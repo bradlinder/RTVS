@@ -645,12 +645,22 @@ class PlaybackPreferencesMixin:
         gen_form.addRow("Theme Mode:", theme_combo)
 
         startup_combo = QComboBox()
-        startup_combo.addItems(["last", "new", "prompt"])
-        curr_startup = str(self.settings_store.value("startup_project_mode", "last") or "last")
-        idx = startup_combo.findText(curr_startup)
+        startup_combo.addItem("Open last project", "last")
+        startup_combo.addItem("Start new project", "new")
+        startup_combo.addItem("Ask me", "prompt")
+
+        curr_startup = getattr(
+            self,
+            "startup_project_mode",
+            str(self.settings_store.value("startup_project_mode", "last") or "last")
+        )
+        idx = startup_combo.findData(curr_startup)
         if idx >= 0:
             startup_combo.setCurrentIndex(idx)
-        gen_form.addRow("Startup Mode:", startup_combo)
+        else:
+            startup_combo.setCurrentIndex(0)
+
+        gen_form.addRow("Startup Project:", startup_combo)
 
         autosave_spin = QSpinBox()
         autosave_spin.setRange(0, 120)
@@ -858,11 +868,18 @@ class PlaybackPreferencesMixin:
 
         def _save_preferences():
             # Save General
+            # Save General
             new_theme = theme_combo.currentText()
             self.settings_store.setValue("theme_mode", new_theme)
             self.set_theme(new_theme)
 
-            self.settings_store.setValue("startup_project_mode", startup_combo.currentText())
+            new_startup = startup_combo.currentData()
+            if hasattr(self, "set_startup_project_mode"):
+                self.set_startup_project_mode(new_startup)
+            else:
+                self.startup_project_mode = new_startup
+                self.settings_store.setValue("startup_project_mode", new_startup)
+
             self.auto_save_minutes = autosave_spin.value()
             self.settings_store.setValue("auto_save_minutes", self.auto_save_minutes)
             self.update_auto_save_timer()
