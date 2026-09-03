@@ -1096,11 +1096,21 @@ class InteractiveTranscriptEdit(QTextEdit):
         # Speaker controls are deliberately available in BOTH modes.
         if speaker_target:
             seg_idx, raw_speaker = speaker_target
-            change_action = QAction("Change Speaker Label...", self)
-            change_action.triggered.connect(
-                lambda _, i=seg_idx, s=raw_speaker: main_win.prompt_rename_speaker(i, s)
+            
+            change_menu = menu.addMenu("Change Speaker To")
+            known_speakers = []
+            if hasattr(main_win, "get_all_known_speakers"):
+                known_speakers = main_win.get_all_known_speakers()
+            for spk in known_speakers:
+                action = change_menu.addAction(spk)
+                action.triggered.connect(
+                    lambda _, i=seg_idx, s=raw_speaker, name=spk: main_win.execute_speaker_rename(i, s, name)
+                )
+            change_menu.addSeparator()
+            new_change_action = change_menu.addAction("Add New Speaker...")
+            new_change_action.triggered.connect(
+                lambda _, i=seg_idx, s=raw_speaker: main_win.execute_speaker_rename(i, s, "__NEW__")
             )
-            menu.addAction(change_action)
 
             remove_action = QAction("Remove Speaker Label", self)
             remove_action.setEnabled(seg_idx > 0)
