@@ -1051,43 +1051,129 @@ class ProjectExportMixin:
 
     # In project_export.py -> ProjectExportMixin class
 
+    def prepare_export_directories(self, target_base_dir=None, default_name=None, prompt_user=True):
+        """Resolves:
+          ├── [project_dir]/
+          │   ├── [project_file].json
+          │   ├── Transcripts/
+          │   └── Media/
+        If the current project is already saved in a dedicated project directory
+        (like Bellevue/) that contains Transcripts/ or Media/, it reuses it directly
+        without asking for another folder name or parent directory.
+        """
+        create_bundle = str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"}
+
+        # 1. Check if an active project is already open in an existing bundle folder
+        if self.project_file:
+            active_parent = self.project_file.parent
+            has_transcripts = (active_parent / "Transcripts").is_dir()
+            has_media = (active_parent / "Media").is_dir()
+
+            # If inside a folder like 'Bellevue' with Transcripts/ or Media/ present, reuse it immediately
+            if has_transcripts or has_media or active_parent.name == self.project_file.stem:
+                transcripts_dir = active_parent / "Transcripts"
+                media_dir = active_parent / "Media"
+                transcripts_dir.mkdir(parents=True, exist_ok=True)
+                media_dir.mkdir(parents=True, exist_ok=True)
+                return active_parent, transcripts_dir, media_dir, self.project_file.stem
+
+        # 2. Fallback to passed directory, default project directory, or media folder
+        if target_base_dir is None:
+            target_base_dir = self.get_default_save_directory()
+
+        fallback_name = safe_filename(
+            default_name 
+            or (self.project_file.stem if self.project_file else None)
+            or (self.audio_file.stem if self.audio_file else "export")
+        )
+
+        folder_name = fallback_name
+        base_path = Path(target_base_dir)
+
+        # 3. If target_base_dir is already the project folder (e.g. user selected 'Bellevue' or it contains subfolders)
+        if (base_path / "Transcripts").is_dir() or (base_path / "Media").is_dir() or base_path.name == fallback_name:
+            project_dir = base_path
+            transcripts_dir = project_dir / "Transcripts"
+            media_dir = project_dir / "Media"
+            transcripts_dir.mkdir(parents=True, exist_ok=True)
+            media_dir.mkdir(parents=True, exist_ok=True)
+            return project_dir, transcripts_dir, media_dir, base_path.name
+
+        # 4. Prompt user only if creating a new subfolder and prompt_user is True
+        if prompt_user and create_bundle:
+            dialog_name, ok = QInputDialog.getText(
+                self,
+                "Project Folder Name",
+                "Enter folder name for project and export subfolders:",
+                QLineEdit.EchoMode.Normal,
+                fallback_name
+            )
+            if not ok:
+                return None, None, None, None
+            folder_name = safe_filename(dialog_name.strip()) or fallback_name
+
+        if create_bundle:
+            project_dir = base_path / folder_name
+            transcripts_dir = project_dir / "Transcripts"
+            media_dir = project_dir / "Media"
+        else:
+            project_dir = base_path
+            transcripts_dir = base_path
+            media_dir = base_path
+
+        project_dir.mkdir(parents=True, exist_ok=True)
+        transcripts_dir.mkdir(parents=True, exist_ok=True)
+        media_dir.mkdir(parents=True, exist_ok=True)
+
+        return project_dir, transcripts_dir, media_dir, folder_name
+        
     def get_default_save_directory(self) -> str:
-        """Returns target directory based on user settings and loaded media path."""
+        """Returns target base directory based on preferences and loaded media."""
         save_with_media = (
-            str(self.settings_store.value("save_project_with_media", "false")).lower() == "true"
+            str(self.settings_store.value("save_project_with_media", "false")).lower() in {"1", "true", "yes"}
         )
         if save_with_media and self.audio_file:
             media_path = Path(self.audio_file)
             if media_path.exists():
                 return str(media_path.parent)
 
-        return self.default_project_directory or ""
+        if getattr(self, "default_project_directory", ""):
+            return str(self.default_project_directory)
+
+        return str(Path.home())
 
     def save_project_as(self) -> bool:
-        """
-        Saves the current project state to a JSON file.
-        Auto-saves silently during batch processing; otherwise prompts the user.
-        Returns True if saved successfully, False otherwise.
-        """
         if not self.audio_file and not self.transcript:
             return False
 
-        # Check if we are running inside a batch pipeline
+        base_name = safe_filename(
+            Path(self.audio_file).stem if self.audio_file else "project"
+        )
+        target_base_dir = Path(self.get_default_save_directory())
+        create_bundle = str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"}
+
         if getattr(self, "batch_active", False) and hasattr(self, "batch_settings"):
-            output_dir = self.batch_settings.get("output")
-            if output_dir and os.path.exists(output_dir):
-                base_name = safe_filename(Path(self.audio_file).stem) if self.audio_file else "batch_project"
-                file_path = os.path.join(output_dir, f"{base_name}.json")
+            out_setting = self.batch_settings.get("output")
+            out_dir = Path(out_setting) if out_setting and os.path.exists(out_setting) else target_base_dir
 
-                # Perform silent save without dialogs or completion popups
-                self._write_project_file(file_path)
-                self.log_activity(f"[BATCH] Auto-saved project to {file_path}")
-                return True
+            if create_bundle:
+                project_bundle_dir = out_dir / base_name
+                project_bundle_dir.mkdir(parents=True, exist_ok=True)
+                file_path = str(project_bundle_dir / f"{base_name}.json")
+            else:
+                out_dir.mkdir(parents=True, exist_ok=True)
+                file_path = str(out_dir / f"{base_name}.json")
 
-        # Standard interactive behavior (shows dialog)
-        target_dir = self.get_default_save_directory() or str(Path.home())
-        default_name = f"{Path(self.audio_file).stem}.json" if self.audio_file else "project.json"
-        initial_path = str(Path(target_dir) / default_name)
+            self._write_project_file(file_path)
+            self.log_activity(f"[BATCH] Auto-saved project to {file_path}")
+            return True
+
+        # Interactive Save As dialog
+        if create_bundle:
+            initial_path = str(target_base_dir / base_name / f"{base_name}.json")
+        else:
+            initial_path = str(target_base_dir / f"{base_name}.json")
+
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Project As",
@@ -1095,7 +1181,12 @@ class ProjectExportMixin:
             "Project Files (*.json)"
         )
         if file_path:
-            self._write_project_file(file_path)
+            target_path = Path(file_path)
+            if create_bundle:
+                (target_path.parent / "Transcripts").mkdir(parents=True, exist_ok=True)
+                (target_path.parent / "Media").mkdir(parents=True, exist_ok=True)
+
+            self._write_project_file(str(target_path))
             return True
         return False
 
@@ -1495,19 +1586,50 @@ class ProjectExportMixin:
             formats = result.get("formats", {})
             base = result.get("base", "")
             options = result.get("options", {})
+
+            # Check if project already lives in an existing folder containing Transcripts/Media (e.g. Bellevue/)
+            if self.project_file and ((self.project_file.parent / "Transcripts").is_dir() or (self.project_file.parent / "Media").is_dir()):
+                project_dir, trans_dir, media_dir, chosen_name = self.prepare_export_directories()
+            else:
+                parent_dir = QFileDialog.getExistingDirectory(self, "Choose Export Location", self._dialog_directory())
+                if not parent_dir:
+                    return
+                project_dir, trans_dir, media_dir, chosen_name = self.prepare_export_directories(
+                    parent_dir, default_name=base, prompt_user=True
+                )
+
+            if not project_dir:
+                return
+
+            # Keep project session file saved at root of the directory
+            if self.audio_file or self.transcript:
+                self._write_project_file(str(project_dir / f"{chosen_name}.json"))
+
+            # Route exports directly to project_dir
             if scope == "full":
-                self.export_full_episode(custom_formats=formats, custom_base=base, custom_options=options)
+                self.export_full_episode(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir))
             elif scope == "selected_stories":
-                self.export_selected_stories(custom_formats=formats, custom_base=base, custom_options=options)
+                self.export_selected_stories(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir))
             elif scope == "all_stories":
-                self.export_all_stories(custom_formats=formats, custom_base=base, custom_options=options)
+                self.export_all_stories(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir))
             elif scope == "full_and_all_stories":
-                self.export_full_and_all_stories(custom_formats=formats, custom_base=base, custom_options=options)
+                self.export_full_and_all_stories(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir))
         else:
             self._handle_wordpress_export_result(result)
 
     def _export_story_files(self, stories_with_indices, formats, base, options, directory, progress_dialog=None, start_progress_idx=0):
         out = Path(directory)
+        create_bundle = str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"}
+        if create_bundle:
+            transcripts_out = out / "Transcripts"
+            media_out = out / "Media"
+            transcripts_out.mkdir(parents=True, exist_ok=True)
+            if formats.get("media"):
+                media_out.mkdir(parents=True, exist_ok=True)
+        else:
+            transcripts_out = out
+            media_out = out
+
         languages_to_export = []
         if options.get("include_english", True):
             languages_to_export.append(("en", ""))
@@ -1564,9 +1686,9 @@ class ProjectExportMixin:
                         })
                     blocks = self.build_story_blocks(curr_spk_blocks) if curr_spk_blocks else []
 
-                # Export TXT
+                # Export TXT to Transcripts subfolder
                 if formats.get("txt"):
-                    txt_file = out / f"{file_base}.txt"
+                    txt_file = transcripts_out / f"{file_base}.txt"
                     with open(txt_file, "w", encoding="utf-8") as f:
                         source_name = self.audio_file.name if self.audio_file else "Text-only project"
                         lang_label = " (Spanish)" if lang_code == "es" else ""
@@ -1583,9 +1705,9 @@ class ProjectExportMixin:
                                 prefix += f"{speaker}: "
                             f.write(f"{prefix}{p_text}\n\n")
 
-                # Export DOCX
+                # Export DOCX to Transcripts subfolder
                 if formats.get("docx"):
-                    docx_file = out / f"{file_base}.docx"
+                    docx_file = transcripts_out / f"{file_base}.docx"
                     document = Document()
                     document.styles["Normal"].font.name = "Arial"
                     document.styles["Normal"].font.size = Pt(11)
@@ -1609,15 +1731,15 @@ class ProjectExportMixin:
                         p.paragraph_format.space_after = Pt(6)
                     document.save(docx_file)
 
-                # Export Subtitles
+                # Export Subtitles to Transcripts subfolder
                 if formats.get("srt"):
-                    self.write_subtitles(blocks, out / f"{file_base}.srt", "srt", options.get("include_speakers", True))
+                    self.write_subtitles(blocks, transcripts_out / f"{file_base}.srt", "srt", options.get("include_speakers", True))
                 if formats.get("vtt"):
-                    self.write_subtitles(blocks, out / f"{file_base}.vtt", "vtt", options.get("include_speakers", True))
+                    self.write_subtitles(blocks, transcripts_out / f"{file_base}.vtt", "vtt", options.get("include_speakers", True))
 
-            # Export Media slice for story
+            # Export Media clip to Media subfolder
             if formats.get("media") and self.audio_file:
-                media_file = out / f"{story_base}{self.audio_file.suffix.lower()}"
+                media_file = media_out / f"{story_base}{self.audio_file.suffix.lower()}"
                 self.extract_media(story.start, story.end, media_file)
 
             if progress_dialog is not None:
@@ -1636,12 +1758,21 @@ class ProjectExportMixin:
             QMessageBox.warning(self, "No Story Selected", "No valid stories are currently selected.")
             return
 
-        if directory is None:
-            directory = QFileDialog.getExistingDirectory(self, "Choose Export Folder", self._dialog_directory())
-            if not directory:
-                return
-
         base = custom_base or (safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "export")))
+
+        if directory is None:
+            if self.project_file and ((self.project_file.parent / "Transcripts").is_dir() or (self.project_file.parent / "Media").is_dir()):
+                project_dir, _, _, chosen_base = self.prepare_export_directories()
+            else:
+                parent_dir = QFileDialog.getExistingDirectory(self, "Choose Export Location", self._dialog_directory())
+                if not parent_dir:
+                    return
+                project_dir, _, _, chosen_base = self.prepare_export_directories(parent_dir, default_name=base, prompt_user=True)
+            if not project_dir:
+                return
+            directory = str(project_dir)
+            base = chosen_base
+
         formats = custom_formats or {"txt": True, "docx": True, "srt": False, "vtt": False, "media": False}
         options = custom_options or {"include_speakers": True, "include_timestamps": False, "include_english": True, "include_spanish": False}
 
@@ -1671,12 +1802,21 @@ class ProjectExportMixin:
             QMessageBox.warning(self, "No Stories", "There are no story segments in this project to export.")
             return
 
-        if directory is None:
-            directory = QFileDialog.getExistingDirectory(self, "Choose Export Folder", self._dialog_directory())
-            if not directory:
-                return
-
         base = custom_base or (safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "export")))
+
+        if directory is None:
+            if self.project_file and ((self.project_file.parent / "Transcripts").is_dir() or (self.project_file.parent / "Media").is_dir()):
+                project_dir, _, _, chosen_base = self.prepare_export_directories()
+            else:
+                parent_dir = QFileDialog.getExistingDirectory(self, "Choose Export Location", self._dialog_directory())
+                if not parent_dir:
+                    return
+                project_dir, _, _, chosen_base = self.prepare_export_directories(parent_dir, default_name=base, prompt_user=True)
+            if not project_dir:
+                return
+            directory = str(project_dir)
+            base = chosen_base
+
         formats = custom_formats or {"txt": True, "docx": True, "srt": False, "vtt": False, "media": False}
         options = custom_options or {"include_speakers": True, "include_timestamps": False, "include_english": True, "include_spanish": False}
 
@@ -1703,12 +1843,21 @@ class ProjectExportMixin:
             progress_dialog.close()
 
     def export_full_and_all_stories(self, custom_formats=None, custom_base=None, custom_options=None, directory=None):
-        if directory is None:
-            directory = QFileDialog.getExistingDirectory(self, "Choose Export Folder", self._dialog_directory())
-            if not directory:
-                return
-
         base = custom_base or (safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "export")))
+
+        if directory is None:
+            if self.project_file and ((self.project_file.parent / "Transcripts").is_dir() or (self.project_file.parent / "Media").is_dir()):
+                project_dir, _, _, chosen_base = self.prepare_export_directories()
+            else:
+                parent_dir = QFileDialog.getExistingDirectory(self, "Choose Export Location", self._dialog_directory())
+                if not parent_dir:
+                    return
+                project_dir, _, _, chosen_base = self.prepare_export_directories(parent_dir, default_name=base, prompt_user=True)
+            if not project_dir:
+                return
+            directory = str(project_dir)
+            base = chosen_base
+
         formats = custom_formats or {"txt": True, "docx": True, "srt": False, "vtt": False, "media": False}
         options = custom_options or {"include_speakers": True, "include_timestamps": False, "include_english": True, "include_spanish": False}
 
@@ -1887,10 +2036,26 @@ class ProjectExportMixin:
             formats, base, options = custom_formats, custom_base, custom_options
 
         if directory is None:
-            directory = QFileDialog.getExistingDirectory(self, "Choose Export Folder")
-            if not directory:
+            parent_dir = QFileDialog.getExistingDirectory(self, "Choose Export Location", self._dialog_directory())
+            if not parent_dir:
                 return False
+            project_dir, _, _, chosen_base = self.prepare_export_directories(parent_dir, default_name=base, prompt_user=True)
+            if not project_dir:
+                return False
+            directory = str(project_dir)
+            base = chosen_base
+
         out = Path(directory)
+        create_bundle = str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"}
+        if create_bundle:
+            transcripts_out = out / "Transcripts"
+            media_out = out / "Media"
+            transcripts_out.mkdir(parents=True, exist_ok=True)
+            if formats.get("media"):
+                media_out.mkdir(parents=True, exist_ok=True)
+        else:
+            transcripts_out = out
+            media_out = out
 
         created_local_dialog = False
         if progress_dialog is None:
@@ -1914,7 +2079,6 @@ class ProjectExportMixin:
                 if has_es:
                     languages_to_export.append(("es", "_es"))
 
-            # Derive document title directly from the base filename (which matches source media)
             doc_title = base if base else (safe_filename(self.audio_file.stem) if self.audio_file else "Transcript")
 
             if progress_dialog is not None:
@@ -1952,9 +2116,9 @@ class ProjectExportMixin:
                         })
                     blocks = self.build_story_blocks(curr_spk_blocks) if curr_spk_blocks else []
 
-                # Export TXT
+                # Export TXT to Transcripts subfolder
                 if formats.get("txt"):
-                    txt_file = out / f"{file_base}.txt"
+                    txt_file = transcripts_out / f"{file_base}.txt"
                     with open(txt_file, "w", encoding="utf-8") as f:
                         source_name = self.audio_file.name if self.audio_file else "Text-only project"
                         lang_label = " (Spanish)" if lang_code == "es" else ""
@@ -1978,15 +2142,13 @@ class ProjectExportMixin:
 
                             f.write(f"{prefix}{paragraph_text}\n\n")
 
-                # Export DOCX
+                # Export DOCX to Transcripts subfolder
                 if formats.get("docx"):
-                    docx_file = out / f"{file_base}.docx"
+                    docx_file = transcripts_out / f"{file_base}.docx"
                     document = Document()
                     document.styles["Normal"].font.name = "Arial"
                     document.styles["Normal"].font.size = Pt(11)
                     lang_label = " (Spanish)" if lang_code == "es" else ""
-                    
-                    # Set Heading 0 to original media title instead of "Full Episode Transcript"
                     document.add_heading(f"{doc_title}{lang_label}", 0)
                     if self.audio_file:
                         document.add_paragraph(f"Recording: {self.audio_file.name}")
@@ -2015,15 +2177,17 @@ class ProjectExportMixin:
                             p.paragraph_format.space_after = Pt(6)
                     document.save(docx_file)
 
+                # Export Subtitles to Transcripts subfolder
                 if formats.get("srt"):
-                    self.write_subtitles(blocks, out / f"{file_base}.srt", "srt", options.get("include_speakers", True))
+                    self.write_subtitles(blocks, transcripts_out / f"{file_base}.srt", "srt", options.get("include_speakers", True))
                 if formats.get("vtt"):
-                    self.write_subtitles(blocks, out / f"{file_base}.vtt", "vtt", options.get("include_speakers", True))
+                    self.write_subtitles(blocks, transcripts_out / f"{file_base}.vtt", "vtt", options.get("include_speakers", True))
 
+            # Export Media to Media subfolder
             if formats.get("media"):
                 if not self.audio_file:
                     raise RuntimeError("Media export is unavailable because this project has no imported media file.")
-                media_file = out / f"{base}{self.audio_file.suffix.lower()}"
+                media_file = media_out / f"{base}{self.audio_file.suffix.lower()}"
                 self.extract_media(0, self.duration, media_file)
 
             if progress_dialog is not None and created_local_dialog:

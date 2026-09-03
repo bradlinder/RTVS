@@ -586,20 +586,46 @@ class ProcessingMixin:
         model_name = self.current_whisper_model()
         self.whisper_model = model_name
         if not self.is_whisper_model_available(model_name):
+            label = model_name.replace("-v3", "").title()
             answer = QMessageBox.question(
                 self,
-                "Whisper Model Not Downloaded",
-                f"Whisper '{model_name}' is not installed locally.\n\n"
-                "It will be downloaded locally the first time it is used. "
-                "This requires an Internet connection for the download, but transcription itself remains local.\n\n"
-                "Continue?",
+                "Model Not Installed",
+                f"Whisper {label} is not yet installed locally.\n\n"
+                "Would you like to download it now? Once downloaded, transcription will begin automatically.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
             )
             if answer != QMessageBox.StandardButton.Yes:
                 self.log_activity(
-                    f"[TRANSCRIPTION] Model '{model_name}' is not installed; transcription canceled before startup."
+                    f"[TRANSCRIPTION] Model '{model_name}' is not installed; transcription canceled by user.",
+                    mark_dirty=False
                 )
+                self.pipeline_active = False
+                self.pipeline_queue = []
+                self.set_tools_actions_enabled(True)
                 return
+
+            # Modal download with progress
+            progress_box = QProgressDialog(f"Downloading Whisper {label} model...", None, 0, 0, self)
+            progress_box.setWindowTitle("Downloading Model")
+            progress_box.setWindowModality(Qt.WindowModality.WindowModal)
+            progress_box.setCancelButton(None)
+            progress_box.show()
+            QApplication.processEvents()
+
+            err = self._install_whisper_model_background(model_name)
+            progress_box.close()
+
+            if err:
+                QMessageBox.critical(self, "Download Failed", f"Could not download Whisper '{model_name}':\n\n{err}")
+                self.pipeline_active = False
+                self.pipeline_queue = []
+                self.set_tools_actions_enabled(True)
+                return
+
+            self.log_activity(f"[MODELS] Whisper {label} downloaded successfully. Starting transcription...")
+            if hasattr(self, "refresh_whisper_model_chooser"):
+                self.refresh_whisper_model_chooser()
 
         if not self.pipeline_active:
             self.processing_status["transcription"] = False

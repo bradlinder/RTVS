@@ -729,48 +729,51 @@ class MediaBatchMixin:
         self.set_tools_actions_enabled(True)
 
     def _batch_save_project_file(self):
-        """Saves project .json to designated output dir or default directory during batch."""
+        """Saves project .json to dedicated directory structure during batch processing."""
         if not self.audio_file:
             return
-        output_dir = self.batch_settings.get("output") if hasattr(self, "batch_settings") else ""
-        if not output_dir or not os.path.exists(output_dir):
-            output_dir = self.default_project_directory or str(Path(self.audio_file).parent)
+
+        base_dir = self.batch_settings.get("output") if hasattr(self, "batch_settings") else ""
+        if not base_dir or not os.path.exists(base_dir):
+            base_dir = self.get_default_save_directory()
+
+        base_name = safe_filename(Path(self.audio_file).stem)
 
         try:
-            Path(output_dir).mkdir(parents=True, exist_ok=True)
-            base_name = safe_filename(Path(self.audio_file).stem)
-            target_path = os.path.join(output_dir, f"{base_name}.json")
+            project_dir, trans_dir, media_dir, _ = self.prepare_export_directories(
+                base_dir, default_name=base_name, prompt_user=False
+            )
+            target_path = str(project_dir / f"{base_name}.json")
             self._write_project_file(target_path)
             self.log_activity(f"[BATCH] Auto-saved project file to {target_path}")
         except Exception as e:
             self.log_activity(f"[BATCH ERROR] Failed to save project file for {self.audio_file}: {e}")
 
     def _batch_export_current(self):
-        """
-        Handles automatic export for the current file during batch processing
-        using the designated output directory from batch settings.
-        """
+        """Auto-exports current media file into its project folder and subfolders."""
         if not getattr(self, "batch_active", False) or not hasattr(self, "batch_settings"):
             return
 
-        # Auto-save project file if requested or in save_project_only mode
         if self.batch_settings.get("save_project", True) or self.batch_settings.get("save_project_only", False):
             self._batch_save_project_file()
 
-        # If user selected save_project_only, skip exporting transcript/subtitles/media files
         if self.batch_settings.get("save_project_only", False):
             self.log_activity("[BATCH] Finished processing. Document and media exports skipped (Save Project Files Only mode enabled).")
             return
 
-        output_dir = self.batch_settings.get("output")
-        if not output_dir or not os.path.exists(output_dir):
-            output_dir = self.default_project_directory or str(Path(self.audio_file).parent if self.audio_file else "")
-        if not output_dir or not os.path.exists(output_dir):
+        base_dir = self.batch_settings.get("output")
+        if not base_dir or not os.path.exists(base_dir):
+            base_dir = self.get_default_save_directory()
+        if not base_dir or not os.path.exists(base_dir):
             return
 
         base_name = safe_filename(Path(self.audio_file).stem if self.audio_file else "batch_output")
+        
+        # Creates [base_dir]/[base_name]/ with Transcripts and Media subfolders:
+        project_dir, _, _, _ = self.prepare_export_directories(
+            base_dir, default_name=base_name, prompt_user=False
+        )
 
-        # Build export options matching batch dialog configurations
         formats = {
             "txt": self.batch_settings.get("full_txt", True) or self.batch_settings.get("story_txt", False),
             "docx": self.batch_settings.get("full_docx", True) or self.batch_settings.get("story_docx", False),
@@ -794,7 +797,7 @@ class MediaBatchMixin:
                     custom_formats=formats,
                     custom_base=base_name,
                     custom_options=options,
-                    directory=output_dir,
+                    directory=str(project_dir),
                     show_completion=False
                 )
 
@@ -804,11 +807,11 @@ class MediaBatchMixin:
                     custom_formats=formats,
                     custom_base=base_name,
                     custom_options=options,
-                    directory=output_dir,
+                    directory=str(project_dir),
                     show_completion=False
                 )
 
-            self.log_activity(f"[BATCH] Successfully exported files for {base_name} to {output_dir}")
+            self.log_activity(f"[BATCH] Successfully exported files for {base_name} to {project_dir}")
         except Exception as e:
             self.log_activity(f"[BATCH ERROR] Export failed for {base_name}: {e}")
 

@@ -623,7 +623,7 @@ class PlaybackPreferencesMixin:
         # Left category tree / list
         cat_list = QListWidget(dialog)
         cat_list.setFixedWidth(160)
-        categories = ["General", "Audio Hardware", "Updates & GitHub", "Models", "Playback & Timeline", "Detection"]
+        categories = ["General", "Audio Hardware", "Updates & GitHub", "AI Models", "Playback & Timeline", "Detection"]
         for cat in categories:
             cat_list.addItem(QListWidgetItem(cat))
         content_layout.addWidget(cat_list)
@@ -659,8 +659,30 @@ class PlaybackPreferencesMixin:
             startup_combo.setCurrentIndex(idx)
         else:
             startup_combo.setCurrentIndex(0)
-
         gen_form.addRow("Startup Project:", startup_combo)
+
+        # --- Project Directory & Organization Settings ---
+        proj_dir_edit = QLineEdit(str(self.settings_store.value("default_project_directory", "") or ""))
+        proj_dir_btn = QPushButton("Browse…")
+        def _browse_proj_dir():
+            chosen = QFileDialog.getExistingDirectory(dialog, "Select Default Projects Directory", proj_dir_edit.text() or str(Path.home()))
+            if chosen:
+                proj_dir_edit.setText(chosen)
+        proj_dir_btn.clicked.connect(_browse_proj_dir)
+
+        p_dir_layout = QHBoxLayout()
+        p_dir_layout.addWidget(proj_dir_edit)
+        p_dir_layout.addWidget(proj_dir_btn)
+        gen_form.addRow("Default Projects Folder:", p_dir_layout)
+
+        save_with_media_chk = QCheckBox("Save projects in the same folder as original media file")
+        save_with_media_chk.setChecked(str(self.settings_store.value("save_project_with_media", "false")).lower() in {"1", "true", "yes"})
+        gen_form.addRow("", save_with_media_chk)
+
+        bundle_folder_chk = QCheckBox("Create dedicated project folder with subfolders for exports")
+        bundle_folder_chk.setToolTip("Creates [ProjectName]/ containing project.json, with /Transcripts and /Media subfolders.")
+        bundle_folder_chk.setChecked(str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"})
+        gen_form.addRow("", bundle_folder_chk)
 
         autosave_spin = QSpinBox()
         autosave_spin.setRange(0, 120)
@@ -765,16 +787,17 @@ class PlaybackPreferencesMixin:
         up_layout.addStretch()
         stack.addWidget(page_updates)
 
-        # 3. Models Page
+        # 3. AI Models Page
         page_models = QWidget()
         mod_layout = QVBoxLayout(page_models)
         mod_form = QFormLayout()
 
+        # Storage directory picker
         curr_model_dir = str(get_models_storage_dir())
         model_dir_edit = QLineEdit(curr_model_dir)
         model_dir_btn = QPushButton("Browse…")
         def _browse_model_dir():
-            chosen = QFileDialog.getExistingDirectory(dialog, "Select Models Storage Directory", model_dir_edit.text())
+            chosen = QFileDialog.getExistingDirectory(dialog, "Select AI Models Storage Directory", model_dir_edit.text())
             if chosen:
                 model_dir_edit.setText(chosen)
         model_dir_btn.clicked.connect(_browse_model_dir)
@@ -784,7 +807,56 @@ class PlaybackPreferencesMixin:
         m_dir_layout.addWidget(model_dir_btn)
         mod_form.addRow("Model Storage Directory:", m_dir_layout)
 
+        # Transcription Model (Whisper) selector
+        pref_whisper_combo = QComboBox()
+        whisper_models = [
+            ("tiny", "Tiny"),
+            ("base", "Base"),
+            ("small", "Small"),
+            ("medium", "Medium"),
+            ("large-v3", "Large (v3)")
+        ]
+        for m_id, label in whisper_models:
+            installed = self.is_whisper_model_available(m_id)
+            display = f"{label} ✓" if installed else label
+            pref_whisper_combo.addItem(display, m_id)
+
+        curr_whisper = getattr(self, "whisper_model", "small")
+        w_idx = pref_whisper_combo.findData(curr_whisper)
+        if w_idx >= 0:
+            pref_whisper_combo.setCurrentIndex(w_idx)
+        mod_form.addRow("Default Transcription Model:", pref_whisper_combo)
+
+        # Translation Model (OPUS-MT) selector
+        pref_trans_combo = QComboBox()
+        trans_variants = [
+            ("tiny", "OPUS-MT-tiny"),
+            ("standard", "OPUS-MT (Standard)")
+        ]
+        for v_id, label in trans_variants:
+            installed_en_es = TranslationWorker.model_is_installed("en", "es", v_id)
+            installed_es_en = TranslationWorker.model_is_installed("es", "en", v_id)
+            installed = installed_en_es and installed_es_en
+            display = f"{label} ✓" if installed else label
+            pref_trans_combo.addItem(display, v_id)
+
+        curr_trans = getattr(self, "translation_model_variant", "tiny")
+        t_idx = pref_trans_combo.findData(curr_trans)
+        if t_idx >= 0:
+            pref_trans_combo.setCurrentIndex(t_idx)
+        mod_form.addRow("Default Translation Model:", pref_trans_combo)
+
         mod_layout.addLayout(mod_form)
+
+        manage_models_btn = QPushButton("Open Full Model Manager (Download / Remove Models)…")
+        manage_models_btn.setToolTip("View exact disk sizes, pre-download, or delete local models.")
+        def _open_mgr():
+            dialog.accept()
+            if hasattr(self, "open_model_cleanup_dialog"):
+                self.open_model_cleanup_dialog()
+        manage_models_btn.clicked.connect(_open_mgr)
+        mod_layout.addWidget(manage_models_btn)
+
         mod_layout.addStretch()
         stack.addWidget(page_models)
 
@@ -868,7 +940,6 @@ class PlaybackPreferencesMixin:
 
         def _save_preferences():
             # Save General
-            # Save General
             new_theme = theme_combo.currentText()
             self.settings_store.setValue("theme_mode", new_theme)
             self.set_theme(new_theme)
@@ -879,6 +950,11 @@ class PlaybackPreferencesMixin:
             else:
                 self.startup_project_mode = new_startup
                 self.settings_store.setValue("startup_project_mode", new_startup)
+
+            self.default_project_directory = proj_dir_edit.text().strip()
+            self.settings_store.setValue("default_project_directory", self.default_project_directory)
+            self.settings_store.setValue("save_project_with_media", "true" if save_with_media_chk.isChecked() else "false")
+            self.settings_store.setValue("create_project_subfolders", "true" if bundle_folder_chk.isChecked() else "false")
 
             self.auto_save_minutes = autosave_spin.value()
             self.settings_store.setValue("auto_save_minutes", self.auto_save_minutes)
@@ -898,10 +974,24 @@ class PlaybackPreferencesMixin:
             if new_repo:
                 self.settings_store.setValue("github_repo", new_repo)
 
-            # Save Models dir
+            # Save Models dir & selections
             new_model_dir = model_dir_edit.text().strip()
             if new_model_dir:
                 set_models_storage_dir(new_model_dir)
+
+            new_whisper = pref_whisper_combo.currentData()
+            if new_whisper:
+                self.whisper_model = str(new_whisper)
+                self.settings_store.setValue("whisper_model", self.whisper_model)
+                if hasattr(self, "refresh_whisper_model_chooser"):
+                    self.refresh_whisper_model_chooser()
+
+            new_trans = pref_trans_combo.currentData()
+            if new_trans:
+                self.translation_model_variant = str(new_trans)
+                self.settings_store.setValue("translation_model_variant", self.translation_model_variant)
+                if hasattr(self, "refresh_translation_model_chooser"):
+                    self.refresh_translation_model_chooser()
 
             # Save Playback
             self.skip_seconds = skip_spin.value()

@@ -156,7 +156,7 @@ class UiLayoutMixin:
         self.translate_button.clicked.connect(lambda: self.start_translation("en", "es"))
         search_bar.addWidget(self.translate_button)
 
-        self.transcript_mode_toggle_btn = QPushButton("👁 Viewing Mode", self)
+        self.transcript_mode_toggle_btn = QPushButton("Viewing Mode", self)
         self.transcript_mode_toggle_btn.setCheckable(True)
         self.transcript_mode_toggle_btn.setChecked(False)
         self.transcript_mode_toggle_btn.setToolTip("Toggle between Viewing Mode (click to play/seek audio) and Editing Mode (type/edit transcript text).")
@@ -344,41 +344,10 @@ class UiLayoutMixin:
         file_menu.addSeparator()
 
         # Export Submenu
-        export_menu = file_menu.addMenu("&Export")
-
-        unified_export_act = QAction("&Unified Export...", self)
-        unified_export_act.setShortcut(QKeySequence("Ctrl+E"))
-        unified_export_act.triggered.connect(self.open_unified_export_dialog)
-        export_menu.addAction(unified_export_act)
-
-        export_menu.addSeparator()
-
-        export_transcript_act = QAction("Export Full &Transcript...", self)
-        export_transcript_act.triggered.connect(self.export_full_transcript)
-        export_menu.addAction(export_transcript_act)
-
-        export_episode_act = QAction("Export Full &Episode Audio...", self)
-        export_episode_act.triggered.connect(self.export_full_episode)
-        export_menu.addAction(export_episode_act)
-
-        export_sel_stories_act = QAction("Export &Selected Stories...", self)
-        export_sel_stories_act.triggered.connect(self.export_selected_stories)
-        export_menu.addAction(export_sel_stories_act)
-
-        export_all_stories_act = QAction("Export &All Stories...", self)
-        export_all_stories_act.triggered.connect(self.export_all_stories)
-        export_menu.addAction(export_all_stories_act)
-
-        export_full_all_act = QAction("Export Full & All Stories...", self)
-        export_full_all_act.triggered.connect(self.export_full_and_all_stories)
-        export_menu.addAction(export_full_all_act)
-
-        self.export_translation_action = QAction("Export Spanish &Translation...", self)
-        self.export_translation_action.setEnabled(False)
-        self.export_translation_action.triggered.connect(self.export_full_transcript)
-        export_menu.addAction(self.export_translation_action)
-
-        export_menu.addSeparator()
+        export_act = QAction("&Export...", self)
+        export_act.setShortcut(QKeySequence("Ctrl+E"))
+        export_act.triggered.connect(self.open_unified_export_dialog)
+        file_menu.addAction(export_act)
 
         file_menu.addSeparator()
 
@@ -668,8 +637,8 @@ class UiLayoutMixin:
         if hasattr(self, "transcript_mode_toggle_btn"):
             self.transcript_mode_toggle_btn.setChecked(is_editing)
             if is_editing:
-                self.transcript_mode_toggle_btn.setText("✎ Editing Mode")
+                self.transcript_mode_toggle_btn.setText("Editing Mode")
                 self.transcript_mode_toggle_btn.setStyleSheet("font-weight: bold; background-color: #2b5278; color: white;")
             else:
-                self.transcript_mode_toggle_btn.setText("👁 Viewing Mode")
+                self.transcript_mode_toggle_btn.setText("Viewing Mode")
                 self.transcript_mode_toggle_btn.setStyleSheet("")
