@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 APP_NAME="RadioTVSegmenter"
-VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "1.5")
+VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "1.6")
 DIST="$ROOT/dist"
 APP="$DIST/${APP_NAME}.app"
 DMG="$DIST/${APP_NAME}-${VERSION}-macOS.dmg"

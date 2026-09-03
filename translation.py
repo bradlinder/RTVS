@@ -242,3 +242,7 @@ class TranslationMixin:
         """Clean up thread reference."""
         self.translation_thread = None
         self.translation_worker = None
+
+    def _translation_thread_finished(self):
+        """Alias for _on_translation_thread_finished."""
+        self._on_translation_thread_finished()

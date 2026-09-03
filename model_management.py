@@ -414,7 +414,14 @@ class ModelManagementMixin:
         self.translation_worker.finished.connect(self.translation_thread.quit)
         self.translation_worker.error.connect(self.translation_thread.quit)
         self.translation_thread.finished.connect(self.translation_worker.deleteLater)
-        self.translation_thread.finished.connect(self._translation_thread_finished)
+        cleanup_fn = getattr(self, "_on_translation_thread_finished", getattr(self, "_translation_thread_finished", None))
+        if cleanup_fn:
+            self.translation_thread.finished.connect(cleanup_fn)
+        else:
+            def _fallback_cleanup():
+                self.translation_thread = None
+                self.translation_worker = None
+            self.translation_thread.finished.connect(_fallback_cleanup)
 
         self.translation_thread.start()
 

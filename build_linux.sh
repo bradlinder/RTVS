@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")"
 
 echo "====================================================================="
-echo " Radio & TV Story Segmenter v1.5 - Automated 1-Click Build (Linux)"
+echo " Radio & TV Story Segmenter v1.6 - Automated 1-Click Build (Linux)"
 echo "====================================================================="
 echo ""
 

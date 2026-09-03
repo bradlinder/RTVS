@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter v1.1.1 — playback preferences responsibilities.
+"""Radio & TV Segmenter v1.6 — playback preferences responsibilities.
 
 Methods intentionally retain the MainWindow-facing API so behavior remains
 maintaining the established MainWindow-facing API while responsibilities are isolated.
@@ -599,15 +599,19 @@ class PlaybackPreferencesMixin:
 
     def open_preferences_dialog(self, initial_category="General"):
         """Open the multi-category Preferences dialog."""
+        if not isinstance(initial_category, str):
+            initial_category = "General"
+
         from PySide6.QtWidgets import (
             QDialog, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem,
             QStackedWidget, QWidget, QFormLayout, QGroupBox, QCheckBox,
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPushButton,
-            QDialogButtonBox, QLabel, QFileDialog
+            QDialogButtonBox, QLabel, QFileDialog, QSlider
         )
+        from PySide6.QtCore import Qt
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Preferences — {APP_DISPLAY_NAME}")
-        dialog.resize(680, 480)
+        dialog.resize(700, 500)
 
         main_layout = QVBoxLayout(dialog)
         main_layout.setContentsMargins(14, 14, 14, 14)
@@ -619,7 +623,7 @@ class PlaybackPreferencesMixin:
         # Left category tree / list
         cat_list = QListWidget(dialog)
         cat_list.setFixedWidth(160)
-        categories = ["General", "Updates & GitHub", "Models", "Playback & Timeline", "Detection"]
+        categories = ["General", "Audio Hardware", "Updates & GitHub", "Models", "Playback & Timeline", "Detection"]
         for cat in categories:
             cat_list.addItem(QListWidgetItem(cat))
         content_layout.addWidget(cat_list)
@@ -654,9 +658,72 @@ class PlaybackPreferencesMixin:
         autosave_spin.setSuffix(" min (0 = off)")
         gen_form.addRow("Auto-save Interval:", autosave_spin)
 
+        batch_reset_btn = QPushButton("Reset Batch Add Files Location")
+        batch_reset_btn.setToolTip("Forget the last directory used by Batch Processing > Add Files and return to the normal default location.")
+        def _reset_batch_add_location():
+            self.settings_store.remove("batch_add_files_directory")
+            QMessageBox.information(dialog, "Batch Add Files Location", "The Batch Processing Add Files location has been reset to the default.")
+        batch_reset_btn.clicked.connect(_reset_batch_add_location)
+        gen_form.addRow("Batch Add Files Location:", batch_reset_btn)
+
         gen_layout.addLayout(gen_form)
         gen_layout.addStretch()
         stack.addWidget(page_general)
+
+        # 2. Audio Hardware Page
+        page_audio = QWidget()
+        audio_layout = QVBoxLayout(page_audio)
+        audio_form = QFormLayout()
+
+        audio_dev_combo = QComboBox()
+        audio_dev_combo.addItem("System Default")
+        try:
+            from PySide6.QtMultimedia import QMediaDevices
+            for dev in QMediaDevices.audioOutputs():
+                d_name = dev.description()
+                if d_name and audio_dev_combo.findText(d_name) < 0:
+                    audio_dev_combo.addItem(d_name)
+        except Exception as dev_err:
+            logger.warning(f"Could not enumerate audio devices: {dev_err}")
+
+        saved_dev = str(self.settings_store.value("audio_output_device", "System Default") or "System Default")
+        found_dev_idx = audio_dev_combo.findText(saved_dev)
+        if found_dev_idx >= 0:
+            audio_dev_combo.setCurrentIndex(found_dev_idx)
+        else:
+            audio_dev_combo.setCurrentIndex(0)
+        audio_form.addRow("Audio Output Device:", audio_dev_combo)
+
+        vol_layout = QHBoxLayout()
+        vol_slider = QSlider(Qt.Orientation.Horizontal)
+        vol_slider.setRange(0, 100)
+        curr_vol = int(float(self.settings_store.value("audio_output_volume", 100) or 100))
+        vol_slider.setValue(curr_vol)
+        vol_label = QLabel(f"{curr_vol}%")
+        vol_slider.valueChanged.connect(lambda v: vol_label.setText(f"{v}%"))
+        vol_layout.addWidget(vol_slider, 1)
+        vol_layout.addWidget(vol_label)
+        audio_form.addRow("Default Output Volume:", vol_layout)
+
+        def _test_audio_device():
+            try:
+                from PySide6.QtCore import QUrl
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            except Exception:
+                try:
+                    from PySide6.QtWidgets import QApplication
+                    QApplication.beep()
+                except Exception:
+                    pass
+
+        test_btn = QPushButton("Test Audio Output")
+        test_btn.clicked.connect(_test_audio_device)
+        audio_form.addRow("Device Test:", test_btn)
+
+        audio_layout.addLayout(audio_form)
+        audio_layout.addStretch()
+        stack.addWidget(page_audio)
 
         # 2. Updates & GitHub Page
         page_updates = QWidget()
@@ -753,11 +820,20 @@ class PlaybackPreferencesMixin:
         pad_spin.setSuffix(" sec")
         det_form.addRow("Lead-In Padding:", pad_spin)
 
-        sens_spin = QSpinBox()
-        sens_spin.setRange(1, 10)
-        sens_spin.setValue(self.speaker_sensitivity)
-        sens_spin.setSuffix(" (1-10)")
-        det_form.addRow("Speaker Cleanup Sensitivity:", sens_spin)
+        sens_slider = QSlider(Qt.Orientation.Horizontal)
+        sens_slider.setRange(1, 10)
+        sens_slider.setSingleStep(1)
+        sens_slider.setPageStep(1)
+        sens_slider.setValue(self.speaker_sensitivity)
+        sens_value = QLabel(str(self.speaker_sensitivity))
+        sens_value.setMinimumWidth(28)
+        sens_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        sens_slider.valueChanged.connect(lambda v: sens_value.setText(str(v)))
+        sens_layout = QHBoxLayout()
+        sens_layout.addWidget(sens_slider, 1)
+        sens_layout.addWidget(sens_value)
+        det_form.addRow("Speaker Detection Sensitivity:", sens_layout)
+        sens_slider.setToolTip("1 = more conservative speaker separation; 10 = more sensitive speaker separation.")
 
         det_layout.addLayout(det_form)
         det_layout.addStretch()
@@ -768,8 +844,9 @@ class PlaybackPreferencesMixin:
 
         # Switch page on category selection
         cat_list.currentRowChanged.connect(stack.setCurrentIndex)
+        cat_search = str(initial_category).strip().lower()[:4] if initial_category else "gene"
         for i, c in enumerate(categories):
-            if c.lower().startswith(initial_category.lower()[:4]):
+            if c.lower().startswith(cat_search):
                 cat_list.setCurrentRow(i)
                 break
         else:
@@ -789,6 +866,14 @@ class PlaybackPreferencesMixin:
             self.auto_save_minutes = autosave_spin.value()
             self.settings_store.setValue("auto_save_minutes", self.auto_save_minutes)
             self.update_auto_save_timer()
+
+            # Save Audio Hardware
+            new_dev = audio_dev_combo.currentText()
+            self.settings_store.setValue("audio_output_device", new_dev)
+            new_vol = vol_slider.value()
+            self.settings_store.setValue("audio_output_volume", new_vol)
+            if hasattr(self, "apply_audio_output_device"):
+                self.apply_audio_output_device(new_dev, new_vol / 100.0)
 
             # Save Updates
             self.settings_store.setValue("auto_check_updates", str(auto_update_chk.isChecked()).lower())
@@ -819,7 +904,7 @@ class PlaybackPreferencesMixin:
             # Save Detection
             self.silence_threshold = gap_spin.value()
             self.lead_in_padding = pad_spin.value()
-            self.speaker_sensitivity = sens_spin.value()
+            self.speaker_sensitivity = sens_slider.value()
             self.settings_store.setValue("silence_threshold", self.silence_threshold)
             self.settings_store.setValue("lead_in_padding", self.lead_in_padding)
             self.settings_store.setValue("speaker_sensitivity", self.speaker_sensitivity)
@@ -831,6 +916,32 @@ class PlaybackPreferencesMixin:
         btn_box.rejected.connect(dialog.reject)
 
         dialog.exec()
+
+    def apply_audio_output_device(self, device_name=None, volume=None):
+        """Apply selected audio output device and volume to the active player."""
+        if not hasattr(self, "audio_output") or not self.audio_output:
+            return
+        if device_name is None:
+            device_name = str(self.settings_store.value("audio_output_device", "System Default") or "System Default")
+        if volume is None:
+            try:
+                volume = float(self.settings_store.value("audio_output_volume", 100) or 100) / 100.0
+            except Exception:
+                volume = 1.0
+
+        try:
+            from PySide6.QtMultimedia import QMediaDevices
+            if not device_name or device_name in ("System Default", "default"):
+                default_dev = QMediaDevices.defaultAudioOutput()
+                self.audio_output.setDevice(default_dev)
+            else:
+                for dev in QMediaDevices.audioOutputs():
+                    if dev.description() == device_name:
+                        self.audio_output.setDevice(dev)
+                        break
+            self.audio_output.setVolume(max(0.0, min(1.0, float(volume))))
+        except Exception as e:
+            logger.warning(f"Could not set audio output device '{device_name}': {e}")
 
     def show_licenses_dialog(self):
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
@@ -1497,7 +1608,7 @@ class PlaybackPreferencesMixin:
         else:
             desc = "More sensitive separation; preserves shorter speaker changes."
 
-        tooltip_msg = f"Speaker cleanup sensitivity: {pct}%\\n({desc})\\nAdjusts short-fragment cleanup after detection."
+        tooltip_msg = f"Speaker Detection sensitivity: {pct}%\\n({desc})\\nAdjusts short-fragment cleanup after detection."
         if hasattr(self, "sensitivity_slider"):
             self.sensitivity_slider.setToolTip(tooltip_msg)
 
@@ -1511,7 +1622,7 @@ class PlaybackPreferencesMixin:
             self.log_activity("[PROCESSING] Speaker Detection sensitivity changed; existing speaker detection is marked for reprocessing.", mark_dirty=False)
         self.mark_project_dirty()
         self.log_activity(f"[SETTINGS] Speaker cleanup sensitivity set to {int(val) * 10}%.")
-        self.statusBar().showMessage(f"Speaker cleanup sensitivity: {int(val) * 10}%.")
+        self.statusBar().showMessage(f"Speaker Detection sensitivity: {int(val) * 10}%.")
 
     def update_auto_save_timer(self):
         if self.auto_save_minutes > 0:

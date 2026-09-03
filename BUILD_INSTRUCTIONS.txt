@@ -1,9 +1,9 @@
 # ==============================================================================
-# Radio & TV Segmenter v1.5 — Executable & Installer Build Instructions
+# Radio & TV Segmenter v1.6 — Executable & Installer Build Instructions
 # ==============================================================================
 
 This guide provides comprehensive, step-by-step instructions for building
-standalone, installable executables of Radio & TV Segmenter v1.5 for
+standalone, installable executables of Radio & TV Segmenter v1.6 for
 Windows, macOS, and Linux.
 
 ------------------------------------------------------------------------------
@@ -30,7 +30,7 @@ repository root for Windows, macOS, and Linux:
   - It automatically initializes a dedicated build environment (.venv-build),
     installs all necessary build dependencies using CPU-only wheels, compiles
     the application via `python build_installer.py`, and if Inno Setup is
-    installed, builds the final Windows Setup installer `RadioTVSegmenter-1.5-Windows.exe`!
+    installed, builds the final Windows Setup installer `RadioTVSegmenter-1.6-Windows.exe`!
 
 * macOS (1-Click Shell Script):
   - Run `./build_macos.sh` in Terminal.
@@ -138,7 +138,7 @@ Step 4: Compile Inno Setup Installer (.exe)
    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\Windows\RadioTVStorySegmenter.iss
 
 4. The setup wizard executable is generated in:
-   `dist/installer/RadioTVSegmenter-1.5-Windows.exe`
+   `dist/installer/RadioTVSegmenter-1.6-Windows.exe`
 
 ==============================================================================
 4. macOS COMPILATION & DMG CREATION (macOS 12+ INTEL / APPLE SILICON)
@@ -176,7 +176,7 @@ Run the automated packaging script:
     bash installer/macOS/build_app.sh
 
 The resulting installable disk image is output to:
-`dist/RadioTVSegmenter-1.5-macOS.dmg`
+`dist/RadioTVSegmenter-1.6-macOS.dmg`
 
 ==============================================================================
 5. LINUX COMPILATION (UBUNTU / DEBIAN / FEDORA / ARCH)
@@ -210,7 +210,7 @@ Step 4: Package for Distribution (.tar.gz or AppImage)
 To create a standalone distributable tarball:
 
     cd dist
-    tar -czvf RadioTVSegmenter-1.5-Linux-x86_64.tar.gz RadioTVSegmenter/
+    tar -czvf RadioTVSegmenter-1.6-Linux-x86_64.tar.gz RadioTVSegmenter/
 
 To run directly on Linux:
     ./dist/RadioTVSegmenter/RadioTVSegmenter
@@ -222,7 +222,7 @@ Before releasing a new build to users, execute these smoke tests:
 
 1. Launch & Window Title:
    - Run the compiled binary/installer directly.
-   - Verify window title shows "Radio & TV Segmenter v1.5".
+   - Verify window title shows "Radio & TV Segmenter v1.6".
 2. Theme Verification:
    - Switch to Settings > Appearance > Light Mode: confirm transcript text,
      speaker names, timestamps, and Export dialog checkboxes are clearly visible.

@@ -225,7 +225,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "1.5"
+PROJECT_VERSION = "1.6"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -2590,10 +2590,10 @@ class BatchProcessingDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Batch Processing")
-        self.resize(650, 580)
+        self.resize(680, 640)
         
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Add media files or documents. The application will auto-detect file types and run required processing."))
+        layout.addWidget(QLabel("Add media files or documents. Choose to run the full automated pipeline or select specific processes."))
 
         # File List View
         self.files = BatchFileListWidget()
@@ -2608,64 +2608,119 @@ class BatchProcessingDialog(QDialog):
         row.addStretch()
         layout.addLayout(row)
 
-        # Output Directory Selector
-        outrow = QHBoxLayout()
+        # Output / Project Directory Selector
+        dir_group = QGroupBox("Target Save Location")
+        dir_layout = QHBoxLayout(dir_group)
         self.output = QLineEdit()
-        browse = QPushButton("Output Folder…")
-        outrow.addWidget(self.output, 1)
-        outrow.addWidget(browse)
-        layout.addLayout(outrow)
+        self.output.setPlaceholderText("Default (project folder or media file directory if empty)")
+        browse = QPushButton("Browse Folder…")
+        dir_layout.addWidget(self.output, 1)
+        dir_layout.addWidget(browse)
+        layout.addWidget(dir_group)
 
-        # --- Sub-Menu 1: Scope Selection ---
-        scope_group = QGroupBox("1. Scope")
-        scope_layout = QFormLayout(scope_group)
+        # --- Section 1: Pipeline & Process Selection ---
+        proc_group = QGroupBox("1. Processing Pipeline Selection")
+        proc_layout = QVBoxLayout(proc_group)
+
+        self.pipeline_full_radio = QRadioButton("Run Full Processing Pipeline (Transcribe + Diarize + Detect Stories)")
+        self.pipeline_full_radio.setChecked(True)
+        self.pipeline_custom_radio = QRadioButton("Select Specific Processes to Run:")
+        
+        proc_layout.addWidget(self.pipeline_full_radio)
+        proc_layout.addWidget(self.pipeline_custom_radio)
+
+        # Custom process checkboxes
+        self.custom_proc_widget = QWidget()
+        custom_proc_layout = QHBoxLayout(self.custom_proc_widget)
+        custom_proc_layout.setContentsMargins(20, 0, 0, 0)
+        self.proc_transcribe = QCheckBox("Transcription")
+        self.proc_transcribe.setChecked(True)
+        self.proc_diarize = QCheckBox("Diarization")
+        self.proc_diarize.setChecked(True)
+        self.proc_stories = QCheckBox("Story Detection")
+        self.proc_stories.setChecked(True)
+        self.proc_translate = QCheckBox("Spanish Translation")
+        self.proc_translate.setChecked(False)
+
+        custom_proc_layout.addWidget(self.proc_transcribe)
+        custom_proc_layout.addWidget(self.proc_diarize)
+        custom_proc_layout.addWidget(self.proc_stories)
+        custom_proc_layout.addWidget(self.proc_translate)
+        proc_layout.addWidget(self.custom_proc_widget)
+        self.custom_proc_widget.setEnabled(False)
+
+        self.pipeline_custom_radio.toggled.connect(self.custom_proc_widget.setEnabled)
+        layout.addWidget(proc_group)
+
+        # --- Section 2: Project & Save Options ---
+        opts_group = QGroupBox("2. Project & Save Options")
+        opts_layout = QVBoxLayout(opts_group)
+
+        self.save_project_check = QCheckBox("Auto-save updated project (.json) files to specified directory (or default)")
+        self.save_project_check.setChecked(True)
+        opts_layout.addWidget(self.save_project_check)
+
+        self.skip_existing_check = QCheckBox("Skip re-processing if requested output files already exist")
+        self.skip_existing_check.setChecked(True)
+        opts_layout.addWidget(self.skip_existing_check)
+
+        layout.addWidget(opts_group)
+
+        # --- Section 3: Output Formats & Scope (for standard exports) ---
+        self.export_group = QGroupBox("3. Output Formats & Scope")
+        export_layout = QVBoxLayout(self.export_group)
+
+        self.save_project_only_check = QCheckBox("Save projects only (do not export text or media files)")
+        self.save_project_only_check.setChecked(False)
+        self.save_project_only_check.setToolTip("Run the selected processing and save the resulting project files without creating transcript, subtitle, document, or media exports.")
+        export_layout.addWidget(self.save_project_only_check)
+
+        scope_row = QHBoxLayout()
+        scope_row.addWidget(QLabel("Export Scope:"))
         self.scope_combo = QComboBox()
         self.scope_combo.addItem("Full Transcripts Only", "full")
         self.scope_combo.addItem("Individual Stories Only", "stories")
         self.scope_combo.addItem("Full Transcripts + Individual Stories", "both")
-        scope_layout.addRow("Export Scope:", self.scope_combo)
-        layout.addWidget(scope_group)
+        scope_row.addWidget(self.scope_combo, 1)
+        export_layout.addLayout(scope_row)
 
-        # --- Sub-Menu 2: Options & Features ---
-        options_group = QGroupBox("2. Processing Options")
-        options_layout = QFormLayout(options_group)
-        
-        self.skip_existing_check = QCheckBox("Skip re-processing if requested output files already exist")
-        self.skip_existing_check.setChecked(True)
-        options_layout.addRow(self.skip_existing_check)
-
-        self.include_speakers = QCheckBox("Include speaker labels")
-        self.include_speakers.setChecked(True)      
-        self.include_times = QCheckBox("Include timestamps")
-        self.include_times.setChecked(False)
-        self.translate_check = QCheckBox("Translate outputs to Spanish (_es)")
-        
-        self.doc_direction = QComboBox()
-        self.doc_direction.addItem("English → Spanish", "en-es")
-        self.doc_direction.addItem("Spanish → English", "es-en")
-        
-        options_layout.addRow(self.include_speakers)
-        options_layout.addRow(self.include_times)
-        options_layout.addRow(self.translate_check)
-        options_layout.addRow("Document Translation Direction:", self.doc_direction)
-        layout.addWidget(options_group)
-
-        # --- Sub-Menu 3: Output Formats ---
-        formats_group = QGroupBox("3. Output Formats")
-        formats_layout = QHBoxLayout(formats_group)
+        fmt_row = QHBoxLayout()
         self.fmt_txt = QCheckBox("TXT (.txt)")
         self.fmt_docx = QCheckBox("DOCX (.docx)")
         self.fmt_srt = QCheckBox("SRT (.srt)")
         self.fmt_vtt = QCheckBox("VTT (.vtt)")
-        
         self.fmt_txt.setChecked(True)
         self.fmt_docx.setChecked(True)
-        
-        formats_layout.addWidget(self.fmt_txt)
-        formats_layout.addWidget(self.fmt_docx)
-        formats_layout.addWidget(self.fmt_srt)
-        formats_layout.addWidget(self.fmt_vtt)
-        layout.addWidget(formats_group)
+        fmt_row.addWidget(self.fmt_txt)
+        fmt_row.addWidget(self.fmt_docx)
+        fmt_row.addWidget(self.fmt_srt)
+        fmt_row.addWidget(self.fmt_vtt)
+        export_layout.addLayout(fmt_row)
+
+        details_row = QHBoxLayout()
+        self.include_speakers = QCheckBox("Include speaker labels")
+        self.include_speakers.setChecked(True)
+        self.include_times = QCheckBox("Include timestamps")
+        self.include_times.setChecked(False)
+        self.translate_check = QCheckBox("Translate outputs to Spanish (_es)")
+        details_row.addWidget(self.include_speakers)
+        details_row.addWidget(self.include_times)
+        details_row.addWidget(self.translate_check)
+        export_layout.addLayout(details_row)
+
+        self.doc_direction = QComboBox()
+        self.doc_direction.addItem("English → Spanish", "en-es")
+        self.doc_direction.addItem("Spanish → English", "es-en")
+        doc_row = QHBoxLayout()
+        doc_row.addWidget(QLabel("Document Translation Direction:"))
+        doc_row.addWidget(self.doc_direction)
+        export_layout.addLayout(doc_row)
+
+        layout.addWidget(self.export_group)
+
+        def _on_save_project_only_toggled(checked):
+            self.export_group.setEnabled(not checked)
+        self.save_project_only_check.toggled.connect(_on_save_project_only_toggled)
 
         # Dialog Action Buttons
         btns = QHBoxLayout()
@@ -2695,9 +2750,16 @@ class BatchProcessingDialog(QDialog):
 
     def add_files(self):
         filters = "All Supported Files (*.*)"
-        files, _ = QFileDialog.getOpenFileNames(
-            self, "Add Files", getattr(self.parent(), "_dialog_directory", lambda: "")(), filters
-        )
+        parent = self.parent()
+        settings = getattr(parent, "settings_store", None)
+        default_dir = ""
+        if settings is not None:
+            default_dir = str(settings.value("batch_add_files_directory", "") or "")
+        if not default_dir:
+            default_dir = getattr(parent, "_dialog_directory", lambda: "")()
+        files, _ = QFileDialog.getOpenFileNames(self, "Add Files", default_dir, filters)
+        if files and settings is not None:
+            settings.setValue("batch_add_files_directory", str(Path(files[0]).resolve().parent))
         self.add_paths(files)
 
     def choose_output(self):

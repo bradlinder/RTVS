@@ -139,10 +139,12 @@ class MediaBatchMixin:
 
         output = dialog.output.text().strip()
         if not output:
-            output = self.default_project_directory or str(Path.home() / "Batch_Output")
-            Path(output).mkdir(parents=True, exist_ok=True)
+            output = self.default_project_directory or ""
+            if output:
+                Path(output).mkdir(parents=True, exist_ok=True)
 
-        self._remember_directory(output)
+        if output:
+            self._remember_directory(output)
 
         # Minimize user input: Auto-save active project before starting
         if self.project_dirty and self.audio_file:
@@ -159,22 +161,36 @@ class MediaBatchMixin:
         
 
         scope = dialog.scope_combo.currentData()
+        pipeline_mode = "custom" if dialog.pipeline_custom_radio.isChecked() else "full"
+        save_project_only = dialog.save_project_only_check.isChecked()
+        save_project = dialog.save_project_check.isChecked()
+        do_transcribe = dialog.proc_transcribe.isChecked() if pipeline_mode == "custom" else True
+        do_diarize = dialog.proc_diarize.isChecked() if pipeline_mode == "custom" else True
+        do_stories = dialog.proc_stories.isChecked() if pipeline_mode == "custom" else True
+        translate_pipeline = dialog.proc_translate.isChecked() if pipeline_mode == "custom" else dialog.translate_check.isChecked()
+
         self.batch_settings = {
             "output": output,
+            "pipeline_mode": pipeline_mode,
+            "save_project_only": save_project_only,
+            "save_project": save_project,
+            "do_transcribe": do_transcribe,
+            "do_diarize": do_diarize,
+            "do_stories": do_stories,
             "scope": scope,
             "skip_existing": dialog.skip_existing_check.isChecked(),
-            "full_txt": dialog.fmt_txt.isChecked() and scope in ("full", "both"),
-            "full_docx": dialog.fmt_docx.isChecked() and scope in ("full", "both"),
-            "full_srt": dialog.fmt_srt.isChecked() and scope in ("full", "both"),
-            "full_vtt": dialog.fmt_vtt.isChecked() and scope in ("full", "both"),
-            "story_txt": dialog.fmt_txt.isChecked() and scope in ("stories", "both"),
-            "story_docx": dialog.fmt_docx.isChecked() and scope in ("stories", "both"),
-            "story_srt": dialog.fmt_srt.isChecked() and scope in ("stories", "both"),
-            "story_vtt": dialog.fmt_vtt.isChecked() and scope in ("stories", "both"),
+            "full_txt": dialog.fmt_txt.isChecked() and scope in ("full", "both") and not save_project_only,
+            "full_docx": dialog.fmt_docx.isChecked() and scope in ("full", "both") and not save_project_only,
+            "full_srt": dialog.fmt_srt.isChecked() and scope in ("full", "both") and not save_project_only,
+            "full_vtt": dialog.fmt_vtt.isChecked() and scope in ("full", "both") and not save_project_only,
+            "story_txt": dialog.fmt_txt.isChecked() and scope in ("stories", "both") and not save_project_only,
+            "story_docx": dialog.fmt_docx.isChecked() and scope in ("stories", "both") and not save_project_only,
+            "story_srt": dialog.fmt_srt.isChecked() and scope in ("stories", "both") and not save_project_only,
+            "story_vtt": dialog.fmt_vtt.isChecked() and scope in ("stories", "both") and not save_project_only,
             "include_speakers": dialog.include_speakers.isChecked(),
             "include_timestamps": dialog.include_times.isChecked(),
-            "translate_es": dialog.translate_check.isChecked(),
-            "translate_stories": dialog.translate_check.isChecked() and scope in ("stories", "both"),
+            "translate_es": translate_pipeline,
+            "translate_stories": translate_pipeline and scope in ("stories", "both"),
             "doc_direction": dialog.doc_direction.currentData()
         }
 
@@ -239,17 +255,32 @@ class MediaBatchMixin:
 
             # Non-interactive automated pipeline setup for batch execution
             pipeline_stages = []
-            if not self.transcript or not self.processing_status.get("transcription"):
-                pipeline_stages.append("transcription")
+            pipeline_mode = self.batch_settings.get("pipeline_mode", "full")
 
-            if self.batch_settings.get("include_speakers") and (not self.diarization or not self.processing_status.get("diarization")):
-                pipeline_stages.append("diarization")
+            if pipeline_mode == "full":
+                if not self.transcript or not self.processing_status.get("transcription"):
+                    pipeline_stages.append("transcription")
 
-            if self.batch_settings.get("scope") in ("stories", "both") and not self.stories:
-                pipeline_stages.append("stories")
+                if self.batch_settings.get("include_speakers") and (not self.diarization or not self.processing_status.get("diarization")):
+                    pipeline_stages.append("diarization")
 
-            if self.batch_settings.get("translate_es"):
-                pipeline_stages.append("translation")
+                if self.batch_settings.get("scope") in ("stories", "both") and not self.stories:
+                    pipeline_stages.append("stories")
+
+                if self.batch_settings.get("translate_es"):
+                    pipeline_stages.append("translation")
+            else:
+                if self.batch_settings.get("do_transcribe", True) and (not self.transcript or not self.processing_status.get("transcription")):
+                    pipeline_stages.append("transcription")
+
+                if self.batch_settings.get("do_diarize", True) and (not self.diarization or not self.processing_status.get("diarization")):
+                    pipeline_stages.append("diarization")
+
+                if self.batch_settings.get("do_stories", True) and not self.stories:
+                    pipeline_stages.append("stories")
+
+                if self.batch_settings.get("translate_es"):
+                    pipeline_stages.append("translation")
 
             if pipeline_stages:
                 self.pipeline_queue = pipeline_stages
@@ -697,6 +728,23 @@ class MediaBatchMixin:
         self.set_processing_stage(None)
         self.set_tools_actions_enabled(True)
 
+    def _batch_save_project_file(self):
+        """Saves project .json to designated output dir or default directory during batch."""
+        if not self.audio_file:
+            return
+        output_dir = self.batch_settings.get("output") if hasattr(self, "batch_settings") else ""
+        if not output_dir or not os.path.exists(output_dir):
+            output_dir = self.default_project_directory or str(Path(self.audio_file).parent)
+
+        try:
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            base_name = safe_filename(Path(self.audio_file).stem)
+            target_path = os.path.join(output_dir, f"{base_name}.json")
+            self._write_project_file(target_path)
+            self.log_activity(f"[BATCH] Auto-saved project file to {target_path}")
+        except Exception as e:
+            self.log_activity(f"[BATCH ERROR] Failed to save project file for {self.audio_file}: {e}")
+
     def _batch_export_current(self):
         """
         Handles automatic export for the current file during batch processing
@@ -705,7 +753,18 @@ class MediaBatchMixin:
         if not getattr(self, "batch_active", False) or not hasattr(self, "batch_settings"):
             return
 
+        # Auto-save project file if requested or in save_project_only mode
+        if self.batch_settings.get("save_project", True) or self.batch_settings.get("save_project_only", False):
+            self._batch_save_project_file()
+
+        # If user selected save_project_only, skip exporting transcript/subtitles/media files
+        if self.batch_settings.get("save_project_only", False):
+            self.log_activity("[BATCH] Finished processing. Document and media exports skipped (Save Project Files Only mode enabled).")
+            return
+
         output_dir = self.batch_settings.get("output")
+        if not output_dir or not os.path.exists(output_dir):
+            output_dir = self.default_project_directory or str(Path(self.audio_file).parent if self.audio_file else "")
         if not output_dir or not os.path.exists(output_dir):
             return
 

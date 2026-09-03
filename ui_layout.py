@@ -156,6 +156,13 @@ class UiLayoutMixin:
         self.translate_button.clicked.connect(lambda: self.start_translation("en", "es"))
         search_bar.addWidget(self.translate_button)
 
+        self.transcript_mode_toggle_btn = QPushButton("👁 Viewing Mode", self)
+        self.transcript_mode_toggle_btn.setCheckable(True)
+        self.transcript_mode_toggle_btn.setChecked(False)
+        self.transcript_mode_toggle_btn.setToolTip("Toggle between Viewing Mode (click to play/seek audio) and Editing Mode (type/edit transcript text).")
+        self.transcript_mode_toggle_btn.clicked.connect(self.toggle_transcript_editing_mode)
+        search_bar.addWidget(self.transcript_mode_toggle_btn)
+
         left_layout.addLayout(search_bar)
 
         self.transcript_view = InteractiveTranscriptEdit(self)
@@ -275,6 +282,7 @@ class UiLayoutMixin:
         self.transcript_view.requestRemoveSpeakerAtBlock.connect(self.remove_speaker_label_at_segment)
         self.transcript_view.textChanged.connect(self.on_transcript_text_changed)
         self.transcript_view.cursorPositionChanged.connect(self.on_transcript_selection_changed)
+        self.transcript_view.editingModeChanged.connect(self._on_transcript_editing_mode_changed)
 
         # Connect Story List signals
         self.story_list.itemSelectionChanged.connect(self.story_selection_changed)
@@ -478,7 +486,7 @@ class UiLayoutMixin:
         self.transcribe_diarize_action.triggered.connect(self.start_transcribe_and_diarize)
         tools_menu.addAction(self.transcribe_diarize_action)
 
-        self.transcribe_diarize_detect_action = QAction("&Full Automated Pipeline (All Stages)...", self)
+        self.transcribe_diarize_detect_action = QAction("&Run Processing...", self)
         self.transcribe_diarize_detect_action.setEnabled(False)
         self.transcribe_diarize_detect_action.triggered.connect(self.start_full_auto_pipeline)
         tools_menu.addAction(self.transcribe_diarize_detect_action)
@@ -490,6 +498,12 @@ class UiLayoutMixin:
         self.translate_action.triggered.connect(lambda: self.start_translation("en", "es"))
         tools_menu.addAction(self.translate_action)
 
+        tools_menu.addSeparator()
+
+        self.batch_processing_action = QAction("&Batch Processing...", self)
+        self.batch_processing_action.triggered.connect(self.open_batch_processing_dialog)
+        tools_menu.addAction(self.batch_processing_action)
+
         # ==========================================
         # Settings Menu
         # ==========================================
@@ -499,7 +513,7 @@ class UiLayoutMixin:
         pref_act.triggered.connect(self.open_preferences_dialog)
         settings_menu.addAction(pref_act)
 
-        self.translation_model_action = QAction("&Manage Translation Models...", self)
+        self.translation_model_action = QAction("&Manage AI Models...", self)
         self.translation_model_action.triggered.connect(self.open_translation_model_manager)
         settings_menu.addAction(self.translation_model_action)
 
@@ -654,3 +668,21 @@ class UiLayoutMixin:
         self.find_dialog.show()
         self.find_dialog.raise_()
         self.find_dialog.activateWindow()
+
+    def toggle_transcript_editing_mode(self):
+        """Toggle between Viewing Mode (navigation/click-to-seek) and Editing Mode (text editing)."""
+        if not hasattr(self, "transcript_view"):
+            return
+        new_mode = not getattr(self.transcript_view, "is_editing_mode", False)
+        self.transcript_view.set_editing_mode(new_mode)
+
+    def _on_transcript_editing_mode_changed(self, is_editing: bool):
+        """Respond to changes in transcript edit vs view mode."""
+        if hasattr(self, "transcript_mode_toggle_btn"):
+            self.transcript_mode_toggle_btn.setChecked(is_editing)
+            if is_editing:
+                self.transcript_mode_toggle_btn.setText("✎ Editing Mode")
+                self.transcript_mode_toggle_btn.setStyleSheet("font-weight: bold; background-color: #2b5278; color: white;")
+            else:
+                self.transcript_mode_toggle_btn.setText("👁 Viewing Mode")
+                self.transcript_mode_toggle_btn.setStyleSheet("")

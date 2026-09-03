@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter — v1.1.1
+"""Radio & TV Segmenter — v1.6
 
 This is the thin application composition root. UI/processing responsibilities
 are implemented in focused mixins so future changes can target smaller files
@@ -152,11 +152,20 @@ class MainWindow(
 
         QApplication.instance().installEventFilter(self)
 
+        # Initialize persistent settings before any component that reads them.
+        self.settings_store = QSettings(INTERNAL_APP_ID, INTERNAL_APP_ID)
+        self.default_project_directory = str(self.settings_store.value("default_project_directory", "") or "")
+        self.timeline_show_waveform = str(self.settings_store.value("timeline_show_waveform", "true")).lower() in {"1", "true", "yes"}
+        self.timeline_show_thumbnails = str(self.settings_store.value("timeline_show_thumbnails", "true")).lower() in {"1", "true", "yes"}
+        self.timeline_thumbnail_position = "above"
+
         self.audio_output = QAudioOutput()
         self.audio_output.setVolume(1.0)
 
         self.player = QMediaPlayer()
         self.player.setAudioOutput(self.audio_output)
+        if hasattr(self, "apply_audio_output_device"):
+            self.apply_audio_output_device()
         self.player.positionChanged.connect(self.audio_position_changed)
         self.player.durationChanged.connect(self.audio_duration_changed)
 
@@ -177,12 +186,6 @@ class MainWindow(
         self.batch_current = None
         self.batch_document_queue = []
         self.batch_document_state = None
-        self.settings_store = QSettings(INTERNAL_APP_ID, INTERNAL_APP_ID)
-        self.default_project_directory = str(self.settings_store.value("default_project_directory", "") or "")
-        self.timeline_show_waveform = str(self.settings_store.value("timeline_show_waveform", "true")).lower() in {"1", "true", "yes"}
-        self.timeline_show_thumbnails = str(self.settings_store.value("timeline_show_thumbnails", "true")).lower() in {"1", "true", "yes"}
-        self.timeline_thumbnail_position = "above"
-
         self._install_diagnostic_logging()
 
         self.build_ui()

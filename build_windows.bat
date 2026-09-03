@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo =====================================================================
-echo  Radio ^& TV Story Segmenter v1.5 - Automated 1-Click Build (Windows)
+echo  Radio ^& TV Story Segmenter v1.6 - Automated 1-Click Build (Windows)
 echo =====================================================================
 echo.
 
