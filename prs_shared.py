@@ -345,33 +345,50 @@ def ffprobe_path() -> str | None:
 def get_app_icon() -> QIcon:
     """Return the application QIcon loaded from bundled resources or fallback to empty."""
     icon_paths = []
+
+    # 1. PyInstaller temporary extraction directory (_MEIPASS)
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
+        p = Path(meipass)
         icon_paths.extend([
-            Path(meipass) / "resources" / "icon.ico",
-            Path(meipass) / "resources" / "icon.png",
-            Path(meipass) / "resources" / "icon.svg",
+            p / "resources" / "icon.ico",
+            p / "resources" / "icon.png",
+            p / "resources" / "icon.svg",
+            p / "icon.ico",
+            p / "icon.png",
         ])
+
+    # 2. Frozen binary folder, alongside the exe, and inside _internal/
     if getattr(sys, "frozen", False):
         app_dir = Path(sys.executable).resolve().parent
         icon_paths.extend([
             app_dir / "resources" / "icon.ico",
             app_dir / "resources" / "icon.png",
             app_dir / "resources" / "icon.svg",
+            app_dir / "_internal" / "resources" / "icon.ico",
+            app_dir / "_internal" / "resources" / "icon.png",
+            app_dir / "_internal" / "resources" / "icon.svg",
+            app_dir / "icon.ico",
+            app_dir / "icon.png",
         ])
+
+    # 3. Source directory
     src_dir = Path(__file__).resolve().parent
     icon_paths.extend([
         src_dir / "resources" / "icon.ico",
         src_dir / "resources" / "icon.png",
         src_dir / "resources" / "icon.svg",
+        src_dir / "icon.ico",
+        src_dir / "icon.png",
     ])
+
     for path in icon_paths:
         if path.is_file():
             icon = QIcon(str(path))
             if not icon.isNull():
                 return icon
-    return QIcon()
 
+    return QIcon()
 
 def get_license_file_path(filename: str = "NOTICES.txt") -> Path | None:
     """Return the path to a licensing or notice file, checking bundle and source paths."""
@@ -2719,7 +2736,16 @@ class BatchProcessingDialog(QDialog):
         layout.addWidget(self.export_group)
 
         def _on_save_project_only_toggled(checked):
-            self.export_group.setEnabled(not checked)
+            # Keep the group accessible but disable the file format & scope pickers
+            self.scope_combo.setEnabled(not checked)
+            self.fmt_txt.setEnabled(not checked)
+            self.fmt_docx.setEnabled(not checked)
+            self.fmt_srt.setEnabled(not checked)
+            self.fmt_vtt.setEnabled(not checked)
+            self.include_speakers.setEnabled(not checked)
+            self.include_times.setEnabled(not checked)
+            self.translate_check.setEnabled(not checked)
+
         self.save_project_only_check.toggled.connect(_on_save_project_only_toggled)
 
         # Dialog Action Buttons

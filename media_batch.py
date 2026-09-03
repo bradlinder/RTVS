@@ -159,11 +159,11 @@ class MediaBatchMixin:
         self.progress.show()
         self.cancel_button.show()
         
-
         scope = dialog.scope_combo.currentData()
         pipeline_mode = "custom" if dialog.pipeline_custom_radio.isChecked() else "full"
         save_project_only = dialog.save_project_only_check.isChecked()
-        save_project = dialog.save_project_check.isChecked()
+        save_project = dialog.save_project_check.isChecked() or save_project_only
+
         do_transcribe = dialog.proc_transcribe.isChecked() if pipeline_mode == "custom" else True
         do_diarize = dialog.proc_diarize.isChecked() if pipeline_mode == "custom" else True
         do_stories = dialog.proc_stories.isChecked() if pipeline_mode == "custom" else True
@@ -178,7 +178,7 @@ class MediaBatchMixin:
             "do_diarize": do_diarize,
             "do_stories": do_stories,
             "scope": scope,
-            "skip_existing": dialog.skip_existing_check.isChecked(),
+            "skip_existing": dialog.skip_existing_check.isChecked() and not save_project_only,
             "full_txt": dialog.fmt_txt.isChecked() and scope in ("full", "both") and not save_project_only,
             "full_docx": dialog.fmt_docx.isChecked() and scope in ("full", "both") and not save_project_only,
             "full_srt": dialog.fmt_srt.isChecked() and scope in ("full", "both") and not save_project_only,
@@ -750,29 +750,30 @@ class MediaBatchMixin:
             self.log_activity(f"[BATCH ERROR] Failed to save project file for {self.audio_file}: {e}")
 
     def _batch_export_current(self):
-        """Auto-exports current media file into its project folder and subfolders."""
+        """Handles automatic export or project saving during batch processing."""
         if not getattr(self, "batch_active", False) or not hasattr(self, "batch_settings"):
             return
 
+        # 1. Save the project file (.json)
         if self.batch_settings.get("save_project", True) or self.batch_settings.get("save_project_only", False):
             self._batch_save_project_file()
 
+        # 2. If 'Save projects only' is checked, skip generating .txt, .docx, .srt, and media files
         if self.batch_settings.get("save_project_only", False):
-            self.log_activity("[BATCH] Finished processing. Document and media exports skipped (Save Project Files Only mode enabled).")
+            base_name = safe_filename(Path(self.audio_file).stem if self.audio_file else "file")
+            self.log_activity(
+                f"[BATCH] Finished processing {base_name}. Project session saved (exports skipped: 'Save projects only' mode).",
+                mark_dirty=False
+            )
             return
 
-        base_dir = self.batch_settings.get("output")
-        if not base_dir or not os.path.exists(base_dir):
-            base_dir = self.get_default_save_directory()
+        # 3. Otherwise, proceed with requested transcript, subtitle, and media exports
+        base_dir = self.batch_settings.get("output") or self.get_default_save_directory()
         if not base_dir or not os.path.exists(base_dir):
             return
 
         base_name = safe_filename(Path(self.audio_file).stem if self.audio_file else "batch_output")
-        
-        # Creates [base_dir]/[base_name]/ with Transcripts and Media subfolders:
-        project_dir, _, _, _ = self.prepare_export_directories(
-            base_dir, default_name=base_name, prompt_user=False
-        )
+        project_dir, _, _, _ = self.prepare_export_directories(base_dir, default_name=base_name, prompt_user=False)
 
         formats = {
             "txt": self.batch_settings.get("full_txt", True) or self.batch_settings.get("story_txt", False),
