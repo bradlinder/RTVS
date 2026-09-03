@@ -1,0 +1,30 @@
+# Radio & TV Segmenter 1.1 -- base (CPU-only) runtime dependencies.
+#
+# This app is CPU-only by default; GPU acceleration is a separate, optional
+# download from Settings > Processing > GPU Acceleration (see
+# runtime_manager.py's "gpu_transcribe" environment and gpu_acceleration.py).
+# For that reason, install torch from the CPU wheel index rather than plain
+# PyPI -- on Windows and Linux, PyPI's default torch wheel bundles CUDA
+# runtime libraries and is well over a gigabyte larger than the CPU build:
+#
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+#
+# (On macOS this doesn't matter -- PyPI only ships CPU/MPS wheels there.)
+# build_installer.py checks for this and warns if it detects a CUDA-enabled
+# torch in the build environment.
+
+PySide6>=6.7,<7
+python-docx>=1.1,<2
+faster-whisper>=1.1,<2
+diarize==0.1.2
+transformers>=4.40,<5
+huggingface-hub>=0.23,<2
+pypdf>=4,<7
+requests>=2.32,<3
+numpy>=1.26,<3
+sacremoses>=0.0.53
+keyring>=25,<26
+torch>=2.0,<2.4
+sentencepiece>=0.2,<1
+
+cryptography>=42,<46

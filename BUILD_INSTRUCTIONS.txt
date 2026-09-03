@@ -1,0 +1,259 @@
+# ==============================================================================
+# Radio & TV Segmenter v1.5 — Executable & Installer Build Instructions
+# ==============================================================================
+
+This guide provides comprehensive, step-by-step instructions for building
+standalone, installable executables of Radio & TV Segmenter v1.5 for
+Windows, macOS, and Linux.
+
+------------------------------------------------------------------------------
+TABLE OF CONTENTS
+------------------------------------------------------------------------------
+0. Quick Start: 1-Click Automated Build Scripts (.bat / .sh)
+1. Architectural & Size Optimization Principles
+2. Prerequisites
+3. Windows Compilation & Installer (EXE / Inno Setup)
+4. macOS Compilation & DMG Creation (App Bundle / Notarization)
+5. Linux Compilation (Standalone Binary / AppImage / Tarball)
+6. Post-Build Verification Checklist
+7. Troubleshooting Common Build Issues
+
+==============================================================================
+0. QUICK START: 1-CLICK AUTOMATED BUILD SCRIPTS
+==============================================================================
+For maximum convenience, automated 1-click build scripts are included in the
+repository root for Windows, macOS, and Linux:
+
+* Windows (1-Click Batch File):
+  - Simply double-click `build_windows.bat` (or run it from Command Prompt /
+    PowerShell).
+  - It automatically initializes a dedicated build environment (.venv-build),
+    installs all necessary build dependencies using CPU-only wheels, compiles
+    the application via `python build_installer.py`, and if Inno Setup is
+    installed, builds the final Windows Setup installer `RadioTVSegmenter-1.5-Windows.exe`!
+
+* macOS (1-Click Shell Script):
+  - Run `./build_macos.sh` in Terminal.
+  - It sets up the build environment, compiles the binary, packages `Radio & TV
+    Story Segmenter.app`, and generates the distributable `.dmg` disk image.
+
+* Linux (1-Click Shell Script):
+  - Run `./build_linux.sh` in Terminal.
+  - It sets up the environment and creates the standalone distribution in
+    `dist/RadioTVSegmenter/`.
+
+If you prefer manual, step-by-step control, follow the detailed sections below.
+
+==============================================================================
+1. ARCHITECTURAL & SIZE OPTIMIZATION PRINCIPLES
+==============================================================================
+To keep the base installer compact (typically ~250MB-350MB instead of 1.6GB+):
+
+* Unified Single-Runtime Architecture:
+  The application executable (`RadioTVSegmenter.exe`) handles both GUI and
+  background worker tasks (via `--prs-worker`), eliminating the duplicate
+  ~450MB onefile worker binary that previously bundled duplicate copies of
+  PyTorch, CTranslate2, and Python DLLs.
+* CPU-Only Base Build:
+  The base installer packages CPU-only PyTorch and libraries. NVIDIA CUDA
+  GPU acceleration is provisioned on-demand via Settings > Processing >
+  GPU Acceleration (NVIDIA CUDA) after installation.
+* Targeted Submodule Bundling & Exclusions:
+  The build script explicitly bundles only Qt modules in use (QtCore, QtGui,
+  QtWidgets, QtMultimedia, QtMultimediaWidgets) and excludes heavy unused
+  modules (such as QtWebEngine, Qt3D, QtQuick, QtPdf, torch.testing,
+  torch.distributed, torch.compiler, and test suites).
+* Inno Setup Solid LZMA2 Ultra Compression:
+  The Windows installer (`.iss`) utilizes `Compression=lzma2/ultra64` and
+  `SolidCompression=yes` with a 1GB dictionary size, achieving maximum
+  compression across shared libraries and binaries.
+* On-Demand AI Models:
+  Whisper and translation models (Helsinki-NLP Opus-MT) are downloaded on
+  first use or via Manage Models, avoiding bloat in the base installer.
+* Embedded Media Tools:
+  Static FFmpeg and ffprobe binaries are copied into `runtime/bin` so end users
+  do not need separate codec or media runtime installations. (Use an essentials
+  static build for minimal footprint).
+
+==============================================================================
+2. PREREQUISITES
+==============================================================================
+1. Python Version:
+   - Python 3.12 (64-bit) is required across all platforms.
+2. FFmpeg & FFprobe Binaries:
+   - Make `ffmpeg` and `ffprobe` accessible on your system PATH, or set the
+     environment variable `PRS_FFMPEG_DIR` pointing to the directory containing
+     them.
+     * Windows: Download static build from gyan.dev (ffmpeg-release-essentials.zip)
+     * macOS: `brew install ffmpeg`
+     * Linux: `sudo apt update && sudo apt install ffmpeg` (or distribution equivalent)
+3. Target OS Rule:
+   - Always build on the target operating system (Windows on Windows, macOS on
+     macOS, Linux on Linux). PyInstaller does not support cross-compilation.
+
+==============================================================================
+3. WINDOWS COMPILATION & INSTALLER (WINDOWS 10/11 64-BIT)
+==============================================================================
+
+Step 1: Set Up Build Virtual Environment
+----------------------------------------
+Open PowerShell or Command Prompt in the repository root directory:
+
+    # Create virtual environment
+    python -m venv venv_build
+
+    # Activate virtual environment
+    .\venv_build\Scripts\activate
+
+    # Upgrade pip and packaging tools
+    python -m pip install --upgrade pip setuptools wheel
+
+Step 2: Install CPU-Only Dependencies
+-------------------------------------
+Install dependencies using the official PyTorch CPU wheel index to prevent
+pulling in multi-gigabyte CUDA runtime packages:
+
+    pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+    pip install -r requirements-build.txt
+
+Step 3: Run the PyInstaller Packager
+------------------------------------
+Ensure `ffmpeg.exe` and `ffprobe.exe` are on PATH (or set `PRS_FFMPEG_DIR`):
+
+    $env:PRS_FFMPEG_DIR = "C:\path\to\ffmpeg\bin"   # (PowerShell, optional if on PATH)
+    python build_installer.py
+
+This produces:
+- `dist/RadioTVSegmenter/` (the main standalone application folder)
+- `dist/RadioTVSegmenter/runtime/bin/` (bundled ffmpeg.exe & ffprobe.exe)
+- `dist/RadioTVSegmenter/workers/` (worker script for optional GPU runtime)
+- `dist/RadioTVSegmenter/optional_runtime/uv.exe` (isolated runtime manager)
+
+Step 4: Compile Inno Setup Installer (.exe)
+-------------------------------------------
+1. Install Inno Setup 6 (https://jrsoftware.org/isdl.php) if not already installed.
+2. Open `installer/Windows/RadioTVStorySegmenter.iss` in Inno Setup Compiler.
+3. Click "Compile" (or run from command line):
+   
+   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\Windows\RadioTVStorySegmenter.iss
+
+4. The setup wizard executable is generated in:
+   `dist/installer/RadioTVSegmenter-1.5-Windows.exe`
+
+==============================================================================
+4. macOS COMPILATION & DMG CREATION (macOS 12+ INTEL / APPLE SILICON)
+==============================================================================
+
+Step 1: Set Up Build Virtual Environment
+----------------------------------------
+Open Terminal in the repository root directory:
+
+    python3 -m venv venv_build
+    source venv_build/bin/activate
+    python -m pip install --upgrade pip setuptools wheel
+
+Step 2: Install Dependencies
+----------------------------
+    pip install -r requirements.txt
+    pip install -r requirements-build.txt
+
+Step 3: Build the App Bundle
+----------------------------
+    python build_installer.py
+
+This packages the application bundle at `dist/RadioTVSegmenter.app`.
+
+Step 4: Package, Sign, and Notarize DMG
+---------------------------------------
+Run the automated packaging script:
+
+    # Basic unsigned DMG creation:
+    bash installer/macOS/build_app.sh
+
+    # Or with Apple Developer ID signing & notarization:
+    export DEVELOPER_ID_APPLICATION="Developer ID Application: Your Name (TEAMID)"
+    export NOTARY_PROFILE="AC_NOTARY_PROFILE"
+    bash installer/macOS/build_app.sh
+
+The resulting installable disk image is output to:
+`dist/RadioTVSegmenter-1.5-macOS.dmg`
+
+==============================================================================
+5. LINUX COMPILATION (UBUNTU / DEBIAN / FEDORA / ARCH)
+==============================================================================
+
+Step 1: Install System Dependencies
+-----------------------------------
+Ubuntu/Debian:
+    sudo apt update
+    sudo apt install python3-venv python3-dev ffmpeg libxcb-cursor0 libpulse0
+
+Fedora:
+    sudo dnf install python3-devel ffmpeg libxcb pulseaudio-libs
+
+Step 2: Set Up Build Virtual Environment
+----------------------------------------
+    python3 -m venv venv_build
+    source venv_build/bin/activate
+    python -m pip install --upgrade pip setuptools wheel
+
+    # Install CPU-only dependencies
+    pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+    pip install -r requirements-build.txt
+
+Step 3: Run the Build Script
+----------------------------
+    python3 build_installer.py
+
+Step 4: Package for Distribution (.tar.gz or AppImage)
+------------------------------------------------------
+To create a standalone distributable tarball:
+
+    cd dist
+    tar -czvf RadioTVSegmenter-1.5-Linux-x86_64.tar.gz RadioTVSegmenter/
+
+To run directly on Linux:
+    ./dist/RadioTVSegmenter/RadioTVSegmenter
+
+==============================================================================
+6. POST-BUILD VERIFICATION CHECKLIST
+==============================================================================
+Before releasing a new build to users, execute these smoke tests:
+
+1. Launch & Window Title:
+   - Run the compiled binary/installer directly.
+   - Verify window title shows "Radio & TV Segmenter v1.5".
+2. Theme Verification:
+   - Switch to Settings > Appearance > Light Mode: confirm transcript text,
+     speaker names, timestamps, and Export dialog checkboxes are clearly visible.
+   - Switch to Settings > Appearance > High Contrast: verify high-contrast
+     yellow/black styling and readability.
+   - Switch to Settings > Appearance > Dark Mode: verify default dark theme.
+3. Media Playback & Waveform:
+   - Load an MP3/WAV/MP4 file.
+   - Verify audio plays, waveform renders, and playback scrubbing seeks correctly.
+4. AI Transcription & Speaker Detection:
+   - Run transcription with Tiny/Base Whisper model.
+   - Run speaker detection and ensure speaker segments appear in the transcript.
+5. Export Functions:
+   - Test Text (.txt), Word (.docx), and Subtitle (.srt/.vtt) exports.
+   - Confirm WordPress export modal opens and renders correctly.
+
+==============================================================================
+7. TROUBLESHOOTING COMMON BUILD ISSUES
+==============================================================================
+
+Problem: The compiled executable is over 1.5 GB.
+Fix: Your build environment installed PyTorch with CUDA wheels. Remove the
+virtual environment and reinstall using:
+`pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu`
+
+Problem: PyInstaller fails with `ERROR: ffmpeg was not found`.
+Fix: Add FFmpeg to your system PATH or set the `PRS_FFMPEG_DIR` environment
+variable to the directory containing ffmpeg and ffprobe.
+
+Problem: macOS gives "App is damaged and cannot be opened" on other machines.
+Fix: Sign the application with an active Apple Developer ID certificate and
+notarize the DMG using `xcrun notarytool` via `installer/macOS/build_app.sh`.
+
+==============================================================================
