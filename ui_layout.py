@@ -6,6 +6,7 @@ interactive transcript editor, story segmentation panel, and search bar.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -284,7 +285,7 @@ class UiLayoutMixin:
         # Connect Transcript View signals
         self.transcript_view.linkClicked.connect(self.transcript_clicked)
         self.transcript_view.requestSplitAtCursor.connect(self.split_segment_at_time)
-        self.transcript_view.requestInsertSpeaker.connect(self.prompt_rename_custom_speaker)
+        self.transcript_view.requestInsertSpeaker.connect(self.handle_insert_speaker_request)
         self.transcript_view.requestRemoveSpeakerAtBlock.connect(self.remove_speaker_label_at_segment)
         self.transcript_view.textChanged.connect(self.on_transcript_text_changed)
         self.transcript_view.cursorPositionChanged.connect(self.on_transcript_selection_changed)
@@ -590,6 +591,12 @@ class UiLayoutMixin:
             return
         self.recent_menu.clear()
         recent_paths = self.settings_store.value("recent_projects", [])
+        if isinstance(recent_paths, str):
+            try:
+                recent_paths = json.loads(recent_paths)
+            except Exception:
+                recent_paths = []
+
         if not isinstance(recent_paths, list) or not recent_paths:
             empty_act = QAction("No Recent Projects", self)
             empty_act.setEnabled(False)

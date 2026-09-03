@@ -33,7 +33,11 @@ def configure_runtime_environment() -> Path:
     models = root / "models"
     models.mkdir(parents=True, exist_ok=True)
     # Keep Hugging Face downloads out of the user's generic cache and out of
-    # the protected application-install directory.
+    # the protected application-install directory. This is only the
+    # *default* location; a user-configured custom model directory
+    # (Preferences > Processing) is applied later, after QApplication
+    # exists and QSettings is safe to use -- see get_models_storage_dir()
+    # in prs_shared.py and its use in processing.py/model_management.py.
     os.environ.setdefault("HF_HOME", str(models / "huggingface"))
     os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
     return root

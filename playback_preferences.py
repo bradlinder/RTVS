@@ -1016,6 +1016,14 @@ class PlaybackPreferencesMixin:
             self.settings_store.setValue("lead_in_padding", self.lead_in_padding)
             self.settings_store.setValue("speaker_sensitivity", self.speaker_sensitivity)
 
+            # Force these writes to disk now rather than relying on
+            # QSettings' own flush timing, so a Preferences change is
+            # durable even if the app is closed or killed shortly after.
+            try:
+                self.settings_store.sync()
+            except Exception:
+                pass
+
             self.log_activity("[SETTINGS] Preferences updated.")
             dialog.accept()
 

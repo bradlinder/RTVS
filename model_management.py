@@ -17,7 +17,7 @@ class WhisperModelInstallWorker(QObject):
     def run(self):
         error = None
         try:
-            WhisperModel(self.model_name, device="cpu", compute_type="int8")
+            WhisperModel(self.model_name, device="cpu", compute_type="int8", download_root=str(get_models_storage_dir()))
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
         self.finished.emit(error)
@@ -313,7 +313,7 @@ class ModelManagementMixin:
         # runs in WhisperModelInstallWorker on a QThread.
         error = None
         try:
-            WhisperModel(model_name, device="cpu", compute_type="int8")
+            WhisperModel(model_name, device="cpu", compute_type="int8", download_root=str(get_models_storage_dir()))
         except Exception as exc:
             error = str(exc)
         return error

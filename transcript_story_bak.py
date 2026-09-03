@@ -320,186 +320,6 @@ class TranscriptStoryMixin:
         else:
             self.add_speaker_label_at(seg_idx, split_time, name=speaker_name)
 
-    def add_speaker_label_at(self, seg_idx, split_time, name=None):
-        """Adds a speaker label break: assigns or splits the segment at split_time."""
-        if not self.transcript or "segments" not in self.transcript:
-            self.statusBar().showMessage("No transcript available.")
-            return False
-
-        segments = self.transcript.get("segments", [])
-        if not segments:
-            return False
-
-        # If seg_idx is invalid, locate the segment that contains split_time
-        if seg_idx is None or seg_idx < 0 or seg_idx >= len(segments):
-            for i, seg in enumerate(segments):
-                s_start = float(seg.get("start", 0.0))
-                s_end = float(seg.get("end", s_start))
-                if s_start <= split_time <= s_end:
-                    seg_idx = i
-                    break
-            if seg_idx is None:
-                seg_idx = max(0, min(len(segments) - 1, int(seg_idx or 0)))
-
-        if name is None:
-            known = self.get_all_known_speakers() if hasattr(self, "get_all_known_speakers") else []
-            if known:
-                name, accepted = QInputDialog.getItem(
-                    self, "Add Speaker Label", "Speaker name for this label:", known, 0, True
-                )
-            else:
-                name, accepted = QInputDialog.getText(self, "Add Speaker Label", "Speaker name for this label:")
-            if not accepted:
-                return False
-
-        name = (name or "").strip()
-        if not name:
-            self.statusBar().showMessage("Speaker label needs a name.")
-            return False
-
-        target_seg = segments[seg_idx]
-        words = target_seg.get("words", [])
-
-        # Check if click is at or before the very first word of the segment
-        is_at_segment_start = False
-        if words:
-            if split_time <= words[0].get("start", target_seg["start"]) + 0.05:
-                is_at_segment_start = True
-        else:
-            if split_time <= float(target_seg.get("start", 0.0)) + 0.1:
-                is_at_segment_start = True
-
-        # If click is at start of segment, reassign this segment directly without splitting
-        if is_at_segment_start:
-            self.flush_pending_transcript_undo() if hasattr(self, "flush_pending_transcript_undo") else None
-            before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
-
-            override_key = f"SEG_{seg_idx}_SPEAKER"
-            self.speaker_names[override_key] = name
-            self.segment_speaker_overrides[seg_idx] = override_key
-            self._diar_index_key = None
-
-            if before_state is not None and hasattr(self, "_commit_project_state_change"):
-                self._commit_project_state_change(before_state, f"Add Speaker Label ({name})")
-
-            self.add_custom_speaker_to_glossary(name)
-            self.log_activity(f"[SPEAKER] Set speaker label '{name}' at segment #{seg_idx + 1}")
-            self.save_project()
-            self.render_transcript()
-            return True
-
-        # Otherwise, split segment at word boundary
-        if not self.split_segment_at_time(seg_idx, split_time, new_speaker_name=name):
-            # Fallback: if words-based split rejected because split_time was slightly off,
-            # assign to the segment directly so the user action always succeeds
-            self.flush_pending_transcript_undo() if hasattr(self, "flush_pending_transcript_undo") else None
-            before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
-
-            override_key = f"SEG_{seg_idx}_SPEAKER"
-            self.speaker_names[override_key] = name
-            self.segment_speaker_overrides[seg_idx] = override_key
-            self._diar_index_key = None
-
-            if before_state is not None and hasattr(self, "_commit_project_state_change"):
-                self._commit_project_state_change(before_state, f"Add Speaker Label ({name})")
-
-            self.add_custom_speaker_to_glossary(name)
-            self.log_activity(f"[SPEAKER] Assigned speaker label '{name}' to segment #{seg_idx + 1}")
-            self.save_project()
-            self.render_transcript()
-            return True
-
-        self.add_custom_speaker_to_glossary(name)
-        return True
-
-    def split_segment_at_time(self, seg_idx, split_time, new_speaker_name=None):
-        """Split a segment at an exact word timestamp."""
-        if not self.transcript or "segments" not in self.transcript:
-            return False
-
-        segments = self.transcript.get("segments", [])
-        if seg_idx < 0 or seg_idx >= len(segments):
-            return False
-
-        target_seg = segments[seg_idx]
-        words = target_seg.get("words", [])
-
-        if words:
-            # Find the best split split index by proximity
-            split_idx = -1
-            for w_i, w in enumerate(words):
-                if w.get("start", target_seg["start"]) >= split_time - 0.01:
-                    split_idx = w_i
-                    break
-
-            if split_idx <= 0 or split_idx >= len(words):
-                return False
-
-            left_words = words[:split_idx]
-            right_words = words[split_idx:]
-
-            seg1 = dict(target_seg)
-            seg1["end"] = left_words[-1].get("end", split_time)
-            seg1["words"] = left_words
-            seg1["text"] = " ".join(w.get("word", "") for w in left_words)
-
-            seg2 = dict(target_seg)
-            seg2["start"] = right_words[0].get("start", split_time)
-            seg2["words"] = right_words
-            seg2["text"] = " ".join(w.get("word", "") for w in right_words)
-        else:
-            seg_text = target_seg.get("text", "").split()
-            if len(seg_text) < 2:
-                return False
-
-            seg_start = float(target_seg.get("start", split_time))
-            seg_end = float(target_seg.get("end", split_time))
-            duration = max(0.0, seg_end - seg_start)
-            ratio = max(0.0, min(1.0, (float(split_time) - seg_start) / duration)) if duration > 0 else 0.5
-            split_word = max(1, min(len(seg_text) - 1, round(len(seg_text) * ratio)))
-
-            seg1 = dict(target_seg)
-            seg1["end"] = float(split_time)
-            seg1["text"] = " ".join(seg_text[:split_word])
-
-            seg2 = dict(target_seg)
-            seg2["start"] = float(split_time)
-            seg2["text"] = " ".join(seg_text[split_word:])
-
-        self.flush_pending_transcript_undo() if hasattr(self, "flush_pending_transcript_undo") else None
-        before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
-
-        segments[seg_idx] = seg1
-        segments.insert(seg_idx + 1, seg2)
-
-        # Shift overrides down
-        new_overrides = {}
-        for idx_k, spk in self.segment_speaker_overrides.items():
-            k = int(idx_k)
-            if k <= seg_idx:
-                new_overrides[k] = spk
-            else:
-                new_overrides[k + 1] = spk
-        self.segment_speaker_overrides = new_overrides
-
-        if new_speaker_name:
-            override_key = f"SEG_{seg_idx + 1}_SPEAKER"
-            self.speaker_names[override_key] = str(new_speaker_name).strip()
-            self.segment_speaker_overrides[seg_idx + 1] = override_key
-
-        self._diar_index_key = None
-
-        if before_state is not None and hasattr(self, "_commit_project_state_change"):
-            self._commit_project_state_change(
-                before_state,
-                f"Add Speaker Label{' (' + str(new_speaker_name) + ')' if new_speaker_name else ''}"
-            )
-
-        self.log_activity(f"[SPEAKER] Added speaker label break at {format_time(split_time)} (Split Segment #{seg_idx + 1})")
-        self.save_project()
-        self.render_transcript()
-        return True
-
     def prompt_rename_custom_speaker(self, old_name):
         self.flush_pending_transcript_undo() if hasattr(self, "flush_pending_transcript_undo") else None
         before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
@@ -587,9 +407,192 @@ class TranscriptStoryMixin:
             self.save_project()
             self.statusBar().showMessage(f"Updated speaker to: {new_name}")
 
+    def handle_insert_speaker_request(self, seg_idx, split_time, speaker_name):
+        """Dispatched from the right-click 'Add Speaker Label Here' context menu."""
+        if speaker_name == "__NEW__":
+            self.add_speaker_label_at(seg_idx, split_time, name=None)
+        else:
+            self.add_speaker_label_at(seg_idx, split_time, name=speaker_name)
+
+    def add_speaker_label_at(self, seg_idx, split_time, name=None):
+        """Adds a speaker label break: assigns or splits the segment at split_time."""
+        if not self.transcript or "segments" not in self.transcript:
+            self.statusBar().showMessage("No transcript available.")
+            return False
+
+        segments = self.transcript.get("segments", [])
+        if not segments:
+            return False
+
+        # If seg_idx is invalid, locate the segment that contains split_time
+        if seg_idx is None or seg_idx < 0 or seg_idx >= len(segments):
+            for i, seg in enumerate(segments):
+                s_start = float(seg.get("start", 0.0))
+                s_end = float(seg.get("end", s_start))
+                if s_start <= split_time <= s_end:
+                    seg_idx = i
+                    break
+            if seg_idx is None:
+                seg_idx = max(0, min(len(segments) - 1, int(seg_idx or 0)))
+
+        if name is None:
+            known = self.get_all_known_speakers() if hasattr(self, "get_all_known_speakers") else []
+            if known:
+                name, accepted = QInputDialog.getItem(
+                    self, "Add Speaker Label", "Speaker name for this label:", known, 0, True
+                )
+            else:
+                name, accepted = QInputDialog.getText(self, "Add Speaker Label", "Speaker name for this label:")
+            if not accepted:
+                return False
+
+        name = (name or "").strip()
+        if not name:
+            self.statusBar().showMessage("Speaker label needs a name.")
+            return False
+
+        target_seg = segments[seg_idx]
+        words = target_seg.get("words", [])
+
+        # Check if click is at or before the very first word of the segment
+        is_at_segment_start = False
+        if words:
+            if split_time <= words[0].get("start", target_seg["start"]) + 0.05:
+                is_at_segment_start = True
+        else:
+            if split_time <= float(target_seg.get("start", 0.0)) + 0.1:
+                is_at_segment_start = True
+
+        # Generate a unique segment-specific override key so it never collides globally
+        unique_key = f"SEG_{seg_idx}_SPEAKER_{int(split_time * 1000)}"
+        self.speaker_names[unique_key] = name
+
+        # If click is at start of segment, reassign this segment directly without splitting
+        if is_at_segment_start:
+            self.flush_pending_transcript_undo() if hasattr(self, "flush_pending_transcript_undo") else None
+            before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
+
+            self.segment_speaker_overrides[seg_idx] = unique_key
+            self._diar_index_key = None
+
+            if before_state is not None and hasattr(self, "_commit_project_state_change"):
+                self._commit_project_state_change(before_state, f"Add Speaker Label ({name})")
+
+            self.add_custom_speaker_to_glossary(name)
+            self.log_activity(f"[SPEAKER] Set speaker label '{name}' at segment #{seg_idx + 1}")
+            self.save_project()
+            self.render_transcript()
+            return True
+
+        # Otherwise, split segment at word boundary
+        if not self.split_segment_at_time(seg_idx, split_time, new_speaker_key=unique_key):
+            # Fallback: assign directly if split boundary is tightly constrained
+            self.flush_pending_transcript_undo() if hasattr(self, "flush_pending_transcript_undo") else None
+            before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
+
+            self.segment_speaker_overrides[seg_idx] = unique_key
+            self._diar_index_key = None
+
+            if before_state is not None and hasattr(self, "_commit_project_state_change"):
+                self._commit_project_state_change(before_state, f"Add Speaker Label ({name})")
+
+            self.add_custom_speaker_to_glossary(name)
+            self.log_activity(f"[SPEAKER] Assigned speaker label '{name}' to segment #{seg_idx + 1}")
+            self.save_project()
+            self.render_transcript()
+            return True
+
+        self.add_custom_speaker_to_glossary(name)
+        return True
+
+    def split_segment_at_time(self, seg_idx, split_time, new_speaker_key=None):
+        """Split a segment at an exact word timestamp."""
+        if not self.transcript or "segments" not in self.transcript:
+            return False
+
+        segments = self.transcript.get("segments", [])
+        if seg_idx < 0 or seg_idx >= len(segments):
+            return False
+
+        target_seg = segments[seg_idx]
+        words = target_seg.get("words", [])
+
+        if words:
+            split_idx = -1
+            for w_i, w in enumerate(words):
+                if w.get("start", target_seg["start"]) >= split_time - 0.01:
+                    split_idx = w_i
+                    break
+
+            if split_idx <= 0 or split_idx >= len(words):
+                return False
+
+            left_words = words[:split_idx]
+            right_words = words[split_idx:]
+
+            seg1 = dict(target_seg)
+            seg1["end"] = left_words[-1].get("end", split_time)
+            seg1["words"] = left_words
+            seg1["text"] = " ".join(w.get("word", "") for w in left_words)
+
+            seg2 = dict(target_seg)
+            seg2["start"] = right_words[0].get("start", split_time)
+            seg2["words"] = right_words
+            seg2["text"] = " ".join(w.get("word", "") for w in right_words)
+        else:
+            seg_text = target_seg.get("text", "").split()
+            if len(seg_text) < 2:
+                return False
+
+            seg_start = float(target_seg.get("start", split_time))
+            seg_end = float(target_seg.get("end", split_time))
+            duration = max(0.0, seg_end - seg_start)
+            ratio = max(0.0, min(1.0, (float(split_time) - seg_start) / duration)) if duration > 0 else 0.5
+            split_word = max(1, min(len(seg_text) - 1, round(len(seg_text) * ratio)))
+
+            seg1 = dict(target_seg)
+            seg1["end"] = float(split_time)
+            seg1["text"] = " ".join(seg_text[:split_word])
+
+            seg2 = dict(target_seg)
+            seg2["start"] = float(split_time)
+            seg2["text"] = " ".join(seg_text[split_word:])
+
+        self.flush_pending_transcript_undo() if hasattr(self, "flush_pending_transcript_undo") else None
+        before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
+
+        segments[seg_idx] = seg1
+        segments.insert(seg_idx + 1, seg2)
+
+        # Shift overrides down
+        new_overrides = {}
+        for idx_k, spk in self.segment_speaker_overrides.items():
+            k = int(idx_k)
+            if k <= seg_idx:
+                new_overrides[k] = spk
+            else:
+                new_overrides[k + 1] = spk
+        self.segment_speaker_overrides = new_overrides
+
+        if new_speaker_key:
+            self.segment_speaker_overrides[seg_idx + 1] = new_speaker_key
+
+        self._diar_index_key = None
+
+        if before_state is not None and hasattr(self, "_commit_project_state_change"):
+            self._commit_project_state_change(
+                before_state,
+                "Add Speaker Label Break"
+            )
+
+        self.log_activity(f"[SPEAKER] Added speaker label break at {format_time(split_time)} (Split Segment #{seg_idx + 1})")
+        self.save_project()
+        self.render_transcript()
+        return True
+
     def remove_speaker_label_at_segment(self, seg_idx):
-        """Remove a speaker label strictly for this specific instance/turn, 
-        reassigning only this contiguous section to the preceding speaker."""
+        """Remove a speaker label strictly for this specific turn by clearing its override,
+        merging it back into the preceding speaker without touching other sections."""
         if not self.transcript or "segments" not in self.transcript:
             return False
 
@@ -600,81 +603,33 @@ class TranscriptStoryMixin:
         self.flush_pending_transcript_undo() if hasattr(self, "flush_pending_transcript_undo") else None
         before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
 
-        # 1. Determine the target speaker immediately preceding this label
+        removed_name = self.get_effective_speaker_name(seg_idx, segments[seg_idx])
         prev_seg_idx = seg_idx - 1
         target_name = self.get_effective_speaker_name(prev_seg_idx, segments[prev_seg_idx])
-        target_raw = (
-            self.segment_speaker_overrides.get(prev_seg_idx) 
-            or self.speaker_for_segment(segments[prev_seg_idx])
-        )
 
-        # 2. Identify the speaker being removed at this specific position
-        removed_name = self.get_effective_speaker_name(seg_idx, segments[seg_idx])
-
-        # 3. Find only the CONTIGUOUS run of segments in this specific turn
+        # Find only the CONTIGUOUS run of segments starting at seg_idx with removed_name
         section_indices = []
         for i in range(seg_idx, len(segments)):
             if self.get_effective_speaker_name(i, segments[i]) == removed_name:
                 section_indices.append(i)
             else:
-                break  # Stop as soon as another speaker turn begins
+                break
 
         if not section_indices:
             return False
 
-        section_indices_set = set(section_indices)
-
-        # 4. Create isolated segment overrides for this section only.
-        # We do NOT touch or reuse global speaker names to avoid altering 
-        # other instances of either speaker that occur before or after.
+        # To remove this label, we simply delete its segment override so it falls back 
+        # to the preceding speaker or underlying track, without touching any other part of the file.
         for idx in section_indices:
-            instance_key = f"SEG_{idx}_SPEAKER"
-            self.speaker_names[instance_key] = target_name
-            self.segment_speaker_overrides[idx] = instance_key
+            if idx in self.segment_speaker_overrides:
+                del self.segment_speaker_overrides[idx]
 
-        # 5. Reassign underlying diarization segments ONLY within this specific time range
-        if self.diarization and isinstance(self.diarization, dict):
-            sec_start = float(segments[section_indices[0]].get("start", 0.0))
-            sec_end = float(segments[section_indices[-1]].get("end", sec_start))
-            diar_segs = self.diarization.get("segments", [])
-            updated_diar = False
-
-            # Use the previous segment's underlying raw identity if valid, else an isolated key
-            new_diar_speaker = target_raw or f"SEG_{prev_seg_idx}_SPEAKER"
-
-            for d_seg in diar_segs:
-                d_start = float(d_seg.get("start", 0.0))
-                d_end = float(d_seg.get("end", d_start))
-
-                # Check strict time-boundary overlap with this specific turn
-                overlap = min(sec_end, d_end) - max(sec_start, d_start)
-                if overlap <= 0.001:
-                    continue
-
-                # Find which transcript segment in this turn the diarization segment best overlaps
-                best_seg_idx = None
-                best_seg_overlap = 0.0
-
-                for s_idx in section_indices:
-                    t_seg = segments[s_idx]
-                    t_start = float(t_seg.get("start", 0.0))
-                    t_end = float(t_seg.get("end", t_start))
-                    cur_overlap = min(t_end, d_end) - max(t_start, d_start)
-                    if cur_overlap > best_seg_overlap:
-                        best_seg_overlap = cur_overlap
-                        best_seg_idx = s_idx
-
-                if best_seg_idx in section_indices_set:
-                    d_seg["speaker"] = new_diar_speaker
-                    updated_diar = True
-
-            if updated_diar:
-                self._diar_index_key = None
+        self._diar_index_key = None
 
         if before_state is not None and hasattr(self, "_commit_project_state_change"):
             self._commit_project_state_change(
                 before_state,
-                f"Remove Speaker Label: {removed_name} → {target_name} (turn at #{seg_idx + 1})"
+                f"Remove Speaker Label: {removed_name} → {target_name}"
             )
 
         self.log_activity(
@@ -683,7 +638,7 @@ class TranscriptStoryMixin:
         )
         self.save_project()
         self.render_transcript()
-        self.statusBar().showMessage(f"Removed '{removed_name}' label at {format_time(segments[seg_idx].get('start', 0))}.")
+        self.statusBar().showMessage(f"Merged into '{target_name}'.")
         return True
 
     def merge_contiguous_speaker_segments(self):

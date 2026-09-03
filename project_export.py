@@ -1534,6 +1534,10 @@ class ProjectExportMixin:
         if session.get("video_preview_visible") and self.current_media_is_video and self.video_preview_action:
             self.video_preview_action.setChecked(False)
             self.toggle_video_preview(True)
+
+        # Remember this project so launch startup and recent projects track it reliably
+        self._remember_saved_project(str(project_path))
+
         self.statusBar().showMessage("Project loaded.")
         return True
 
@@ -2622,6 +2626,16 @@ class ProjectExportMixin:
             sys.excepthook = self._original_excepthook
         except Exception:
             pass
+
+        # QSettings writes made during this session (a project just saved,
+        # a Preferences change) are not guaranteed to reach disk on their
+        # own during interpreter shutdown -- force a flush now, while the
+        # app is still fully alive, so the next launch sees them.
+        try:
+            if getattr(self, "settings_store", None) is not None:
+                self.settings_store.sync()
+        except Exception as exc:
+            self.log_activity(f"[WARNING] Settings sync failed: {exc}", mark_dirty=False)
 
         self.log_activity("[SYSTEM] Application shutdown cleanup complete.")
         event.accept()

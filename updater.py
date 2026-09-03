@@ -55,7 +55,7 @@ try:
     )
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "1.6"
+    PROJECT_VERSION = "1.6.1"
     DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
     INTERNAL_APP_ID = "RadioTVStorySegmenter"
 
@@ -241,8 +241,11 @@ def launch_and_install(file_path: str, parent: QWidget | None = None) -> bool:
 
     if sys.platform == "win32":
         try:
-            # Launch Inno Setup or executable installer
-            subprocess.Popen([str(path)], shell=True)
+            # Launch Inno Setup or executable installer. shell=True is not
+            # needed to start an executable directly and cmd.exe's quoting
+            # doesn't fully protect paths containing shell-special
+            # characters, so launch it without a shell.
+            subprocess.Popen([str(path)])
             return True
         except Exception as exc:
             if parent:
@@ -662,6 +665,18 @@ class CheckUpdateDialog(QDialog):
         QDesktopServices.openUrl(QUrl(url))
 
     def _handle_close(self):
+        # If the initial GitHub check is still running, detach its signals
+        # before closing. The network call it's waiting on can take up to
+        # its own timeout to return, so we don't block the UI on it here --
+        # but without disconnecting, it would otherwise emit into slots on
+        # this dialog after Qt has already torn it down.
+        if self.check_worker and self.check_worker.isRunning():
+            try:
+                self.check_worker.update_available.disconnect(self._on_update_available)
+                self.check_worker.up_to_date.disconnect(self._on_up_to_date)
+                self.check_worker.error.disconnect(self._on_check_error)
+            except Exception:
+                pass
         if self.download_worker and self.download_worker.isRunning():
             self.download_worker.cancel()
             self.download_worker.wait(2000)

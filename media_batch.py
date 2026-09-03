@@ -381,6 +381,10 @@ class MediaBatchMixin:
                     if item and item != resolved:
                         recent.append(item)
                 self.settings_store.setValue("recent_projects", json.dumps(recent[:10]))
+                # Flush now rather than relying on QSettings' own timing --
+                # this is the exact write "restore last project" depends on,
+                # so it needs to reliably survive an app close shortly after.
+                self.settings_store.sync()
                 if hasattr(self, "_refresh_recent_projects_menu"):
                     self._refresh_recent_projects_menu()
         except Exception:
@@ -442,6 +446,24 @@ class MediaBatchMixin:
         raw = str(self.settings_store.value("last_saved_project_path", "") or "")
         path = Path(raw) if raw else None
         valid_last = bool(path and path.exists() and path.is_file() and path.suffix.lower() == ".json")
+
+        # If last_saved_project_path is missing or stale, fall back to the most recent entry from recent_projects
+        if not valid_last:
+            raw_recent = self.settings_store.value("recent_projects", [])
+            if isinstance(raw_recent, str):
+                try:
+                    raw_recent = json.loads(raw_recent)
+                except Exception:
+                    raw_recent = []
+            if isinstance(raw_recent, list):
+                for candidate in raw_recent:
+                    cand_path = Path(str(candidate))
+                    if cand_path.exists() and cand_path.is_file() and cand_path.suffix.lower() == ".json":
+                        path = cand_path
+                        valid_last = True
+                        self.settings_store.setValue("last_saved_project_path", str(path))
+                        self.settings_store.sync()
+                        break
 
         if mode == "prompt":
             if not valid_last:

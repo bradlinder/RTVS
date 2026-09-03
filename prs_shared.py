@@ -225,7 +225,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "1.6"
+PROJECT_VERSION = "1.6.1"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -813,7 +813,7 @@ def transcript_text_view_stylesheet(mode):
 class InteractiveTranscriptEdit(QTextEdit):
     linkClicked = Signal(QUrl)
     editingModeChanged = Signal(bool)
-    requestInsertSpeaker = Signal(str)
+    requestInsertSpeaker = Signal(int, float, str)
     requestSplitAtCursor = Signal(int, float)
     requestRemoveSpeakerAtBlock = Signal(int)
 
@@ -888,14 +888,7 @@ class InteractiveTranscriptEdit(QTextEdit):
         super().mousePressEvent(event)
 
     def _nearest_word_anchor(self, cursor):
-        """Return the word anchor nearest the actual QTextDocument cursor.
-
-        The old implementation used a hand-built character-position map.
-        That map can drift from Qt's real document positions because HTML
-        entities, paragraph boundaries and rich-text formatting do not map
-        one-for-one to source characters.  The rendered word anchors are the
-        authoritative positions, so use their real QTextDocument ranges.
-        """
+        """Return the word anchor nearest the actual QTextDocument cursor."""
         pos = cursor.position()
         best = None
         best_distance = None
@@ -916,18 +909,61 @@ class InteractiveTranscriptEdit(QTextEdit):
                         best_distance = distance
                     except ValueError:
                         pass
+
+        # Fallback to char_timestamp_map if anchor_ranges has no match
+        if best is None and getattr(self, "char_timestamp_map", None):
+            for entry in self.char_timestamp_map:
+                c_start, c_end = entry[0], entry[1]
+                ts = entry[2]
+                s_idx = entry[4] if len(entry) >= 5 else None
+                if c_start <= pos <= c_end and s_idx is not None:
+                    return (float(ts), int(s_idx), f"word:{ts}:{s_idx}")
+
         return best
 
     def get_timestamp_at_cursor(self, cursor):
         nearest = self._nearest_word_anchor(cursor)
         if nearest is not None:
             return nearest[0]
+        # Search the current block in the document for any anchor
+        block = cursor.block()
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            if frag.isValid():
+                href = frag.charFormat().anchorHref()
+                if href and href.startswith("word:"):
+                    parts = href.split(":")
+                    if len(parts) >= 2:
+                        try:
+                            return float(parts[1])
+                        except ValueError:
+                            pass
+            it += 1
         main_win = self.window()
         return getattr(main_win, "current_position", 0.0)
 
     def get_segment_index_at_cursor(self, cursor):
         nearest = self._nearest_word_anchor(cursor)
-        return nearest[1] if nearest is not None else None
+        if nearest is not None:
+            return nearest[1]
+        # Search current block for segment index
+        block = cursor.block()
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            if frag.isValid():
+                href = frag.charFormat().anchorHref()
+                if href and href.startswith("word:"):
+                    parts = href.split(":")
+                    if len(parts) >= 3 and parts[2].isdigit():
+                        return int(parts[2])
+                elif href and href.startswith("speaker:"):
+                    parts = href.split(":")
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        return int(parts[1])
+            it += 1
+        return None
 
     def move_cursor_to_segment_start(self, seg_idx):
         """Best-effort: places the caret at the first word of seg_idx after
@@ -1075,15 +1111,25 @@ class InteractiveTranscriptEdit(QTextEdit):
             menu.addSeparator()
 
         insert_menu = menu.addMenu("Add Speaker Label Here")
+        target_cursor = hit_cursor
+        target_seg_idx = self.get_segment_index_at_cursor(target_cursor)
+        if target_seg_idx is None:
+            target_seg_idx = target_cursor.blockNumber()
+        target_time = self.get_timestamp_at_cursor(target_cursor)
+
         known_speakers = []
         if hasattr(main_win, "get_all_known_speakers"):
             known_speakers = main_win.get_all_known_speakers()
         for spk in known_speakers:
             action = insert_menu.addAction(spk)
-            action.triggered.connect(lambda _, name=spk: self.requestInsertSpeaker.emit(name))
+            action.triggered.connect(
+                lambda _, s=target_seg_idx, t=target_time, name=spk: self.requestInsertSpeaker.emit(s, t, name)
+            )
         insert_menu.addSeparator()
         new_spk_action = insert_menu.addAction("Add New Speaker...")
-        new_spk_action.triggered.connect(lambda: self.requestInsertSpeaker.emit("__NEW__"))
+        new_spk_action.triggered.connect(
+            lambda _, s=target_seg_idx, t=target_time: self.requestInsertSpeaker.emit(s, t, "__NEW__")
+        )
 
         if not self.is_editing_mode:
             add_vocab = QAction("Add Selected Text to Glossary", self)
@@ -1308,7 +1354,7 @@ class StoryAutoDetectWorker(QObject):
             # Story detection currently uses faster-whisper solely for its VAD-enabled
             # speech segmentation. Hardware selection is intentionally not exposed yet.
             self.progress.emit("[Step 1/3] Loading CPU Voice Activity Detection (Whisper VAD)...", 20)
-            model = WhisperModel("tiny", device="cpu", compute_type="int8")
+            model = WhisperModel("tiny", device="cpu", compute_type="int8", download_root=str(get_models_storage_dir()))
 
             if self._is_cancelled:
                 self.error.emit("Process canceled by user.")

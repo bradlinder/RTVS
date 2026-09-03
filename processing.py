@@ -26,6 +26,7 @@ from prs_shared import (
     SelectStoriesCommand,
     StoryAutoDetectWorker,
     format_time,
+    get_models_storage_dir,
     register_process,     
     unregister_process,
 )
@@ -503,6 +504,23 @@ class ProcessingMixin:
         return "cancel"
 
     def _worker_command(self, args):
+        """Return (executable, args, env_overrides) for the local AI worker,
+        with HF_HOME always pointed at the user's configured model storage
+        directory (Preferences > Processing).
+
+        The worker subprocess intentionally does not import prs_shared/Qt to
+        stay lightweight, so it can only learn the configured model
+        directory via an inherited environment variable -- this is computed
+        here, in the already-running main app, where QSettings access is
+        always safe, rather than at process bootstrap before QApplication
+        exists.
+        """
+        executable, worker_args, env_overrides = self._resolve_worker_command(args)
+        env_overrides = dict(env_overrides or {})
+        env_overrides.setdefault("HF_HOME", str(get_models_storage_dir() / "huggingface"))
+        return executable, worker_args, env_overrides
+
+    def _resolve_worker_command(self, args):
         """Return (executable, args, env_overrides) for the local AI worker.
 
         Source builds launch the Python worker script. Frozen/installed builds
@@ -540,6 +558,7 @@ class ProcessingMixin:
                 raise RuntimeError(f"Could not initialize the {feature} runtime environment.")
             return runtime_mgr.get_executable(feature), [str(helper), *args], {}
         return sys.executable, [str(helper), *args], {}
+
 
     def _apply_worker_env_overrides(self, process, env_overrides):
         """Applies extra environment variables (e.g. GPU device selection)
