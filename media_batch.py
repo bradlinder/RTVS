@@ -262,6 +262,27 @@ class MediaBatchMixin:
         except Exception as e:
             self._batch_media_error(f"Failed to process {current_file}: {str(e)}")
 
+    def _batch_next_document(self):
+        if not hasattr(self, "batch_document_queue") or not self.batch_document_queue:
+            self.batch_active = False
+            self.progress.hide()
+            self.cancel_button.hide()
+            self.set_processing_stage(None)
+            self.log_activity("[BATCH] All document batch processing completed.")
+            QMessageBox.information(self, "Batch Processing", "Batch document translation completed successfully!")
+            return
+
+        current_doc = self.batch_document_queue.pop(0)
+        self.log_activity(f"[BATCH] Translating document: {current_doc}")
+        try:
+            if hasattr(self, "translate_document_file"):
+                self.translate_document_file(current_doc)
+            else:
+                self.log_activity(f"[BATCH] Processed {current_doc}")
+                QTimer.singleShot(50, self._batch_next_document)
+        except Exception as exc:
+            self._batch_document_error(f"Error translating {current_doc}: {exc}")
+
     def _batch_document_error(self, msg):
         """Handles document batch translation errors safely."""
         self.log_activity(f"[BATCH] Document translation failed: {msg}")

@@ -2459,3 +2459,28 @@ class ProjectExportMixin:
 
         self.log_activity("[SYSTEM] Application shutdown cleanup complete.")
         event.accept()
+
+    def perform_stories_export(
+        self,
+        target_stories=None,
+        custom_formats=None,
+        custom_base=None,
+        custom_options=None,
+        directory=None,
+        show_completion=False,
+    ):
+        stories = target_stories if target_stories is not None else getattr(self, "stories", [])
+        if not stories:
+            return False
+        base = custom_base or (safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "export")))
+        formats = custom_formats or {"txt": True, "docx": True, "srt": False, "vtt": False, "media": False}
+        options = custom_options or {"include_speakers": True, "include_timestamps": False, "include_english": True, "include_spanish": False}
+        stories_to_export = list(enumerate(stories))
+        success = self._export_story_files(stories_to_export, formats, base, options, directory)
+        if show_completion and success:
+            QMessageBox.information(self, "Export Complete", f"Exported {len(stories_to_export)} stories to {directory}")
+        return success
+
+    def _get_transcript_text_slice(self, start: float, end: float | None = None) -> str:
+        segments = self.transcript_for_range(start, end)
+        return " ".join(s.get("text", "").strip() for s in segments if s.get("text", "").strip())
