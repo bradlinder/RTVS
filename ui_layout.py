@@ -380,10 +380,6 @@ class UiLayoutMixin:
 
         export_menu.addSeparator()
 
-        wp_settings_act = QAction("&WordPress Export Settings...", self)
-        wp_settings_act.triggered.connect(self._open_wp_settings)
-        export_menu.addAction(wp_settings_act)
-
         file_menu.addSeparator()
 
         exit_act = QAction("E&xit", self)
@@ -504,7 +500,7 @@ class UiLayoutMixin:
         self.batch_processing_action.triggered.connect(self.open_batch_processing_dialog)
         tools_menu.addAction(self.batch_processing_action)
 
-        # ==========================================
+       # ==========================================
         # Settings Menu
         # ==========================================
         settings_menu = menubar.addMenu("&Settings")
@@ -512,6 +508,10 @@ class UiLayoutMixin:
         pref_act = QAction("&Preferences...", self)
         pref_act.triggered.connect(self.open_preferences_dialog)
         settings_menu.addAction(pref_act)
+
+        wp_settings_act = QAction("&WordPress Export Settings...", self)
+        wp_settings_act.triggered.connect(self._open_wp_settings)
+        settings_menu.addAction(wp_settings_act)
 
         self.translation_model_action = QAction("&Manage AI Models...", self)
         self.translation_model_action.triggered.connect(self.open_translation_model_manager)
@@ -524,23 +524,6 @@ class UiLayoutMixin:
         glossary_act = QAction("&Glossary & Custom Vocabulary...", self)
         glossary_act.triggered.connect(self.open_glossary_dialog)
         settings_menu.addAction(glossary_act)
-
-        settings_menu.addSeparator()
-
-        startup_menu = settings_menu.addMenu("&Startup Project Mode")
-        self.startup_new_action = QAction("Start with &New Project", self, checkable=True)
-        self.startup_new_action.triggered.connect(lambda: self.set_startup_project_mode("new"))
-        startup_menu.addAction(self.startup_new_action)
-
-        self.startup_last_action = QAction("Reopen &Last Saved Project", self, checkable=True)
-        self.startup_last_action.triggered.connect(lambda: self.set_startup_project_mode("last"))
-        startup_menu.addAction(self.startup_last_action)
-
-        self.startup_prompt_action = QAction("Always &Prompt on Startup", self, checkable=True)
-        self.startup_prompt_action.triggered.connect(lambda: self.set_startup_project_mode("prompt"))
-        startup_menu.addAction(self.startup_prompt_action)
-
-        self._sync_startup_project_actions()
 
         settings_menu.addSeparator()
 
@@ -582,7 +565,11 @@ class UiLayoutMixin:
             label = path.name if path.name else str(path)
             act = QAction(label, self)
             act.setData(str(path))
-            act.triggered.connect(lambda checked=False, target=str(path): self.load_project(target))
+            act.triggered.connect(
+                lambda checked=False, target=str(path): self.load_project_file(
+                    target, prompt=True, preserve_media=False
+                )
+            )
             self.recent_menu.addAction(act)
 
     def _check_external_dependencies(self):
@@ -659,7 +646,7 @@ class UiLayoutMixin:
             "Project Files (*.json);;All Files (*.*)",
         )
         if file_path:
-            self.load_project(file_path)
+            self.load_project_file(file_path, prompt=True, preserve_media=False)
 
     def open_find_dialog(self):
         """Display the Find and Replace dialog window."""
