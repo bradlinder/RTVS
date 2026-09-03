@@ -58,7 +58,8 @@ class UiLayoutMixin:
         # -----------------------------------------------------------
         # Top Panel: Playback, Time, Save, Status, and Progress Bar
         # -----------------------------------------------------------
-        top_panel = QWidget(self)
+        self.top_panel = QWidget(self)
+        top_panel = self.top_panel
         top_layout = QVBoxLayout(top_panel)
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(4)
@@ -130,7 +131,8 @@ class UiLayoutMixin:
         splitter.setChildrenCollapsible(False)
 
         # Left Container: Search Header + Interactive Transcript
-        left_widget = QWidget(self)
+        self.transcript_panel = QWidget(self)
+        left_widget = self.transcript_panel
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(6)
@@ -177,7 +179,8 @@ class UiLayoutMixin:
         right_layout.setSpacing(6)
 
         # Stories Box
-        stories_box = QGroupBox("Stories & Segments", self)
+        self.stories_panel = QGroupBox("Stories & Segments", self)
+        stories_box = self.stories_panel
         stories_box_layout = QVBoxLayout(stories_box)
         stories_box_layout.setContentsMargins(6, 8, 6, 6)
         stories_box_layout.setSpacing(4)
@@ -238,7 +241,8 @@ class UiLayoutMixin:
         right_layout.addWidget(stories_box, 2)
 
         # Activity / History Box
-        activity_box = QGroupBox("Activity History & Recovery", self)
+        self.activity_panel = QGroupBox("Activity History & Recovery", self)
+        activity_box = self.activity_panel
         activity_box_layout = QVBoxLayout(activity_box)
         activity_box_layout.setContentsMargins(6, 8, 6, 6)
         activity_box_layout.setSpacing(4)
@@ -303,21 +307,19 @@ class UiLayoutMixin:
         # ==========================================
         file_menu = menubar.addMenu("&File")
 
+        # 1. Media Input
         open_media_act = QAction("&Open Media...", self)
         open_media_act.setShortcut(QKeySequence.Open)
         open_media_act.triggered.connect(self.open_media)
         file_menu.addAction(open_media_act)
 
-        open_doc_act = QAction("Open &Document for Translation...", self)
+        open_doc_act = QAction("Open &Document...", self)
         open_doc_act.triggered.connect(self.open_document)
         file_menu.addAction(open_doc_act)
 
-        batch_act = QAction("&Batch Processing...", self)
-        batch_act.triggered.connect(self.open_batch_processing_dialog)
-        file_menu.addAction(batch_act)
-
         file_menu.addSeparator()
 
+        # 2. Project Creation & Loading
         new_proj_act = QAction("&New Project", self)
         new_proj_act.setShortcut(QKeySequence.New)
         new_proj_act.triggered.connect(self.new_project)
@@ -328,6 +330,17 @@ class UiLayoutMixin:
         open_proj_act.triggered.connect(self.open_project_dialog)
         file_menu.addAction(open_proj_act)
 
+        self.recent_menu = file_menu.addMenu("Recent Projects")
+        self._refresh_recent_projects_menu()
+
+        close_proj_act = QAction("&Close Project", self)
+        close_proj_act.setShortcut(QKeySequence("Ctrl+W"))
+        close_proj_act.triggered.connect(self.close_project)
+        file_menu.addAction(close_proj_act)
+
+        file_menu.addSeparator()
+
+        # 3. Project Persistence
         self.save_action = QAction("&Save Project", self)
         self.save_action.setShortcut(QKeySequence.Save)
         self.save_action.triggered.connect(self.save_project)
@@ -338,19 +351,22 @@ class UiLayoutMixin:
         self.save_as_action.triggered.connect(self.save_project_as)
         file_menu.addAction(self.save_as_action)
 
-        self.recent_menu = file_menu.addMenu("Recent Projects")
-        self._refresh_recent_projects_menu()
-
         file_menu.addSeparator()
 
-        # Export Submenu
+        # 4. Export & Batch Processing
         export_act = QAction("&Export...", self)
         export_act.setShortcut(QKeySequence("Ctrl+E"))
         export_act.triggered.connect(self.open_unified_export_dialog)
         file_menu.addAction(export_act)
 
+        batch_act = QAction("&Batch Processing...", self)
+        batch_act.setShortcut(QKeySequence("Ctrl+Shift+B"))
+        batch_act.triggered.connect(self.open_batch_processing_dialog)
+        file_menu.addAction(batch_act)
+
         file_menu.addSeparator()
 
+        # 5. Application Exit
         exit_act = QAction("E&xit", self)
         exit_act.setShortcut(QKeySequence.Quit)
         exit_act.triggered.connect(self.close)
@@ -381,33 +397,70 @@ class UiLayoutMixin:
         # ==========================================
         view_menu = menubar.addMenu("&View")
 
-        self.show_waveform_action = QAction("Show &Waveform on Timeline", self, checkable=True)
-        self.show_waveform_action.setChecked(getattr(self, "timeline_show_waveform", True))
-        self.show_waveform_action.toggled.connect(self.toggle_waveform_view)
-        view_menu.addAction(self.show_waveform_action)
+        # Main Panel Visibility Toggles
+        self.toggle_timeline_action = QAction("&Timeline Panel", self, checkable=True)
+        self.toggle_timeline_action.setShortcut(QKeySequence("Alt+1"))
+        self.toggle_timeline_action.setChecked(True)
+        self.toggle_timeline_action.toggled.connect(lambda checked: self.top_panel.setVisible(checked))
+        view_menu.addAction(self.toggle_timeline_action)
 
-        self.show_thumbnails_action = QAction("Show Video &Thumbnails on Timeline", self, checkable=True)
-        self.show_thumbnails_action.setChecked(getattr(self, "timeline_show_thumbnails", True))
-        self.show_thumbnails_action.toggled.connect(self.toggle_thumbnail_view)
-        view_menu.addAction(self.show_thumbnails_action)
+        self.toggle_transcript_action = QAction("&Transcript Panel", self, checkable=True)
+        self.toggle_transcript_action.setShortcut(QKeySequence("Alt+2"))
+        self.toggle_transcript_action.setChecked(True)
+        self.toggle_transcript_action.toggled.connect(lambda checked: self.transcript_panel.setVisible(checked))
+        view_menu.addAction(self.toggle_transcript_action)
 
-        self.video_preview_action = QAction("&Video Preview Window", self, checkable=True)
-        self.video_preview_action.setShortcut(QKeySequence("Ctrl+P"))
-        self.video_preview_action.setEnabled(False)
-        self.video_preview_action.toggled.connect(self.toggle_video_preview)
-        view_menu.addAction(self.video_preview_action)
+        self.toggle_stories_action = QAction("&Stories Panel", self, checkable=True)
+        self.toggle_stories_action.setShortcut(QKeySequence("Alt+3"))
+        self.toggle_stories_action.setChecked(True)
+        self.toggle_stories_action.toggled.connect(lambda checked: self.stories_panel.setVisible(checked))
+        view_menu.addAction(self.toggle_stories_action)
+
+        self.toggle_activity_action = QAction("&Activity History Panel", self, checkable=True)
+        self.toggle_activity_action.setShortcut(QKeySequence("Alt+4"))
+        self.toggle_activity_action.setChecked(True)
+        self.toggle_activity_action.toggled.connect(lambda checked: self.activity_panel.setVisible(checked))
+        view_menu.addAction(self.toggle_activity_action)
 
         view_menu.addSeparator()
 
+        # 1. Timeline Submenu
+        timeline_menu = view_menu.addMenu("&Timeline")
+
+        self.show_waveform_action = QAction("Show &Waveform", self, checkable=True)
+        self.show_waveform_action.setShortcut(QKeySequence("Ctrl+Alt+W"))
+        self.show_waveform_action.setChecked(getattr(self, "timeline_show_waveform", True))
+        self.show_waveform_action.toggled.connect(self.toggle_waveform_view)
+        timeline_menu.addAction(self.show_waveform_action)
+
+        self.show_thumbnails_action = QAction("Show Video &Thumbnails", self, checkable=True)
+        self.show_thumbnails_action.setShortcut(QKeySequence("Ctrl+Alt+T"))
+        self.show_thumbnails_action.setChecked(getattr(self, "timeline_show_thumbnails", True))
+        self.show_thumbnails_action.toggled.connect(self.toggle_thumbnail_view)
+        timeline_menu.addAction(self.show_thumbnails_action)
+
+        timeline_menu.addSeparator()
+
+        self.video_preview_action = QAction("&Video Preview Window", self, checkable=True)
+        self.video_preview_action.setShortcut(QKeySequence("Ctrl+Shift+M"))
+        self.video_preview_action.setEnabled(False)
+        self.video_preview_action.toggled.connect(self.toggle_video_preview)
+        timeline_menu.addAction(self.video_preview_action)
+
+        # 2. Transcript Submenu
+        transcript_menu = view_menu.addMenu("T&ranscript")
+
         self.show_speaker_labels_action = QAction("Show &Speaker Labels", self, checkable=True)
+        self.show_speaker_labels_action.setShortcut(QKeySequence("Ctrl+Alt+S"))
         self.show_speaker_labels_action.setChecked(getattr(self, "show_speaker_labels", True))
         self.show_speaker_labels_action.toggled.connect(self.toggle_speaker_labels)
-        view_menu.addAction(self.show_speaker_labels_action)
+        transcript_menu.addAction(self.show_speaker_labels_action)
 
-        self.show_timestamps_action = QAction("Show &Timestamps", self, checkable=True)
+        self.show_timestamps_action = QAction("Show T&imestamps", self, checkable=True)
+        self.show_timestamps_action.setShortcut(QKeySequence("Ctrl+Alt+I"))
         self.show_timestamps_action.setChecked(getattr(self, "show_timestamps", True))
         self.show_timestamps_action.toggled.connect(self.toggle_timestamps)
-        view_menu.addAction(self.show_timestamps_action)
+        transcript_menu.addAction(self.show_timestamps_action)
 
         view_menu.addSeparator()
 
@@ -475,6 +528,7 @@ class UiLayoutMixin:
         settings_menu = menubar.addMenu("&Settings")
 
         pref_act = QAction("&Preferences...", self)
+        pref_act.setShortcut(QKeySequence("Ctrl+P"))
         pref_act.triggered.connect(self.open_preferences_dialog)
         settings_menu.addAction(pref_act)
 
@@ -504,6 +558,13 @@ class UiLayoutMixin:
         # Help Menu
         # ==========================================
         help_menu = menubar.addMenu("&Help")
+
+        shortcuts_act = QAction("&Keyboard Shortcuts", self)
+        shortcuts_act.setShortcut(QKeySequence("F1"))
+        shortcuts_act.triggered.connect(self.show_shortcuts_dialog)
+        help_menu.addAction(shortcuts_act)
+
+        help_menu.addSeparator()
 
         about_act = QAction("&About Radio & TV Story Segmenter", self)
         about_act.triggered.connect(self.show_about_dialog)
@@ -642,3 +703,99 @@ class UiLayoutMixin:
             else:
                 self.transcript_mode_toggle_btn.setText("Viewing Mode")
                 self.transcript_mode_toggle_btn.setStyleSheet("")
+
+    def show_shortcuts_dialog(self):
+        """Display a searchable or structured reference table of all active shortcuts."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Keyboard Shortcuts")
+        dialog.resize(600, 520)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        browser = QTextBrowser(dialog)
+        browser.setOpenExternalLinks(False)
+        browser.setStyleSheet("""
+            QTextBrowser {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+                font-size: 13px;
+                padding: 10px;
+            }
+        """)
+
+        html_content = """
+        <style>
+            table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+            th { text-align: left; padding: 6px 8px; border-bottom: 2px solid #555; }
+            td { padding: 5px 8px; border-bottom: 1px solid #333; }
+            kbd {
+                background-color: #2b303c;
+                border: 1px solid #4f5666;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-family: monospace;
+                font-size: 12px;
+                color: #e6edf3;
+            }
+            h3 { margin-top: 14px; margin-bottom: 6px; color: #58a6ff; }
+        </style>
+
+        <h3>Playback & Navigation</h3>
+        <table>
+            <tr><td><b>Play / Pause</b></td><td><kbd>Space</kbd> or <kbd>Media Play/Pause</kbd></td></tr>
+            <tr><td><b>Skip Backward / Forward</b></td><td><kbd>Left</kbd> / <kbd>Right</kbd></td></tr>
+            <tr><td><b>Seek to Start / End</b></td><td><kbd>Home</kbd> / <kbd>End</kbd></td></tr>
+            <tr><td><b>Zoom In / Out on Timeline</b></td><td><kbd>+</kbd> / <kbd>-</kbd> or <kbd>Mouse Wheel</kbd></td></tr>
+            <tr><td><b>Pan Timeline View</b></td><td><kbd>Shift + Wheel</kbd> or <kbd>Middle-Click Drag</kbd></td></tr>
+        </table>
+
+        <h3>File & Project</h3>
+        <table>
+            <tr><td><b>New Project</b></td><td><kbd>Ctrl+N</kbd></td></tr>
+            <tr><td><b>Open Media File</b></td><td><kbd>Ctrl+O</kbd></td></tr>
+            <tr><td><b>Open Project Session</b></td><td><kbd>Ctrl+Shift+O</kbd></td></tr>
+            <tr><td><b>Close Project Session</b></td><td><kbd>Ctrl+W</kbd></td></tr>
+            <tr><td><b>Save Project</b></td><td><kbd>Ctrl+S</kbd></td></tr>
+            <tr><td><b>Save Project As...</b></td><td><kbd>Ctrl+Shift+S</kbd></td></tr>
+            <tr><td><b>Export Dialog</b></td><td><kbd>Ctrl+E</kbd></td></tr>
+            <tr><td><b>Batch Processing</b></td><td><kbd>Ctrl+Shift+B</kbd></td></tr>
+            <tr><td><b>Preferences</b></td><td><kbd>Ctrl+P</kbd></td></tr>
+            <tr><td><b>Exit Application</b></td><td><kbd>Ctrl+Q</kbd></td></tr>
+        </table>
+
+        <h3>Panels & Views</h3>
+        <table>
+            <tr><td><b>Toggle Timeline Panel</b></td><td><kbd>Alt+1</kbd></td></tr>
+            <tr><td><b>Toggle Transcript Panel</b></td><td><kbd>Alt+2</kbd></td></tr>
+            <tr><td><b>Toggle Stories Panel</b></td><td><kbd>Alt+3</kbd></td></tr>
+            <tr><td><b>Toggle Activity History Panel</b></td><td><kbd>Alt+4</kbd></td></tr>
+            <tr><td><b>Toggle Waveform Display</b></td><td><kbd>Ctrl+Alt+W</kbd></td></tr>
+            <tr><td><b>Toggle Video Thumbnails</b></td><td><kbd>Ctrl+Alt+T</kbd></td></tr>
+            <tr><td><b>Toggle Video Preview Window</b></td><td><kbd>Ctrl+Shift+M</kbd></td></tr>
+            <tr><td><b>Toggle Speaker Labels</b></td><td><kbd>Ctrl+Alt+S</kbd></td></tr>
+            <tr><td><b>Toggle Timestamps</b></td><td><kbd>Ctrl+Alt+I</kbd></td></tr>
+        </table>
+
+        <h3>Editing & Transcript</h3>
+        <table>
+            <tr><td><b>Undo / Redo</b></td><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd></td></tr>
+            <tr><td><b>Find and Replace</b></td><td><kbd>Ctrl+F</kbd></td></tr>
+            <tr><td><b>Find Next Match</b></td><td><kbd>Ctrl+G</kbd></td></tr>
+            <tr><td><b>Insert Speaker Break (Edit Mode)</b></td><td><kbd>Shift+Enter</kbd></td></tr>
+            <tr><td><b>Insert Timestamp Line (Edit Mode)</b></td><td><kbd>Enter</kbd></td></tr>
+            <tr><td><b>Exit Editing Mode</b></td><td><kbd>Esc</kbd></td></tr>
+            <tr><td><b>Keyboard Shortcuts Reference</b></td><td><kbd>F1</kbd></td></tr>
+        </table>
+        """
+
+        browser.setHtml(html_content)
+        layout.addWidget(browser)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+        button_box.rejected.connect(dialog.accept)
+        layout.addWidget(button_box)
+
+        dialog.exec()
