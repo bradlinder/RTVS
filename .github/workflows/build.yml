@@ -53,7 +53,7 @@ jobs:
       - name: Setup FFmpeg (Fast)
         uses: FedericoCarboni/setup-ffmpeg@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Inno Setup
         run: |
@@ -101,10 +101,36 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Setup FFmpeg (Fast)
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup FFmpeg (Static macOS Binaries)
+        run: |
+          ARCH=$(uname -m)
+          echo "Setting up FFmpeg for macOS ($ARCH)..."
+          mkdir -p "$HOME/bin" bin
+          
+          if [ "$ARCH" = "arm64" ]; then
+            FFMPEG_URL="https://github.com/Tyrrrz/FFmpegBin/releases/download/7.0.2/ffmpeg-osx-arm64.zip"
+          else
+            FFMPEG_URL="https://github.com/Tyrrrz/FFmpegBin/releases/download/7.0.2/ffmpeg-osx-x64.zip"
+          fi
+          
+          echo "Downloading static FFmpeg from $FFMPEG_URL..."
+          if curl -fsSL "$FFMPEG_URL" -o /tmp/ffmpeg.zip && unzip -q -o /tmp/ffmpeg.zip -d "$HOME/bin"; then
+            rm -f /tmp/ffmpeg.zip
+            chmod +x "$HOME/bin/ffmpeg" "$HOME/bin/ffprobe"
+            cp "$HOME/bin/ffmpeg" bin/ 2>/dev/null || true
+            cp "$HOME/bin/ffprobe" bin/ 2>/dev/null || true
+            echo "$HOME/bin" >> $GITHUB_PATH
+            export PATH="$HOME/bin:$PATH"
+          fi
+          
+          # Fallback to Homebrew if static binaries are not functional
+          if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+            echo "Falling back to Homebrew for FFmpeg..."
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
+            mkdir -p bin
+            cp "$(which ffmpeg)" bin/ 2>/dev/null || true
+            cp "$(which ffprobe)" bin/ 2>/dev/null || true
+          fi
 
       - name: Verify FFmpeg Tools
         run: |
