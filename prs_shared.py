@@ -342,6 +342,17 @@ def ffprobe_path() -> str | None:
     return find_bundled_executable("ffprobe")
 
 
+def platform_seq(key_str: str) -> QKeySequence:
+    """Return a QKeySequence adapted for macOS vs Windows/Linux.
+
+    - Replaces 'Ctrl+' with 'Meta+' (Command ⌘) on macOS.
+    - Leaves standard Ctrl/Shift/Alt unmodified on Windows/Linux.
+    """
+    if sys.platform == "darwin":
+        # Meta in Qt key strings corresponds to Command (⌘) on macOS
+        key_str = key_str.replace("Ctrl+", "Meta+")
+    return QKeySequence(key_str)
+    
 def get_app_icon() -> QIcon:
     """Return the application QIcon loaded from bundled resources or fallback to empty."""
     icon_paths = []

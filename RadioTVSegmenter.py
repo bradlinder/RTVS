@@ -196,7 +196,7 @@ class MainWindow(
         self._load_user_preferences()
         QTimer.singleShot(150, self.restore_last_opened)
 
-        self.shortcut_find_next = QShortcut(QKeySequence("Ctrl+G"), self)
+        self.shortcut_find_next = QShortcut(platform_seq("Ctrl+G"), self)
         self.shortcut_find_next.activated.connect(self.trigger_find_next)
 
         self.log_activity("[SYSTEM] Application initialized.")

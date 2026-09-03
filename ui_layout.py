@@ -7,6 +7,7 @@ interactive transcript editor, story segmentation panel, and search bar.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, QTimer, QSize
@@ -40,6 +41,7 @@ from prs_shared import (
     TimelineWidget,
     ffmpeg_path,
     format_time,
+    platform_seq,
     safe_filename,
 )
 
@@ -326,7 +328,7 @@ class UiLayoutMixin:
         file_menu.addAction(new_proj_act)
 
         open_proj_act = QAction("Open &Project...", self)
-        open_proj_act.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        open_proj_act.setShortcut(platform_seq("Ctrl+Shift+O"))
         open_proj_act.triggered.connect(self.open_project_dialog)
         file_menu.addAction(open_proj_act)
 
@@ -334,7 +336,7 @@ class UiLayoutMixin:
         self._refresh_recent_projects_menu()
 
         close_proj_act = QAction("&Close Project", self)
-        close_proj_act.setShortcut(QKeySequence("Ctrl+W"))
+        close_proj_act.setShortcut(QKeySequence.Close)
         close_proj_act.triggered.connect(self.close_project)
         file_menu.addAction(close_proj_act)
 
@@ -355,12 +357,12 @@ class UiLayoutMixin:
 
         # 4. Export & Batch Processing
         export_act = QAction("&Export...", self)
-        export_act.setShortcut(QKeySequence("Ctrl+E"))
+        export_act.setShortcut(platform_seq("Ctrl+E"))
         export_act.triggered.connect(self.open_unified_export_dialog)
         file_menu.addAction(export_act)
 
         batch_act = QAction("&Batch Processing...", self)
-        batch_act.setShortcut(QKeySequence("Ctrl+Shift+B"))
+        batch_act.setShortcut(platform_seq("Ctrl+Shift+B"))
         batch_act.triggered.connect(self.open_batch_processing_dialog)
         file_menu.addAction(batch_act)
 
@@ -397,27 +399,29 @@ class UiLayoutMixin:
         # ==========================================
         view_menu = menubar.addMenu("&View")
 
-        # Main Panel Visibility Toggles
+        # Main Panel Visibility Toggles (Alt+1-4 on Win/Linux, Ctrl+Alt+1-4 on Mac)
+        panel_mod = "Ctrl+Alt" if sys.platform == "darwin" else "Alt"
+
         self.toggle_timeline_action = QAction("&Timeline Panel", self, checkable=True)
-        self.toggle_timeline_action.setShortcut(QKeySequence("Alt+1"))
+        self.toggle_timeline_action.setShortcut(QKeySequence(f"{panel_mod}+1"))
         self.toggle_timeline_action.setChecked(True)
         self.toggle_timeline_action.toggled.connect(lambda checked: self.top_panel.setVisible(checked))
         view_menu.addAction(self.toggle_timeline_action)
 
         self.toggle_transcript_action = QAction("&Transcript Panel", self, checkable=True)
-        self.toggle_transcript_action.setShortcut(QKeySequence("Alt+2"))
+        self.toggle_transcript_action.setShortcut(QKeySequence(f"{panel_mod}+2"))
         self.toggle_transcript_action.setChecked(True)
         self.toggle_transcript_action.toggled.connect(lambda checked: self.transcript_panel.setVisible(checked))
         view_menu.addAction(self.toggle_transcript_action)
 
         self.toggle_stories_action = QAction("&Stories Panel", self, checkable=True)
-        self.toggle_stories_action.setShortcut(QKeySequence("Alt+3"))
+        self.toggle_stories_action.setShortcut(QKeySequence(f"{panel_mod}+3"))
         self.toggle_stories_action.setChecked(True)
         self.toggle_stories_action.toggled.connect(lambda checked: self.stories_panel.setVisible(checked))
         view_menu.addAction(self.toggle_stories_action)
 
         self.toggle_activity_action = QAction("&Activity History Panel", self, checkable=True)
-        self.toggle_activity_action.setShortcut(QKeySequence("Alt+4"))
+        self.toggle_activity_action.setShortcut(QKeySequence(f"{panel_mod}+4"))
         self.toggle_activity_action.setChecked(True)
         self.toggle_activity_action.toggled.connect(lambda checked: self.activity_panel.setVisible(checked))
         view_menu.addAction(self.toggle_activity_action)
@@ -428,13 +432,13 @@ class UiLayoutMixin:
         timeline_menu = view_menu.addMenu("&Timeline")
 
         self.show_waveform_action = QAction("Show &Waveform", self, checkable=True)
-        self.show_waveform_action.setShortcut(QKeySequence("Ctrl+Alt+W"))
+        self.show_waveform_action.setShortcut(platform_seq("Ctrl+Alt+W"))
         self.show_waveform_action.setChecked(getattr(self, "timeline_show_waveform", True))
         self.show_waveform_action.toggled.connect(self.toggle_waveform_view)
         timeline_menu.addAction(self.show_waveform_action)
 
         self.show_thumbnails_action = QAction("Show Video &Thumbnails", self, checkable=True)
-        self.show_thumbnails_action.setShortcut(QKeySequence("Ctrl+Alt+T"))
+        self.show_thumbnails_action.setShortcut(platform_seq("Ctrl+Alt+T"))
         self.show_thumbnails_action.setChecked(getattr(self, "timeline_show_thumbnails", True))
         self.show_thumbnails_action.toggled.connect(self.toggle_thumbnail_view)
         timeline_menu.addAction(self.show_thumbnails_action)
@@ -442,7 +446,7 @@ class UiLayoutMixin:
         timeline_menu.addSeparator()
 
         self.video_preview_action = QAction("&Video Preview Window", self, checkable=True)
-        self.video_preview_action.setShortcut(QKeySequence("Ctrl+Shift+M"))
+        self.video_preview_action.setShortcut(platform_seq("Ctrl+Shift+M"))
         self.video_preview_action.setEnabled(False)
         self.video_preview_action.toggled.connect(self.toggle_video_preview)
         timeline_menu.addAction(self.video_preview_action)
@@ -451,13 +455,13 @@ class UiLayoutMixin:
         transcript_menu = view_menu.addMenu("T&ranscript")
 
         self.show_speaker_labels_action = QAction("Show &Speaker Labels", self, checkable=True)
-        self.show_speaker_labels_action.setShortcut(QKeySequence("Ctrl+Alt+S"))
+        self.show_speaker_labels_action.setShortcut(platform_seq("Ctrl+Alt+S"))
         self.show_speaker_labels_action.setChecked(getattr(self, "show_speaker_labels", True))
         self.show_speaker_labels_action.toggled.connect(self.toggle_speaker_labels)
         transcript_menu.addAction(self.show_speaker_labels_action)
 
         self.show_timestamps_action = QAction("Show T&imestamps", self, checkable=True)
-        self.show_timestamps_action.setShortcut(QKeySequence("Ctrl+Alt+I"))
+        self.show_timestamps_action.setShortcut(platform_seq("Ctrl+Alt+I"))
         self.show_timestamps_action.setChecked(getattr(self, "show_timestamps", True))
         self.show_timestamps_action.toggled.connect(self.toggle_timestamps)
         transcript_menu.addAction(self.show_timestamps_action)
@@ -528,7 +532,8 @@ class UiLayoutMixin:
         settings_menu = menubar.addMenu("&Settings")
 
         pref_act = QAction("&Preferences...", self)
-        pref_act.setShortcut(QKeySequence("Ctrl+P"))
+        # QKeySequence.Preferences maps automatically to Cmd+, on macOS and Ctrl+, on Windows/Linux
+        pref_act.setShortcut(QKeySequence.Preferences)
         pref_act.triggered.connect(self.open_preferences_dialog)
         settings_menu.addAction(pref_act)
 
@@ -560,7 +565,8 @@ class UiLayoutMixin:
         help_menu = menubar.addMenu("&Help")
 
         shortcuts_act = QAction("&Keyboard Shortcuts", self)
-        shortcuts_act.setShortcut(QKeySequence("F1"))
+        # HelpContents maps to F1 on Windows/Linux, and Cmd+? on macOS (avoiding brightness key conflict)
+        shortcuts_act.setShortcut(QKeySequence.HelpContents)
         shortcuts_act.triggered.connect(self.show_shortcuts_dialog)
         help_menu.addAction(shortcuts_act)
 
@@ -710,7 +716,7 @@ class UiLayoutMixin:
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Keyboard Shortcuts")
-        dialog.resize(600, 520)
+        dialog.resize(620, 540)
 
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -726,12 +732,19 @@ class UiLayoutMixin:
             }
         """)
 
-        html_content = """
+        is_mac = sys.platform == "darwin"
+        cmd = "Cmd" if is_mac else "Ctrl"
+        opt = "Option" if is_mac else "Alt"
+        panel_mod = "Ctrl+Option" if is_mac else "Alt"
+        help_key = "Cmd+?" if is_mac else "F1"
+        pref_key = "Cmd+," if is_mac else "Ctrl+,"
+
+        html_content = f"""
         <style>
-            table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-            th { text-align: left; padding: 6px 8px; border-bottom: 2px solid #555; }
-            td { padding: 5px 8px; border-bottom: 1px solid #333; }
-            kbd {
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 16px; }}
+            th {{ text-align: left; padding: 6px 8px; border-bottom: 2px solid #555; }}
+            td {{ padding: 5px 8px; border-bottom: 1px solid #333; }}
+            kbd {{
                 background-color: #2b303c;
                 border: 1px solid #4f5666;
                 border-radius: 4px;
@@ -739,8 +752,8 @@ class UiLayoutMixin:
                 font-family: monospace;
                 font-size: 12px;
                 color: #e6edf3;
-            }
-            h3 { margin-top: 14px; margin-bottom: 6px; color: #58a6ff; }
+            }}
+            h3 {{ margin-top: 14px; margin-bottom: 6px; color: #58a6ff; }}
         </style>
 
         <h3>Playback & Navigation</h3>
@@ -754,40 +767,40 @@ class UiLayoutMixin:
 
         <h3>File & Project</h3>
         <table>
-            <tr><td><b>New Project</b></td><td><kbd>Ctrl+N</kbd></td></tr>
-            <tr><td><b>Open Media File</b></td><td><kbd>Ctrl+O</kbd></td></tr>
-            <tr><td><b>Open Project Session</b></td><td><kbd>Ctrl+Shift+O</kbd></td></tr>
-            <tr><td><b>Close Project Session</b></td><td><kbd>Ctrl+W</kbd></td></tr>
-            <tr><td><b>Save Project</b></td><td><kbd>Ctrl+S</kbd></td></tr>
-            <tr><td><b>Save Project As...</b></td><td><kbd>Ctrl+Shift+S</kbd></td></tr>
-            <tr><td><b>Export Dialog</b></td><td><kbd>Ctrl+E</kbd></td></tr>
-            <tr><td><b>Batch Processing</b></td><td><kbd>Ctrl+Shift+B</kbd></td></tr>
-            <tr><td><b>Preferences</b></td><td><kbd>Ctrl+P</kbd></td></tr>
-            <tr><td><b>Exit Application</b></td><td><kbd>Ctrl+Q</kbd></td></tr>
+            <tr><td><b>New Project</b></td><td><kbd>{cmd}+N</kbd></td></tr>
+            <tr><td><b>Open Media File</b></td><td><kbd>{cmd}+O</kbd></td></tr>
+            <tr><td><b>Open Project Session</b></td><td><kbd>{cmd}+Shift+O</kbd></td></tr>
+            <tr><td><b>Close Project Session</b></td><td><kbd>{cmd}+W</kbd></td></tr>
+            <tr><td><b>Save Project</b></td><td><kbd>{cmd}+S</kbd></td></tr>
+            <tr><td><b>Save Project As...</b></td><td><kbd>{cmd}+Shift+S</kbd></td></tr>
+            <tr><td><b>Export Dialog</b></td><td><kbd>{cmd}+E</kbd></td></tr>
+            <tr><td><b>Batch Processing</b></td><td><kbd>{cmd}+Shift+B</kbd></td></tr>
+            <tr><td><b>Preferences</b></td><td><kbd>{pref_key}</kbd></td></tr>
+            <tr><td><b>Exit Application</b></td><td><kbd>{cmd}+Q</kbd></td></tr>
         </table>
 
         <h3>Panels & Views</h3>
         <table>
-            <tr><td><b>Toggle Timeline Panel</b></td><td><kbd>Alt+1</kbd></td></tr>
-            <tr><td><b>Toggle Transcript Panel</b></td><td><kbd>Alt+2</kbd></td></tr>
-            <tr><td><b>Toggle Stories Panel</b></td><td><kbd>Alt+3</kbd></td></tr>
-            <tr><td><b>Toggle Activity History Panel</b></td><td><kbd>Alt+4</kbd></td></tr>
-            <tr><td><b>Toggle Waveform Display</b></td><td><kbd>Ctrl+Alt+W</kbd></td></tr>
-            <tr><td><b>Toggle Video Thumbnails</b></td><td><kbd>Ctrl+Alt+T</kbd></td></tr>
-            <tr><td><b>Toggle Video Preview Window</b></td><td><kbd>Ctrl+Shift+M</kbd></td></tr>
-            <tr><td><b>Toggle Speaker Labels</b></td><td><kbd>Ctrl+Alt+S</kbd></td></tr>
-            <tr><td><b>Toggle Timestamps</b></td><td><kbd>Ctrl+Alt+I</kbd></td></tr>
+            <tr><td><b>Toggle Timeline Panel</b></td><td><kbd>{panel_mod}+1</kbd></td></tr>
+            <tr><td><b>Toggle Transcript Panel</b></td><td><kbd>{panel_mod}+2</kbd></td></tr>
+            <tr><td><b>Toggle Stories Panel</b></td><td><kbd>{panel_mod}+3</kbd></td></tr>
+            <tr><td><b>Toggle Activity History Panel</b></td><td><kbd>{panel_mod}+4</kbd></td></tr>
+            <tr><td><b>Toggle Waveform Display</b></td><td><kbd>{cmd}+{opt}+W</kbd></td></tr>
+            <tr><td><b>Toggle Video Thumbnails</b></td><td><kbd>{cmd}+{opt}+T</kbd></td></tr>
+            <tr><td><b>Toggle Video Preview Window</b></td><td><kbd>{cmd}+Shift+M</kbd></td></tr>
+            <tr><td><b>Toggle Speaker Labels</b></td><td><kbd>{cmd}+{opt}+S</kbd></td></tr>
+            <tr><td><b>Toggle Timestamps</b></td><td><kbd>{cmd}+{opt}+I</kbd></td></tr>
         </table>
 
         <h3>Editing & Transcript</h3>
         <table>
-            <tr><td><b>Undo / Redo</b></td><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd></td></tr>
-            <tr><td><b>Find and Replace</b></td><td><kbd>Ctrl+F</kbd></td></tr>
-            <tr><td><b>Find Next Match</b></td><td><kbd>Ctrl+G</kbd></td></tr>
+            <tr><td><b>Undo / Redo</b></td><td><kbd>{cmd}+Z</kbd> / <kbd>{cmd}+Y</kbd></td></tr>
+            <tr><td><b>Find and Replace</b></td><td><kbd>{cmd}+F</kbd></td></tr>
+            <tr><td><b>Find Next Match</b></td><td><kbd>{cmd}+G</kbd></td></tr>
             <tr><td><b>Insert Speaker Break (Edit Mode)</b></td><td><kbd>Shift+Enter</kbd></td></tr>
             <tr><td><b>Insert Timestamp Line (Edit Mode)</b></td><td><kbd>Enter</kbd></td></tr>
             <tr><td><b>Exit Editing Mode</b></td><td><kbd>Esc</kbd></td></tr>
-            <tr><td><b>Keyboard Shortcuts Reference</b></td><td><kbd>F1</kbd></td></tr>
+            <tr><td><b>Keyboard Shortcuts Reference</b></td><td><kbd>{help_key}</kbd></td></tr>
         </table>
         """
 
