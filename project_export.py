@@ -1446,13 +1446,15 @@ class ProjectExportMixin:
         self.statusBar().showMessage("Project loaded.")
         return True
 
-    def load_project(self):
-        filename, _ = QFileDialog.getOpenFileName(
-            self, "Load Project", self._dialog_directory(),
-            "Project Files (*.json);;All Files (*)",
-        )
+    def load_project(self, filename=None):
+        if not filename:
+            filename, _ = QFileDialog.getOpenFileName(
+                self, "Load Project", self._dialog_directory(),
+                "Project Files (*.json);;All Files (*)",
+            )
         if filename:
-            self.load_project_file(filename, prompt=True, preserve_media=False)
+            return self.load_project_file(filename, prompt=True, preserve_media=False)
+        return False
 
     def trigger_export(self):
         """Standard trigger for Export (File menu Ctrl+E / toolbar)."""
