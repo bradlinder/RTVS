@@ -76,12 +76,14 @@ def transcribe(audio_file, model_name, initial_prompt=""):
                         "probability": float(w.probability)
                     })
 
-            formatted_segments.append({
+            seg_data = {
                 "start": float(seg.start),
                 "end": float(seg.end),
                 "text": seg.text.strip(),
-                "words": words
-            })
+                "words": words,
+            }
+            formatted_segments.append(seg_data)
+            emit("streaming_segment", segment=seg_data)
 
         output = {
             "text": " ".join([s["text"] for s in formatted_segments]),

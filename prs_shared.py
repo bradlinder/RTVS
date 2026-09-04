@@ -225,7 +225,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "1.6.1"
+PROJECT_VERSION = "1.63"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -833,17 +833,57 @@ class InteractiveTranscriptEdit(QTextEdit):
 
         self.char_timestamp_map = []
         self._context_menu_cursor_position = None
+
+        # Text selection state and preferences
+        self.selection_mode = "replace"  # "replace" or "keep"
+        self.saved_selections = []  # List of dicts for multi-selection mode
+        self._is_left_down = False
+        self._is_left_dragging = False
+        self._left_press_pos = None
+        self._pending_click_href = None
+        self._is_right_down = False
+        self._is_right_dragging = False
+        self._right_press_pos = None
+        self._right_press_cursor_pos = None
+        self._suppress_next_context_menu = False
+
         self.apply_theme_style("dark")
+
+    def set_selection_mode(self, mode):
+        self.selection_mode = mode if mode in ("replace", "keep") else "replace"
+        if self.selection_mode == "replace" and self.saved_selections:
+            self.saved_selections = []
+            self.update_extra_selections()
 
     def set_char_timestamp_map(self, mapping):
         self.char_timestamp_map = mapping
 
-    def get_selected_time_range(self):
+    def has_active_selection(self):
         cursor = self.textCursor()
-        if not cursor.hasSelection() or not self.char_timestamp_map:
+        if cursor.hasSelection() and (cursor.selectionEnd() - cursor.selectionStart() > 0):
+            return True
+        if getattr(self, "saved_selections", None) and len(self.saved_selections) > 0:
+            return True
+        return False
+
+    def clear_all_selections(self):
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            cursor.clearSelection()
+            self.setTextCursor(cursor)
+        self.saved_selections = []
+        self.setExtraSelections([])
+        main_win = self.window()
+        if hasattr(main_win, "timeline"):
+            main_win.timeline.set_transcript_selection_range(None, None)
+        if hasattr(main_win, "statusBar"):
+            main_win.statusBar().showMessage("Cleared transcript selection.")
+
+    def get_time_range_for_char_span(self, start_pos, end_pos):
+        if not self.char_timestamp_map:
             return None
-        start_pos = min(cursor.selectionStart(), cursor.selectionEnd())
-        end_pos = max(cursor.selectionStart(), cursor.selectionEnd())
+        s_pos = min(start_pos, end_pos)
+        e_pos = max(start_pos, end_pos)
         overlaps = []
         for item in self.char_timestamp_map:
             if len(item) >= 4:
@@ -851,15 +891,143 @@ class InteractiveTranscriptEdit(QTextEdit):
             else:
                 a, b, ts_start = item
                 ts_end = ts_start
-            if b > start_pos and a < end_pos:
+            if b > s_pos and a < e_pos:
                 overlaps.append((float(ts_start), float(ts_end)))
         if not overlaps:
             return None
         return min(x[0] for x in overlaps), max(x[1] for x in overlaps)
 
+    def get_selected_time_range(self):
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            s_pos = min(cursor.selectionStart(), cursor.selectionEnd())
+            e_pos = max(cursor.selectionStart(), cursor.selectionEnd())
+            res = self.get_time_range_for_char_span(s_pos, e_pos)
+            if res is not None:
+                return res
+        if getattr(self, "saved_selections", None):
+            return (
+                min(s["start_time"] for s in self.saved_selections),
+                max(s["end_time"] for s in self.saved_selections),
+            )
+        return None
+
+    def get_all_selected_story_ranges(self):
+        """Returns a list of dicts: [{'start_time': float, 'end_time': float, 'text': str, ...}, ...]"""
+        if self.selection_mode == "keep" and self.saved_selections:
+            return sorted(self.saved_selections, key=lambda x: x.get("start_time", 0.0))
+
+        cursor = self.textCursor()
+        if cursor.hasSelection() and (cursor.selectionEnd() - cursor.selectionStart() > 0):
+            s_pos = min(cursor.selectionStart(), cursor.selectionEnd())
+            e_pos = max(cursor.selectionStart(), cursor.selectionEnd())
+            t_range = self.get_time_range_for_char_span(s_pos, e_pos)
+            if not t_range:
+                main_win = self.window()
+                st = getattr(main_win, "current_position", 0.0)
+                t_range = (st, st + 5.0)
+            return [{
+                "start_char": s_pos,
+                "end_char": e_pos,
+                "start_time": t_range[0],
+                "end_time": t_range[1],
+                "text": cursor.selectedText().strip(),
+            }]
+        return []
+
+    def update_extra_selections(self):
+        if not hasattr(self, "saved_selections"):
+            self.saved_selections = []
+        if not self.saved_selections:
+            self.setExtraSelections([])
+            return
+
+        fmt = QTextCharFormat()
+        if getattr(self, "current_theme", "dark") == "light":
+            fmt.setBackground(QColor(186, 215, 255, 170))
+            fmt.setForeground(QColor(15, 23, 42))
+        else:
+            fmt.setBackground(QColor(40, 105, 215, 170))
+            fmt.setForeground(QColor(255, 255, 255))
+
+        extras = []
+        for sel in self.saved_selections:
+            extra = QTextEdit.ExtraSelection()
+            extra.format = fmt
+            cursor = QTextCursor(self.document())
+            cursor.setPosition(sel["start_char"])
+            cursor.setPosition(sel["end_char"], QTextCursor.MoveMode.KeepAnchor)
+            extra.cursor = cursor
+            extras.append(extra)
+
+        self.setExtraSelections(extras)
+
+    def _on_selection_completed(self, cursor):
+        if not cursor.hasSelection():
+            return
+        start_char = min(cursor.selectionStart(), cursor.selectionEnd())
+        end_char = max(cursor.selectionStart(), cursor.selectionEnd())
+        if end_char <= start_char:
+            return
+
+        t_range = self.get_time_range_for_char_span(start_char, end_char)
+        if not t_range:
+            main_win = self.window()
+            start_t = getattr(main_win, "current_position", 0.0)
+            end_t = start_t + 5.0
+            t_range = (start_t, end_t)
+
+        selected_text = cursor.selectedText().strip()
+
+        if self.selection_mode == "keep":
+            # Multi-selection mode: accumulate selections without clearing previous ones
+            merged = False
+            for s in self.saved_selections:
+                if not (end_char < s["start_char"] or start_char > s["end_char"]):
+                    s["start_char"] = min(s["start_char"], start_char)
+                    s["end_char"] = max(s["end_char"], end_char)
+                    merged_tr = self.get_time_range_for_char_span(s["start_char"], s["end_char"])
+                    if merged_tr:
+                        s["start_time"], s["end_time"] = merged_tr
+                    c = QTextCursor(self.document())
+                    c.setPosition(s["start_char"])
+                    c.setPosition(s["end_char"], QTextCursor.MoveMode.KeepAnchor)
+                    s["text"] = c.selectedText().strip()
+                    merged = True
+                    break
+            if not merged:
+                self.saved_selections.append({
+                    "start_char": start_char,
+                    "end_char": end_char,
+                    "start_time": t_range[0],
+                    "end_time": t_range[1],
+                    "text": selected_text
+                })
+
+            # Clear active cursor selection so extraSelections render clearly
+            temp_cursor = QTextCursor(cursor)
+            temp_cursor.clearSelection()
+            self.setTextCursor(temp_cursor)
+            self.update_extra_selections()
+
+            main_win = self.window()
+            if hasattr(main_win, "statusBar"):
+                count = len(self.saved_selections)
+                main_win.statusBar().showMessage(f"Selected {count} sections. Right-click or click 'Add Story' to save.")
+        else:
+            # Single selection mode: replace previous selection
+            self.saved_selections = []
+            self.setExtraSelections([])
+            main_win = self.window()
+            if hasattr(main_win, "timeline") and t_range:
+                main_win.timeline.set_transcript_selection_range(t_range[0], t_range[1])
+            if hasattr(main_win, "statusBar") and t_range:
+                main_win.statusBar().showMessage(f"Transcript selection: {format_time(t_range[0])} – {format_time(t_range[1])}")
+
     def apply_theme_style(self, mode):
         self.current_theme = mode
         self.setStyleSheet(transcript_text_view_stylesheet(mode))
+        self.update_extra_selections()
 
     def set_editing_mode(self, enabled):
         if self.is_editing_mode == enabled:
@@ -871,21 +1039,141 @@ class InteractiveTranscriptEdit(QTextEdit):
         self.editingModeChanged.emit(enabled)
 
     def mousePressEvent(self, event):
-        # In Viewing mode, left-click is strictly navigation.  It may seek
-        # through word/time anchors, but it must never open speaker-editing
-        # UI.  Speaker changes are deliberately a right-click operation.
-        if not self.is_editing_mode and event.button() == Qt.MouseButton.LeftButton:
-            cursor = self.cursorForPosition(event.position().toPoint())
-            href = cursor.charFormat().anchorHref()
-            if href:
-                if href.startswith("word:") or href.startswith("time:"):
-                    self.linkClicked.emit(QUrl(href))
-                    event.accept()
-                    return
-                # Speaker anchors have no navigation action in viewing mode.
+        if self.is_editing_mode:
+            super().mousePressEvent(event)
+            return
+
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._left_press_pos = pos
+            self._is_left_down = True
+            self._is_left_dragging = False
+            self._pending_click_href = None
+
+            # Check if clicked on a timestamp/word link
+            hit_cursor = self.cursorForPosition(pos)
+            href = hit_cursor.charFormat().anchorHref()
+            if not href and hit_cursor.position() > 0:
+                probe = QTextCursor(hit_cursor)
+                probe.setPosition(max(0, hit_cursor.position() - 1))
+                href = probe.charFormat().anchorHref()
+
+            if href and (href.startswith("word:") or href.startswith("time:")):
+                self._pending_click_href = href
+
+            if self.selection_mode == "replace" and self.saved_selections:
+                self.saved_selections = []
+                self.update_extra_selections()
+
+            super().mousePressEvent(event)
+            return
+
+        elif event.button() == Qt.MouseButton.RightButton:
+            self._right_press_pos = pos
+            self._is_right_down = True
+            self._is_right_dragging = False
+            self._right_press_cursor_pos = self.cursorForPosition(pos).position()
+            self._suppress_next_context_menu = False
+            event.accept()
+            return
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.is_editing_mode:
+            super().mouseMoveEvent(event)
+            return
+
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        drag_dist = QApplication.startDragDistance() if hasattr(QApplication, "startDragDistance") else 4
+        if drag_dist < 4:
+            drag_dist = 4
+
+        if getattr(self, "_is_left_down", False):
+            press_pos = getattr(self, "_left_press_pos", pos)
+            if (pos - press_pos).manhattanLength() >= drag_dist:
+                self._is_left_dragging = True
+            super().mouseMoveEvent(event)
+            return
+
+        if getattr(self, "_is_right_down", False):
+            press_pos = getattr(self, "_right_press_pos", pos)
+            if (pos - press_pos).manhattanLength() >= drag_dist:
+                self._is_right_dragging = True
+                curr_pos = self.cursorForPosition(pos).position()
+                start_pos = getattr(self, "_right_drag_start_cursor_pos", curr_pos)
+
+                cursor = QTextCursor(self.document())
+                cursor.setPosition(start_pos)
+                cursor.setPosition(curr_pos, QTextCursor.MoveMode.KeepAnchor)
+                self.setTextCursor(cursor)
                 event.accept()
                 return
-        super().mousePressEvent(event)
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self.is_editing_mode:
+            super().mouseReleaseEvent(event)
+            return
+
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+
+        if event.button() == Qt.MouseButton.LeftButton:
+            was_dragging = getattr(self, "_is_left_dragging", False)
+            self._is_left_down = False
+            self._is_left_dragging = False
+            pending_href = getattr(self, "_pending_click_href", None)
+            self._pending_click_href = None
+
+            super().mouseReleaseEvent(event)
+
+            cursor = self.textCursor()
+            has_sel = cursor.hasSelection() and (cursor.selectionEnd() - cursor.selectionStart() > 0)
+
+            if not was_dragging and not has_sel:
+                # Single Left-Click without dragging -> seek/navigation
+                if self.selection_mode == "replace":
+                    self.clear_all_selections()
+
+                if pending_href and (pending_href.startswith("word:") or pending_href.startswith("time:")):
+                    self.linkClicked.emit(QUrl(pending_href))
+                    event.accept()
+                    return
+                else:
+                    hit_cursor = self.cursorForPosition(pos)
+                    href = hit_cursor.charFormat().anchorHref()
+                    if href and (href.startswith("word:") or href.startswith("time:")):
+                        self.linkClicked.emit(QUrl(href))
+                        event.accept()
+                        return
+            else:
+                # Left-drag selection completed
+                if has_sel:
+                    self._on_selection_completed(cursor)
+                event.accept()
+                return
+
+        elif event.button() == Qt.MouseButton.RightButton:
+            was_right_dragging = getattr(self, "_is_right_dragging", False)
+            self._is_right_down = False
+            self._is_right_dragging = False
+
+            if was_right_dragging:
+                self._suppress_next_context_menu = True
+                cursor = self.textCursor()
+                if cursor.hasSelection() and (cursor.selectionEnd() - cursor.selectionStart() > 0):
+                    self._on_selection_completed(cursor)
+                event.accept()
+                return
+            else:
+                self._suppress_next_context_menu = False
+                self.show_context_menu(pos)
+                event.accept()
+                return
+
+        super().mouseReleaseEvent(event)
 
     def _nearest_word_anchor(self, cursor):
         """Return the word anchor nearest the actual QTextDocument cursor."""
@@ -1038,10 +1326,15 @@ class InteractiveTranscriptEdit(QTextEdit):
                 event.accept()
                 return
 
-        if self.is_editing_mode and event.key() == Qt.Key.Key_Escape:
-            self.set_editing_mode(False)
-            event.accept()
-            return
+        if event.key() == Qt.Key.Key_Escape:
+            if self.has_active_selection():
+                self.clear_all_selections()
+                event.accept()
+                return
+            if self.is_editing_mode:
+                self.set_editing_mode(False)
+                event.accept()
+                return
 
         if event.matches(QKeySequence.StandardKey.Find):
             main_win = self.window()
@@ -1057,6 +1350,10 @@ class InteractiveTranscriptEdit(QTextEdit):
         are interactive targets, while right-clicking anywhere else offers a
         speaker insertion at the nearest transcript timestamp.
         """
+        if getattr(self, "_suppress_next_context_menu", False):
+            self._suppress_next_context_menu = False
+            return
+
         hit_cursor = self.cursorForPosition(position)
         href = hit_cursor.charFormat().anchorHref()
         if not href and hit_cursor.position() > 0:
@@ -1070,9 +1367,9 @@ class InteractiveTranscriptEdit(QTextEdit):
             if len(parts) >= 3 and parts[1].isdigit():
                 speaker_target = (int(parts[1]), parts[2])
 
-        # Right-click establishes the insertion/editing location. Preserve an
-        # existing selection when the user right-clicks inside that selection.
-        if not self.textCursor().hasSelection() or not self.textCursor().selectionStart() <= hit_cursor.position() <= self.textCursor().selectionEnd():
+        # Preserve active text selection when right-clicking so the user can easily
+        # add the selection to a story, play it, or clear it from the context menu.
+        if not self.has_active_selection():
             self.setTextCursor(hit_cursor)
 
         # Store the exact document position that opened the menu.  QAction
@@ -1083,14 +1380,23 @@ class InteractiveTranscriptEdit(QTextEdit):
         menu = self.createStandardContextMenu() if self.is_editing_mode else QMenu(self)
         main_win = self.window()
 
-        if self.textCursor().hasSelection():
-            add_selection = QAction("Add Selected Text to New Story", self)
+        if self.has_active_selection():
+            ranges = self.get_all_selected_story_ranges()
+            count = len(ranges)
+            title = f"Add Selected Sections to New Stories ({count})" if count > 1 else "Add Selected Text to New Story"
+            add_selection = QAction(title, self)
             add_selection.triggered.connect(lambda: main_win.add_selection_to_story())
             menu.addAction(add_selection)
 
             play_selection = QAction("Play Selected Text", self)
             play_selection.triggered.connect(lambda: main_win.play_transcript_selection())
             menu.addAction(play_selection)
+
+            clear_selection = QAction("Clear Selection", self)
+            clear_selection.setShortcut(QKeySequence("Esc"))
+            clear_selection.triggered.connect(self.clear_all_selections)
+            menu.addAction(clear_selection)
+
             menu.addSeparator()
 
         # Speaker controls are deliberately available in BOTH modes.
@@ -1143,8 +1449,12 @@ class InteractiveTranscriptEdit(QTextEdit):
 
         if not self.is_editing_mode:
             add_vocab = QAction("Add Selected Text to Glossary", self)
-            add_vocab.setEnabled(self.textCursor().hasSelection())
-            add_vocab.triggered.connect(lambda: main_win.add_to_glossary(self.textCursor().selectedText()))
+            add_vocab.setEnabled(self.has_active_selection())
+            def _add_vocab_from_selection():
+                ranges = self.get_all_selected_story_ranges()
+                txt = ranges[0]["text"] if ranges else self.textCursor().selectedText()
+                main_win.add_to_glossary(txt)
+            add_vocab.triggered.connect(_add_vocab_from_selection)
             menu.addAction(add_vocab)
 
             edit_action = QAction("Edit Transcript", self)
@@ -1348,12 +1658,14 @@ class StoryAutoDetectWorker(QObject):
     progress = Signal(str, int)
     error = Signal(str)
 
-    def __init__(self, audio_file, silence_threshold=3.0, lead_in_padding=0.5, audio_duration=0, **kwargs):
+    def __init__(self, audio_file, silence_threshold=3.0, lead_in_padding=0.5, audio_duration=0, transcript_segments=None, whisper_model="tiny", **kwargs):
         super().__init__()
         self.audio_file = str(audio_file)
         self.silence_threshold = float(silence_threshold)
         self.lead_in_padding = float(lead_in_padding)
         self.audio_duration = float(audio_duration)
+        self.transcript_segments = transcript_segments or []
+        self.whisper_model = whisper_model or "tiny"
         self._is_cancelled = False
 
     def cancel(self):
@@ -1361,29 +1673,38 @@ class StoryAutoDetectWorker(QObject):
 
     def run(self):
         try:
-            # Story detection currently uses faster-whisper solely for its VAD-enabled
-            # speech segmentation. Hardware selection is intentionally not exposed yet.
-            self.progress.emit("[Step 1/3] Loading CPU Voice Activity Detection (Whisper VAD)...", 20)
-            model = WhisperModel("tiny", device="cpu", compute_type="int8", download_root=str(get_models_storage_dir()))
-
-            if self._is_cancelled:
-                self.error.emit("Process canceled by user.")
-                return
-
-            self.progress.emit("[Step 2/3] Analyzing speech intervals and audio gaps...", 50)
-
-            segments, info = model.transcribe(
-                self.audio_file,
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=int(self.silence_threshold * 1000)),
-            )
-
             speech_chunks = []
-            for seg in segments:
+            if self.transcript_segments:
+                self.progress.emit("[Step 1/3] Using transcript timestamps for instant story detection...", 30)
+                for seg in self.transcript_segments:
+                    start = seg.get("start", 0.0) if isinstance(seg, dict) else getattr(seg, "start", 0.0)
+                    end = seg.get("end", start) if isinstance(seg, dict) else getattr(seg, "end", start)
+                    if end > start:
+                        speech_chunks.append((float(start), float(end)))
+
+            if not speech_chunks:
+                # Story detection falls back to faster-whisper VAD-enabled speech segmentation
+                self.progress.emit("[Step 1/3] Loading CPU Voice Activity Detection (Whisper VAD)...", 20)
+                model_name = self.whisper_model if self.whisper_model else "tiny"
+                model = WhisperModel(model_name, device="cpu", compute_type="int8", download_root=str(get_models_storage_dir()))
+
                 if self._is_cancelled:
                     self.error.emit("Process canceled by user.")
                     return
-                speech_chunks.append((seg.start, seg.end))
+
+                self.progress.emit("[Step 2/3] Analyzing speech intervals and audio gaps...", 50)
+
+                segments, info = model.transcribe(
+                    self.audio_file,
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=int(self.silence_threshold * 1000)),
+                )
+
+                for seg in segments:
+                    if self._is_cancelled:
+                        self.error.emit("Process canceled by user.")
+                        return
+                    speech_chunks.append((seg.start, seg.end))
 
             self.progress.emit("[Step 3/3] Clustering speech boundaries into stories...", 85)
 
@@ -1566,6 +1887,10 @@ class WaveformWorker(QObject):
 # Timeline Canvas (With Right-Click Select & Easy Playhead Scrubbing)
 # ============================================================
 
+# ============================================================
+# Timeline Canvas (With Right-Click Select & Easy Playhead Scrubbing)
+# ============================================================
+
 class VideoThumbnailWorker(QObject):
     finished = Signal(object)
     error = Signal(str)
@@ -1634,6 +1959,8 @@ class TimelineCanvas(QWidget):
     scrollOffsetChanged = Signal(float)
     zoomChanged = Signal()
     mediaDropped = Signal(str)
+    selectionRangeChanged = Signal(object, object)
+    storyCreatedFromSelection = Signal(float, float)
 
     RULER_HEIGHT = 24
     EDGE_HANDLE_THRESHOLD = 8
@@ -1649,6 +1976,11 @@ class TimelineCanvas(QWidget):
         self.is_playing = False
         self.audio_file_name = None
 
+        self.selection_start = None
+        self.selection_end = None
+        self.is_right_dragging = False
+        self.active_selection_handle = None
+
         self.stories = []
         self.waveform_peaks = []
         self.waveform_levels = []
@@ -1658,6 +1990,15 @@ class TimelineCanvas(QWidget):
         self.thumbnail_position = "above"
         self.selected_story_indices = []
         self.transcript_selection_range = None
+        
+        # Background generation activity indicators
+        self.active_background_tasks = set()
+        self.background_status_text = ""
+        self.show_background_banner = False
+        self._background_delay_timer = QTimer(self)
+        self._background_delay_timer.setSingleShot(True)
+        self._background_delay_timer.setInterval(1500)  # Show if taking > 1.5s
+        self._background_delay_timer.timeout.connect(self._activate_background_banner)
 
         self.zoom_level = 1.0
         self.min_zoom = 1.0
@@ -1783,6 +2124,42 @@ class TimelineCanvas(QWidget):
         self.pixmap_dirty = True
         self.update()
 
+    def set_background_generation_active(self, task_name: str, active: bool):
+        """Set generation state for 'waveform' or 'thumbnails'."""
+        if active:
+            self.active_background_tasks.add(task_name)
+            if not self._background_delay_timer.isActive() and not self.show_background_banner:
+                self._background_delay_timer.start()
+        else:
+            self.active_background_tasks.discard(task_name)
+            if not self.active_background_tasks:
+                self._background_delay_timer.stop()
+                self.show_background_banner = False
+                self.background_status_text = ""
+                self.update()
+                return
+
+        self._update_background_status_text()
+        if self.show_background_banner:
+            self.update()
+
+    def _activate_background_banner(self):
+        if self.active_background_tasks:
+            self.show_background_banner = True
+            self._update_background_status_text()
+            self.update()
+
+    def _update_background_status_text(self):
+        labels = []
+        if "waveform" in self.active_background_tasks:
+            labels.append("audio waveform")
+        if "thumbnails" in self.active_background_tasks:
+            labels.append("video thumbnails")
+        if labels:
+            self.background_status_text = f"Generating {' and '.join(labels)}..."
+        else:
+            self.background_status_text = ""
+    
     def set_skip_seconds(self, seconds):
         self.skip_seconds = max(1, int(seconds))
 
@@ -1860,7 +2237,6 @@ class TimelineCanvas(QWidget):
     def mousePressEvent(self, event):
         self.setFocus()
         pos_x = event.position().x()
-        pos_y = event.position().y()
         width = self.width()
 
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -1871,8 +2247,35 @@ class TimelineCanvas(QWidget):
             event.accept()
             return
 
-        # --- RIGHT-CLICK: Start Story Region Selection ---
+        # --- RIGHT-CLICK: Drag Selection, Handle Adjustments, or Context Menu ---
         if event.button() == Qt.MouseButton.RightButton:
+            curr_t = max(0.0, min(self.duration, self.x_to_time(pos_x, width)))
+
+            # Check if clicking a handle on an existing right-click selection
+            if self.selection_start is not None and self.selection_end is not None:
+                x_start = self.time_to_x(self.selection_start, width)
+                x_end = self.time_to_x(self.selection_end, width)
+                x_min = min(x_start, x_end)
+                x_max = max(x_start, x_end)
+
+                if abs(pos_x - x_min) <= self.EDGE_HANDLE_THRESHOLD:
+                    self.active_selection_handle = "start" if x_start <= x_end else "end"
+                    self.is_right_dragging = True
+                    self.setCursor(Qt.CursorShape.SizeHorCursor)
+                    event.accept()
+                    return
+                elif abs(pos_x - x_max) <= self.EDGE_HANDLE_THRESHOLD:
+                    self.active_selection_handle = "end" if x_start <= x_end else "start"
+                    self.is_right_dragging = True
+                    self.setCursor(Qt.CursorShape.SizeHorCursor)
+                    event.accept()
+                    return
+                elif x_min < pos_x < x_max:
+                    self._show_selection_context_menu(event.globalPosition().toPoint() if hasattr(event, "globalPosition") else event.globalPos())
+                    event.accept()
+                    return
+
+            # Check if grabbing an existing story edge
             edge_hit = self.find_edge_at_pos(pos_x, width)
             if edge_hit:
                 self.active_edge_target = edge_hit
@@ -1880,15 +2283,25 @@ class TimelineCanvas(QWidget):
                 event.accept()
                 return
 
-            self.is_box_selecting = True
-            self.selection_start_time = max(0, min(self.duration, self.x_to_time(pos_x, width)))
-            self.left_down_x = pos_x
-            self.has_dragged = False
+            # Otherwise, begin drawing a new selection region
+            self.selection_start = curr_t
+            self.selection_end = curr_t
+            self.active_selection_handle = "end"
+            self.is_right_dragging = True
+            self.selectionRangeChanged.emit(self.selection_start, self.selection_end)
+            self.update()
             event.accept()
             return
 
-        # --- LEFT-CLICK: Continuous Audio Scrubbing & Seeking ---
+        # --- LEFT-CLICK: Check for Story Boundary Handles First, Else Scrub ---
         if event.button() == Qt.MouseButton.LeftButton:
+            edge_hit = self.find_edge_at_pos(pos_x, width)
+            if edge_hit:
+                self.active_edge_target = edge_hit
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+                event.accept()
+                return
+
             time = max(0, min(self.duration, self.x_to_time(pos_x, width)))
             self.is_left_down = True
             self.is_scrubbing = True
@@ -1910,20 +2323,20 @@ class TimelineCanvas(QWidget):
             event.accept()
             return
 
-        # --- RIGHT-CLICK DRAG: Draw Story Region ---
-        if self.is_box_selecting:
-            curr_time = max(0, min(self.duration, self.x_to_time(pos_x, width)))
-            start_t = min(self.selection_start_time, curr_time)
-            end_t = max(self.selection_start_time, curr_time)
+        # --- RIGHT-CLICK DRAG: Update Selection Region and Handles ---
+        if self.is_right_dragging:
+            curr_time = max(0.0, min(self.duration, self.x_to_time(pos_x, width)))
+            if self.active_selection_handle == "start":
+                self.selection_start = curr_time
+            elif self.active_selection_handle == "end":
+                self.selection_end = curr_time
 
-            if not self.has_dragged and abs(pos_x - self.left_down_x) >= self.DRAG_PIXEL_THRESHOLD:
-                self.has_dragged = True
-                self.newRegionStarted.emit(start_t, end_t)
-
-            if self.has_dragged:
-                self.newRegionUpdated.emit(start_t, end_t)
-                event.accept()
-                return
+            s = min(self.selection_start, self.selection_end)
+            e = max(self.selection_start, self.selection_end)
+            self.selectionRangeChanged.emit(s, e)
+            self.update()
+            event.accept()
+            return
 
         # --- LEFT-CLICK DRAG: Continuous Audio Scrubbing ---
         if self.is_left_down and self.is_scrubbing:
@@ -1953,7 +2366,7 @@ class TimelineCanvas(QWidget):
         else:
             self.unsetCursor()
 
-        if not (self.is_panning or self.is_left_down or self.is_box_selecting):
+        if not (self.is_panning or self.is_left_down or self.is_right_dragging):
             hover_time = max(0, min(self.duration, self.x_to_time(pos_x, width)))
             mins = int(hover_time // 60)
             secs = int(hover_time % 60)
@@ -1971,13 +2384,23 @@ class TimelineCanvas(QWidget):
             event.accept()
             return
 
-        # --- RIGHT-CLICK RELEASE: Finish Story Selection ---
+        # --- RIGHT-CLICK RELEASE: Finalize Selection Boundaries ---
         if event.button() == Qt.MouseButton.RightButton:
-            if self.is_box_selecting:
-                self.is_box_selecting = False
-                if self.has_dragged:
-                    self.has_dragged = False
-                    self.dragOperationFinished.emit()
+            if self.is_right_dragging:
+                self.is_right_dragging = False
+                self.active_selection_handle = None
+                self.unsetCursor()
+                if self.selection_start is not None and self.selection_end is not None:
+                    if abs(self.selection_start - self.selection_end) < 0.05:
+                        self.selection_start = None
+                        self.selection_end = None
+                        self.selectionRangeChanged.emit(None, None)
+                    else:
+                        s = min(self.selection_start, self.selection_end)
+                        e = max(self.selection_start, self.selection_end)
+                        self.selection_start, self.selection_end = s, e
+                        self.selectionRangeChanged.emit(s, e)
+                self.update()
                 event.accept()
                 return
 
@@ -1987,8 +2410,15 @@ class TimelineCanvas(QWidget):
                 event.accept()
                 return
 
-        # --- LEFT-CLICK RELEASE: End Scrubbing ---
+        # --- LEFT-CLICK RELEASE: Finalize Edge Adjustment or End Scrubbing ---
         if event.button() == Qt.MouseButton.LeftButton:
+            if self.active_edge_target:
+                self.active_edge_target = None
+                self.unsetCursor()
+                self.dragOperationFinished.emit()
+                event.accept()
+                return
+
             if self.is_left_down:
                 self.is_left_down = False
                 self.is_scrubbing = False
@@ -1996,6 +2426,23 @@ class TimelineCanvas(QWidget):
                 return
 
         super().mouseReleaseEvent(event)
+
+    def _show_selection_context_menu(self, global_pos):
+        if self.selection_start is None or self.selection_end is None:
+            return
+        s = min(self.selection_start, self.selection_end)
+        e = max(self.selection_start, self.selection_end)
+        menu = QMenu(self)
+        add_action = menu.addAction("Add Story from Selection")
+        clear_action = menu.addAction("Clear Selection")
+        selected = menu.exec(global_pos)
+        if selected == add_action:
+            self.storyCreatedFromSelection.emit(s, e)
+        elif selected == clear_action:
+            self.selection_start = None
+            self.selection_end = None
+            self.selectionRangeChanged.emit(None, None)
+            self.update()
 
     def keyPressEvent(self, event):
         if event.matches(QKeySequence.StandardKey.Undo):
@@ -2065,7 +2512,6 @@ class TimelineCanvas(QWidget):
             self.update()
 
     def render_waveform_buffer(self, total_pixel_width, height):
-        # Determine actual physical pixel dimensions based on screen scaling
         dpi_scale = self.devicePixelRatioF()
         phys_width = int(total_pixel_width * dpi_scale)
         phys_height = int(height * dpi_scale)
@@ -2080,7 +2526,6 @@ class TimelineCanvas(QWidget):
         available = max(20, height - self.RULER_HEIGHT)
         has_thumbs = bool(self.video_thumbnails and self.show_thumbnails)
 
-        # 1. Calculate heights based on visibility
         if has_thumbs and self.show_waveform:
             thumbnail_height = int(available * 0.5)
             waveform_height = available - thumbnail_height
@@ -2094,7 +2539,6 @@ class TimelineCanvas(QWidget):
             thumbnail_height = 0
             waveform_height = 0
 
-        # 2. Determine vertical layout offsets
         if self.thumbnail_position == "below" and self.show_waveform and has_thumbs:
             waveform_y = self.RULER_HEIGHT
             thumbnail_y = self.RULER_HEIGHT + waveform_height
@@ -2104,7 +2548,6 @@ class TimelineCanvas(QWidget):
 
         middle_y = waveform_y + (waveform_height / 2.0)
 
-        # 3. Render Video Thumbnails
         if has_thumbs and thumbnail_height > 0:
             for timestamp, pix in self.video_thumbnails:
                 x = int((timestamp / max(0.001, self.duration)) * total_pixel_width)
@@ -2120,7 +2563,6 @@ class TimelineCanvas(QWidget):
                 painter.setPen(QPen(QColor("#4a4f58"), 1))
                 painter.drawRect(x - scaled.width() // 2, draw_y, scaled.width(), scaled.height())
 
-        # 4. Render Waveform across full logical width
         if self.show_waveform and self.waveform_peaks and waveform_height > 0:
             painter.setPen(QPen(QColor("#5a81a8"), 1.0))
             levels = self.waveform_levels or [self.waveform_peaks]
@@ -2160,7 +2602,6 @@ class TimelineCanvas(QWidget):
 
         total_pixel_width = max(width, int(width * self.zoom_level))
 
-        # Check dirty flags using logical size units
         if (self.pixmap_dirty or self.waveform_pixmap is None or 
             self.buffered_total_width != total_pixel_width or 
             self.waveform_pixmap.height() != height):
@@ -2210,10 +2651,11 @@ class TimelineCanvas(QWidget):
 
             t += chosen_interval
 
-        if self.audio_file_name:
+        audio_name = getattr(self, "audio_file_name", None)
+        if audio_name:
             painter.setPen(QPen(QColor("#f2cc60"), 1))
             filename_rect = QRectF(8, self.RULER_HEIGHT + 4, 300, 18)
-            painter.drawText(filename_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"Audio: {self.audio_file_name}")
+            painter.drawText(filename_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"Audio: {audio_name}")
 
         if self.transcript_selection_range:
             sel_start, sel_end = self.transcript_selection_range
@@ -2226,6 +2668,19 @@ class TimelineCanvas(QWidget):
                 painter.setPen(QPen(QColor("#58a6ff"), 2))
                 painter.drawLine(QPointF(left, self.RULER_HEIGHT), QPointF(left, height))
                 painter.drawLine(QPointF(right, self.RULER_HEIGHT), QPointF(right, height))
+
+        # Draw active right-click drag selection with adjustable edge handles
+        if self.selection_start is not None and self.selection_end is not None:
+            sx = self.time_to_x(self.selection_start, width)
+            ex = self.time_to_x(self.selection_end, width)
+            left = max(0.0, min(float(width), min(sx, ex)))
+            right = max(0.0, min(float(width), max(sx, ex)))
+            if right > left:
+                painter.fillRect(QRectF(left, self.RULER_HEIGHT, right - left, waveform_height), QColor(88, 166, 255, 55))
+                painter.setPen(QPen(QColor("#58a6ff"), 2))
+                painter.drawRect(QRectF(left, self.RULER_HEIGHT, right - left, waveform_height))
+                painter.fillRect(QRectF(left - 3, self.RULER_HEIGHT, 6, waveform_height), QColor("#58a6ff"))
+                painter.fillRect(QRectF(right - 3, self.RULER_HEIGHT, 6, waveform_height), QColor("#58a6ff"))
 
         colors = [
             QColor("#315c85"),
@@ -2272,6 +2727,30 @@ class TimelineCanvas(QWidget):
         if 0 <= cursor_x <= width:
             painter.setPen(QPen(QColor("#ff5c5c"), 2))
             painter.drawLine(QPointF(cursor_x, 0), QPointF(cursor_x, height))
+        
+        # Draw Background Task Status Banner (Waveform / Thumbnail Generation)
+        if self.show_background_banner and self.background_status_text:
+            painter.save()
+            font = self.font()
+            font.setPointSize(9)
+            font.setBold(True)
+            painter.setFont(font)
+
+            fm = painter.fontMetrics()
+            text_w = fm.horizontalAdvance(self.background_status_text)
+            badge_w = text_w + 24
+            badge_h = 24
+            badge_x = (width - badge_w) / 2.0
+            badge_y = self.RULER_HEIGHT + 8
+
+            badge_rect = QRectF(badge_x, badge_y, badge_w, badge_h)
+            painter.setPen(QPen(QColor("#58a6ff"), 1.5))
+            painter.setBrush(QColor(18, 20, 24, 230))
+            painter.drawRoundedRect(badge_rect, 4.0, 4.0)
+
+            painter.setPen(QColor("#f0f6fc"))
+            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, self.background_status_text)
+            painter.restore()
 
 
 class TimelineWidget(QWidget):
@@ -2295,6 +2774,85 @@ class TimelineWidget(QWidget):
         self.canvas.mediaDropped.connect(self.mediaDropped.emit)
         self.canvas.zoomChanged.connect(self.update_scrollbar_range)
         self.scrollbar.valueChanged.connect(self.update_canvas_from_scrollbar)
+
+        self.selectionRangeChanged = self.canvas.selectionRangeChanged
+        self.storyCreatedFromSelection = self.canvas.storyCreatedFromSelection
+
+        self.is_internal_scrollbar_update = False
+        self.update_scrollbar_range()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() and any(url.isLocalFile() for url in event.mimeData().urls()):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dropEvent(self, event):
+        for url in event.mimeData().urls():
+            if url.isLocalFile():
+                self.mediaDropped.emit(url.toLocalFile())
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def update_scrollbar_range(self):
+        self.is_internal_scrollbar_update = True
+        total = int(self.canvas.duration * 1000)
+        visible = int(self.canvas.visible_duration() * 1000)
+
+        self.scrollbar.setRange(0, max(0, total - visible))
+        self.scrollbar.setPageStep(visible)
+        self.scrollbar.setSingleStep(max(100, visible // 10))
+        self.is_internal_scrollbar_update = False
+        self.update_scrollbar_from_canvas(self.canvas.scroll_offset)
+
+    def update_scrollbar_from_canvas(self, offset):
+        if self.is_internal_scrollbar_update:
+            return
+
+        self.is_internal_scrollbar_update = True
+        self.scrollbar.setValue(int(offset * 1000))
+        self.is_internal_scrollbar_update = False
+
+    def update_canvas_from_scrollbar(self, val):
+        if self.is_internal_scrollbar_update:
+            return
+
+        self.is_internal_scrollbar_update = True
+        self.canvas.scroll_offset = val / 1000.0
+        self.canvas.clamp_scroll_offset()
+        self.canvas.update()
+        self.is_internal_scrollbar_update = False
+
+    def set_background_generation_active(self, task_name: str, active: bool):
+        if hasattr(self, "canvas"):
+            self.canvas.set_background_generation_active(task_name, active)
+
+    def __getattr__(self, name):
+        return getattr(self.canvas, name)
+    mediaDropped = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.canvas = TimelineCanvas()
+        self.scrollbar = QScrollBar(Qt.Orientation.Horizontal)
+
+        layout.addWidget(self.canvas, 1)
+        layout.addWidget(self.scrollbar)
+
+        self.canvas.scrollOffsetChanged.connect(self.update_scrollbar_from_canvas)
+        self.canvas.mediaDropped.connect(self.mediaDropped.emit)
+        self.canvas.zoomChanged.connect(self.update_scrollbar_range)
+        self.scrollbar.valueChanged.connect(self.update_canvas_from_scrollbar)
+        
+        self.selectionRangeChanged = self.canvas.selectionRangeChanged
+        self.storyCreatedFromSelection = self.canvas.storyCreatedFromSelection
 
         self.is_internal_scrollbar_update = False
         self.update_scrollbar_range()
@@ -2365,6 +2923,7 @@ class TranslationWorker(QObject):
     MODEL_REPOS = {
         "tiny": {("en", "es"): "Helsinki-NLP/opus-mt_tiny_eng-spa", ("es", "en"): "Helsinki-NLP/opus-mt_tiny_spa-eng"},
         "standard": {("en", "es"): "Helsinki-NLP/opus-mt-en-es", ("es", "en"): "Helsinki-NLP/opus-mt-es-en"},
+        "opus-mt": {("en", "es"): "Helsinki-NLP/opus-mt-en-es", ("es", "en"): "Helsinki-NLP/opus-mt-es-en"},
     }
     MODEL_FILES = (
         "config.json",
@@ -2379,17 +2938,46 @@ class TranslationWorker(QObject):
         "vocab.spm",
     )
 
-    def __init__(self, segments, from_code, to_code, install_if_missing=False, installation_only=False, resume_results=None, model_variant="opus-mt", status_only=False, parent=None):
+    def __init__(
+        self,
+        segments=None,
+        from_code="en",
+        to_code="es",
+        install_if_missing=False,
+        installation_only=False,
+        resume_results=None,
+        model_variant="standard",
+        status_only=False,
+        parent=None,
+        transcript=None,
+        variant=None,
+        device="cpu",
+        **kwargs,
+    ):
         # Force parent to None so Qt doesn't bind this object to the GUI thread
         super().__init__(None)
-        self.segments = segments
+
+        if transcript is not None:
+            if isinstance(transcript, dict):
+                segments = transcript.get("segments", [])
+            elif isinstance(transcript, list):
+                segments = transcript
+        elif isinstance(segments, dict):
+            segments = segments.get("segments", [])
+
+        self.segments = list(segments) if segments is not None else []
         self.from_code = from_code
         self.to_code = to_code
         self.install_if_missing = install_if_missing
         self.installation_only = installation_only
         self.resume_results = resume_results or []
-        self.model_variant = model_variant
+
+        eff_variant = variant or model_variant or "standard"
+        if eff_variant == "opus-mt":
+            eff_variant = "standard"
+        self.model_variant = eff_variant
         self.status_only = status_only
+        self.translation_device = device
         self._cancelled = False
         self._is_cancelled = False
         

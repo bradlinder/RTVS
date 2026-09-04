@@ -3,7 +3,7 @@ name: Build & Release Installers
 on:
   push:
     tags:
-      - 'v*' # Automatically triggers and creates a Release when pushing a version tag (e.g. v1.5)
+      - 'v*' # Automatically triggers and creates a Release when pushing a version tag (e.g. v1.7)
   workflow_dispatch:
     inputs:
       build_windows:
@@ -15,7 +15,7 @@ on:
         type: boolean
         default: false
       build_linux:
-        description: 'Build Linux Tarball (.tar.gz)'
+        description: 'Build Linux Package (.deb & .tar.gz)'
         type: boolean
         default: false
       create_release:
@@ -23,9 +23,12 @@ on:
         type: boolean
         default: true
       release_tag:
-        description: 'Release Tag (e.g., v1.5 - optional, defaults to tag or timestamp)'
+        description: 'Release Tag (e.g., v1.7 - optional, defaults to tag or timestamp)'
         type: string
         default: ''
+
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -63,8 +66,8 @@ jobs:
       - name: Install Python dependencies (CPU-only PyTorch)
         run: |
           python -m pip install --upgrade pip
-          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install --prefer-binary -r requirements.txt -r requirements-build.txt
+          pip install --prefer-binary "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0" --index-url https://download.pytorch.org/whl/cpu
+          pip install --prefer-binary -r requirements.txt -r requirements-build.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
       - name: Run PyInstaller build
         run: python build_installer.py
@@ -177,27 +180,37 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg libxcb-cursor0 libpulse0
+          sudo apt-get install -y ffmpeg libxcb-cursor0 libpulse0 binutils dpkg-dev
 
       - name: Install Python dependencies (CPU-only PyTorch)
         run: |
           python3 -m pip install --upgrade pip
-          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install --prefer-binary -r requirements.txt -r requirements-build.txt
+          pip install --prefer-binary "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0" --index-url https://download.pytorch.org/whl/cpu
+          pip install --prefer-binary -r requirements.txt -r requirements-build.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
       - name: Run PyInstaller build
         run: python3 build_installer.py
 
-      - name: Create tarball
+      - name: Package Debian (.deb) & Distributable Tarball (.tar.gz)
         run: |
+          bash installer/Linux/build_deb.sh
+          VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "1.7")
           cd dist
-          tar -czvf RadioTVSegmenter-Linux-x86_64.tar.gz RadioTVSegmenter/
+          tar -czvf "RadioTVSegmenter-${VERSION}-Linux-x86_64.tar.gz" RadioTVSegmenter/
+          cd ..
+
+      - name: Verify Asset Sizes (<2GB GitHub Release Limit)
+        run: |
+          echo "Checking generated package sizes:"
+          ls -lh dist/*.deb dist/*.tar.gz
 
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
         with:
           name: RadioTVSegmenter-Linux
-          path: dist/RadioTVSegmenter-Linux-x86_64.tar.gz
+          path: |
+            dist/*.deb
+            dist/*.tar.gz
           retention-days: 3
           if-no-files-found: error
 
@@ -226,7 +239,7 @@ jobs:
           elif [ -n "${{ inputs.release_tag }}" ]; then
             echo "tag=${{ inputs.release_tag }}" >> $GITHUB_OUTPUT
           else
-            echo "tag=v1.5-$(date +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
+            echo "tag=v1.7-$(date +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
           fi
 
       - name: Create GitHub Release & Upload Binaries

@@ -1,5 +1,5 @@
 #define MyAppName "Radio & TV Segmenter"
-#define MyAppVersion "1.6.1"
+#define MyAppVersion "1.7"
 #define MyAppPublisher "Radio & TV Segmenter"
 #define MyAppURL "https://github.com/bradlinder/RTVS"
 #define MyAppExeName "RadioTVSegmenter.exe"

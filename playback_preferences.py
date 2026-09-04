@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter v1.6 — playback preferences responsibilities.
+"""Radio & TV Segmenter v1.7 — playback preferences responsibilities.
 
 Methods intentionally retain the MainWindow-facing API so behavior remains
 maintaining the established MainWindow-facing API while responsibilities are isolated.
@@ -217,10 +217,14 @@ class PlaybackPreferencesMixin:
         self.segment_speaker_overrides = dict(snapshot["segment_speaker_overrides"])
         self.translations = json.loads(json.dumps(snapshot.get("translations", {})))
         self.translation_display_mode = snapshot.get("translation_display_mode", "en")
+        if hasattr(self, "update_translation_language_selector"):
+            self.update_translation_language_selector()
         if hasattr(self, "transcript_language_selector"):
             idx = self.transcript_language_selector.findData(self.translation_display_mode)
             if idx >= 0:
+                self.transcript_language_selector.blockSignals(True)
                 self.transcript_language_selector.setCurrentIndex(idx)
+                self.transcript_language_selector.blockSignals(False)
 
         if self.diarization:
             num = self.diarization.get("num_speakers", 0)
@@ -439,6 +443,8 @@ class PlaybackPreferencesMixin:
             self.translation_display_mode = state.get("translation_display_mode", "en")
             self.current_selected_story_indices = list(state.get("selected_indices", []))
 
+            if hasattr(self, "update_translation_language_selector"):
+                self.update_translation_language_selector()
             if hasattr(self, "transcript_language_selector"):
                 idx = self.transcript_language_selector.findData(self.translation_display_mode)
                 if idx >= 0:
@@ -879,6 +885,17 @@ class PlaybackPreferencesMixin:
         thumb_chk.setChecked(self.timeline_show_thumbnails)
         play_form.addRow("Timeline Thumbnails:", thumb_chk)
 
+        sel_mode_combo = QComboBox()
+        sel_mode_combo.addItem("Clear previous selection (Single selection)", "replace")
+        sel_mode_combo.addItem("Keep previous selections (Multi-selection: create separate stories)", "keep")
+        curr_sel_mode = getattr(self, "transcript_selection_mode", str(self.settings_store.value("transcript_selection_mode", "replace") or "replace"))
+        sel_idx = sel_mode_combo.findData(curr_sel_mode)
+        if sel_idx >= 0:
+            sel_mode_combo.setCurrentIndex(sel_idx)
+        else:
+            sel_mode_combo.setCurrentIndex(0)
+        play_form.addRow("New Text Selection Behavior:", sel_mode_combo)
+
         play_layout.addLayout(play_form)
         play_layout.addStretch()
         stack.addWidget(page_play)
@@ -1007,6 +1024,13 @@ class PlaybackPreferencesMixin:
 
             if hasattr(self, "timeline"):
                 self.timeline.set_timeline_views(self.timeline_show_waveform, self.timeline_show_thumbnails)
+
+            # Save Selection Mode
+            new_sel_mode = sel_mode_combo.currentData() or "replace"
+            self.transcript_selection_mode = new_sel_mode
+            self.settings_store.setValue("transcript_selection_mode", new_sel_mode)
+            if hasattr(self, "transcript_view") and hasattr(self.transcript_view, "set_selection_mode"):
+                self.transcript_view.set_selection_mode(new_sel_mode)
 
             # Save Detection
             self.silence_threshold = gap_spin.value()

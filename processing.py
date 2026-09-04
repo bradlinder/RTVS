@@ -7,8 +7,10 @@ maintaining the established MainWindow-facing API while responsibilities are iso
 import sys
 import os
 import json
+import html
 from pathlib import Path
 from PySide6.QtCore import QProcess, QProcessEnvironment, QThread, Qt, QTimer
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -34,12 +36,16 @@ from prs_shared import (
 
 class ProcessingMixin:
     def cancel_current_process(self):
+        # Halt any ongoing file export or WordPress upload
+        if hasattr(self, "cancel_export"):
+            self.cancel_export()
         if self.batch_active:
             self.batch_active = False
             self.batch_queue = []
             self.batch_document_queue = []
             self.pipeline_queue = []
             self.pipeline_active = False
+            self.pipeline_rerun_confirmed = False
             if self.transcription_process is not None:
                 self.cleanup_transcription_process()
             if self.diarization_process is not None:
@@ -60,6 +66,7 @@ class ProcessingMixin:
             self.transcription_process is not None
             or self.diarization_process is not None
             or self.thread is not None
+            or getattr(self, "translation_thread", None) is not None
         ):
             if self.pipeline_active:
                 answer = QMessageBox.question(
@@ -77,6 +84,10 @@ class ProcessingMixin:
                 )
             if answer != QMessageBox.StandardButton.Yes:
                 return
+
+        self.pipeline_active = False
+        self.pipeline_queue = []
+        self.pipeline_rerun_confirmed = False
 
         if self.transcription_process is not None:
             self.log_activity("[PROCESS] Terminating local transcription helper...")
@@ -99,6 +110,7 @@ class ProcessingMixin:
             self.log_activity("[PROCESS] Canceling local translation...")
             self.stop_translation_worker()
             self.pipeline_active = False
+            self.pipeline_rerun_confirmed = False
             self.set_processing_stage(None)
             self.progress.hide()
             self.cancel_button.hide()
@@ -223,7 +235,6 @@ class ProcessingMixin:
                 self.log_activity(f"[STORY SELECT] {desc}")
 
     def set_tools_actions_enabled(self, enabled):
-        self.mark_stale_translations()
         has_audio = bool(self.audio_file) and enabled
         self.transcribe_action.setEnabled(has_audio)
         self.diarize_action.setEnabled(has_audio)
@@ -337,8 +348,9 @@ class ProcessingMixin:
         for key, label, data in choices:
             row = QHBoxLayout()
             cb = QCheckBox(label)
-            cb.setChecked(bool(data) or not self.processing_status.get(key, False))
-            if self.processing_status.get(key):
+            is_complete = bool(self.processing_status.get(key, False))
+            cb.setChecked(not is_complete)
+            if is_complete:
                 state = "Complete"
             elif data:
                 state = "Partial"
@@ -373,7 +385,18 @@ class ProcessingMixin:
                     dialog, "Run Processing", "Select at least one processing stage."
                 )
                 return
+            if "translation" in selected and "transcription" not in selected:
+                raw_segs = self.transcript.get("segments", []) if isinstance(self.transcript, dict) else (self.transcript if isinstance(self.transcript, list) else [])
+                if not raw_segs:
+                    QMessageBox.warning(
+                        dialog,
+                        "Run Processing",
+                        "Translation requires a transcript. Please include Transcribe in the selected stages or load a transcript first.",
+                    )
+                    return
             if len(selected) > 1 and not self.ensure_project_for_processing_pipeline():
+                return
+            if not self._confirm_pipeline_rerun_if_needed(selected, parent=dialog):
                 return
             dialog.accept()
             self.pipeline_queue = list(selected)
@@ -392,10 +415,73 @@ class ProcessingMixin:
         run_btn.clicked.connect(run_selected)
         dialog.exec()
 
+    def _confirm_pipeline_rerun_if_needed(self, stages, parent=None):
+        """Look ahead at stages about to run in a pipeline. If any have already
+        completed or have existing data, prompt the user ONCE upfront whether to
+        re-run and overwrite existing results.
+        Returns True to proceed, False to cancel.
+        """
+        if getattr(self, "batch_active", False):
+            self.pipeline_rerun_confirmed = True
+            return True
+
+        stage_labels = {
+            "transcription": "Transcription",
+            "diarization": "Speaker Detection",
+            "stories": "Story Detection",
+            "translation": "Translation",
+        }
+
+        completed = []
+        for s in stages:
+            data = {
+                "transcription": self.transcript,
+                "diarization": self.diarization or getattr(self, "diarization_result", None),
+                "stories": self.stories,
+                "translation": getattr(self, "translations", {}),
+            }.get(s)
+            status = self.processing_status.get(s, False)
+            if data or status:
+                label = stage_labels.get(s, s.title())
+                completed.append((s, label))
+
+        if not completed:
+            self.pipeline_rerun_confirmed = True
+            return True
+
+        parent_widget = parent or self
+        if len(completed) == 1:
+            stage_key, stage_label = completed[0]
+            answer = QMessageBox.question(
+                parent_widget,
+                f"{stage_label} Already Complete",
+                f"{stage_label} has already been completed. Run it again?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+        else:
+            bullets = "\n".join(f"• {label}" for _, label in completed)
+            answer = QMessageBox.question(
+                parent_widget,
+                "Re-run Completed Stages?",
+                f"The following processing stage(s) have already been completed:\n\n{bullets}\n\n"
+                "Do you want to re-run these stages and overwrite existing results?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+
+        if answer == QMessageBox.StandardButton.Yes:
+            self.pipeline_rerun_confirmed = True
+            return True
+        else:
+            self.pipeline_rerun_confirmed = False
+            return False
+
     def _run_next_selected_processing(self):
         if not self.pipeline_active:
             return
         if not self.pipeline_queue:
+            self.pipeline_rerun_confirmed = False
             if self.batch_active:
                 self.pipeline_active = False
                 self.set_processing_stage(None)
@@ -415,35 +501,42 @@ class ProcessingMixin:
 
         kind = self.pipeline_queue.pop(0)
         self.pipeline_current_stage_idx = max(1, getattr(self, "pipeline_total_stages", 1) - len(self.pipeline_queue))
+        skip_choice = self.batch_active or getattr(self, "pipeline_rerun_confirmed", False)
         if kind == "transcription":
-            choice = "run" if self.batch_active else self._processing_choice("transcription")
-            if choice == "cancel":
-                self.pipeline_queue = []
-                self.pipeline_active = False
-                self.set_tools_actions_enabled(True)
-                return
-            if choice == "start_over":
-                self.transcript = []
-                self.processing_status["transcription"] = False
+            if not skip_choice:
+                choice = self._processing_choice("transcription")
+                if choice == "cancel":
+                    self.pipeline_queue = []
+                    self.pipeline_active = False
+                    self.pipeline_rerun_confirmed = False
+                    self.set_tools_actions_enabled(True)
+                    return
+                if choice == "start_over":
+                    self.transcript = []
+                    self.processing_status["transcription"] = False
             self.start_transcription()
         elif kind == "diarization":
-            choice = "run" if self.batch_active else self._processing_choice("diarization")
-            if choice == "cancel":
-                self.pipeline_queue = []
-                self.pipeline_active = False
-                self.set_tools_actions_enabled(True)
-                return
-            if choice == "start_over":
-                self.diarization = {}
-                self.processing_status["diarization"] = False
+            if not skip_choice:
+                choice = self._processing_choice("diarization")
+                if choice == "cancel":
+                    self.pipeline_queue = []
+                    self.pipeline_active = False
+                    self.pipeline_rerun_confirmed = False
+                    self.set_tools_actions_enabled(True)
+                    return
+                if choice == "start_over":
+                    self.diarization = {}
+                    self.processing_status["diarization"] = False
             self.start_diarization()
         elif kind == "stories":
-            choice = "run" if self.batch_active else self._processing_choice("stories")
-            if choice == "cancel":
-                self.pipeline_queue = []
-                self.pipeline_active = False
-                self.set_tools_actions_enabled(True)
-                return
+            if not skip_choice:
+                choice = self._processing_choice("stories")
+                if choice == "cancel":
+                    self.pipeline_queue = []
+                    self.pipeline_active = False
+                    self.pipeline_rerun_confirmed = False
+                    self.set_tools_actions_enabled(True)
+                    return
             self.start_auto_detect_stories()
         elif kind == "translation":
             if not self.transcript:
@@ -454,6 +547,7 @@ class ProcessingMixin:
                 )
                 self.pipeline_queue = []
                 self.pipeline_active = False
+                self.pipeline_rerun_confirmed = False
                 self.set_tools_actions_enabled(True)
                 return
             from_code = self.source_language_code()
@@ -465,10 +559,19 @@ class ProcessingMixin:
             return
         if not self.ensure_project_for_processing_pipeline():
             return
-        self.pipeline_queue = ["transcription", "diarization"]
+        stages = ["transcription", "diarization"]
+        if not self._confirm_pipeline_rerun_if_needed(stages):
+            return
+        self.pipeline_queue = list(stages)
+        self.pipeline_total_stages = len(stages)
+        self.pipeline_all_stages = list(stages)
+        self.pipeline_current_stage_idx = 0
         self.pipeline_active = True
+        self.pending_diarization = False
+        self.pending_auto_detect_stories = False
+        self.pipeline_speaker_detection_requested = False
         self.log_activity("[AUTOMATION] Started Transcribe & Detect Speakers chain")
-        self.start_transcription()
+        QTimer.singleShot(0, self._run_next_selected_processing)
 
     def _processing_choice(self, kind):
         """Return: run, continue, start_over, or cancel based on current state."""
@@ -582,16 +685,17 @@ class ProcessingMixin:
         self.stop_waveform_worker()
         self.stop_video_thumbnail_worker()
 
-        choice = self._processing_choice("transcription")
-        if choice == "cancel":
-            self.log_activity("[TRANSCRIPTION] User canceled processing choice.")
-            return
-        if choice == "start_over":
-            self.transcript = []
-            self.processing_status["transcription"] = False
-            self.log_activity("[TRANSCRIPTION] Starting over; previous transcript discarded.")
-        elif choice == "continue":
-            self.log_activity("[TRANSCRIPTION] Continuing from existing partial transcript.")
+        if not self.pipeline_active and not getattr(self, "pipeline_rerun_confirmed", False):
+            choice = self._processing_choice("transcription")
+            if choice == "cancel":
+                self.log_activity("[TRANSCRIPTION] User canceled processing choice.")
+                return
+            if choice == "start_over":
+                self.transcript = []
+                self.processing_status["transcription"] = False
+                self.log_activity("[TRANSCRIPTION] Starting over; previous transcript discarded.")
+            elif choice == "continue":
+                self.log_activity("[TRANSCRIPTION] Continuing from existing partial transcript.")
 
         if self.transcription_process is not None:
             self.log_activity("[TRANSCRIPTION] A transcription job is already running.")
@@ -652,6 +756,13 @@ class ProcessingMixin:
         self.transcription_output_buffer = ""
         self.transcription_helper_ready = False
         self.transcription_result_received = False
+        
+        # Prepare transcript view for live streaming preview
+        if hasattr(self, "transcript_view"):
+            self.transcript_view.setReadOnly(True)
+            self.transcript_view.clear()
+            self.transcript_view.set_char_timestamp_map([])
+        self.streaming_transcript_segments = []
         self.log_activity(
             f"[TRANSCRIPTION] Started local Whisper transcription (Model: '{model_name}')."
         )
@@ -750,6 +861,15 @@ class ProcessingMixin:
                 self.log_activity(
                     f"[TRANSCRIPTION] Helper protocol {version} verified; transcription capability available."
                 )
+            elif kind == "streaming_segment":
+                seg = message.get("segment")
+                if seg:
+                    self._handle_live_streaming_segment(seg)
+            elif kind == "progress":
+                percent = int(message.get("percent", 0))
+                status = str(message.get("message", "Transcription in progress..."))
+                self.transcription_progress(status, percent)
+                self.log_activity(f"[TRANSCRIPTION] {status}")
             elif kind == "progress":
                 percent = int(message.get("percent", 0))
                 status = str(message.get("message", "Transcription in progress..."))
@@ -766,6 +886,47 @@ class ProcessingMixin:
             elif kind == "error":
                 self.transcription_error(str(message.get("message", "Transcription failed.")))
 
+    def _handle_live_streaming_segment(self, segment):
+        """Append an incoming live transcript chunk directly to the view without rebuilding the map."""
+        if not hasattr(self, "streaming_transcript_segments"):
+            self.streaming_transcript_segments = []
+        self.streaming_transcript_segments.append(segment)
+
+        if not hasattr(self, "transcript_view"):
+            return
+
+        text = segment.get("text", "").strip()
+        if not text:
+            return
+
+        start_time = segment.get("start", 0.0)
+        time_str = format_time(start_time)
+
+        curr_theme = getattr(self.transcript_view, "current_theme", "dark")
+        if curr_theme == "light":
+            text_color = "#24292f"
+            time_color = "#57606a"
+        elif curr_theme == "high_contrast":
+            text_color = "#ffffff"
+            time_color = "#ffff00"
+        else:
+            text_color = "#c9d1d9"
+            time_color = "#8b949e"
+
+        time_html = f'<span style="color: {time_color}; font-weight: bold;">[{time_str}]</span> ' if getattr(self, "show_timestamps", True) else ""
+        escaped_text = html.escape(text)
+        para_html = f'<p style="margin-bottom: 8px; color: {text_color};">{time_html}{escaped_text}</p>'
+
+        cursor = self.transcript_view.textCursor()
+        cursor.beginEditBlock()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertHtml(para_html)
+        cursor.endEditBlock()
+
+        v_bar = self.transcript_view.verticalScrollBar()
+        if v_bar:
+            v_bar.setValue(v_bar.maximum())
+    
     def on_transcription_process_finished(self, exit_code, exit_status):
         self.on_transcription_output()
         if self.transcription_process is None:
@@ -828,6 +989,7 @@ class ProcessingMixin:
                 "The transcription helper returned an invalid transcript result."
             )
             return
+
         self.flush_pending_transcript_undo() if hasattr(self, "flush_pending_transcript_undo") else None
         before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
         self.progress.setValue(100)
@@ -838,11 +1000,24 @@ class ProcessingMixin:
 
         self.set_tools_actions_enabled(True)
         self.update_translation_language_selector()
-        self.render_transcript()
+
+        # If Diarization is scheduled to run immediately next in the pipeline,
+        # skip rebuilding the document layout here so the final speaker tags
+        # and anchor map can be built cleanly once diarization finishes.
+        will_diarize_next = (
+            getattr(self, "pipeline_active", False)
+            and "diarization" in getattr(self, "pipeline_queue", [])
+        )
+        if not will_diarize_next:
+            self.render_transcript()
+        else:
+            self.log_activity("[TRANSCRIPTION] Live text ready. Speaker detection will assign speakers next.", mark_dirty=False)
+
         self.render_translation_view()
 
         if before_state is not None and hasattr(self, "_commit_project_state_change"):
             self._commit_project_state_change(before_state, "Transcription")
+
         self.log_activity("[TRANSCRIPTION] Complete. Rendered interactive transcript.")
         self.update_processing_stage_summary()
         self.statusBar().showMessage("Transcription complete.")
@@ -861,6 +1036,10 @@ class ProcessingMixin:
         self.pending_auto_detect_stories = False
         self.pipeline_speaker_detection_requested = False
         self.pipeline_active = False
+        self.pipeline_queue = []
+        self.pipeline_rerun_confirmed = False
+        if getattr(self, "batch_active", False):
+            self.batch_active = False
         self.progress.hide()
         self.cancel_button.hide()
         self.set_processing_stage(None)
@@ -931,7 +1110,7 @@ class ProcessingMixin:
         self.stop_waveform_worker()
         self.stop_video_thumbnail_worker()
 
-        if not self.batch_active:
+        if not self.batch_active and not self.pipeline_active and not getattr(self, "pipeline_rerun_confirmed", False):
             choice = self._processing_choice("diarization")
             if choice == "cancel":
                 self.log_activity("[SPEAKER DETECT] User canceled processing choice.")
@@ -940,8 +1119,9 @@ class ProcessingMixin:
                 self.diarization = {}
                 self.processing_status["diarization"] = False
         else:
-            self.diarization = {}
-            self.processing_status["diarization"] = False
+            if self.batch_active:
+                self.diarization = {}
+                self.processing_status["diarization"] = False
 
         if self.diarization_process is not None:
             self.log_activity("[SPEAKER DETECT] A job is already running.")
@@ -1155,21 +1335,17 @@ class ProcessingMixin:
             f"[SPEAKER DETECT] Complete: identified {number} speaker(s) locally."
         )
         self.update_processing_stage_summary()
-
-        if self.pipeline_active and self.pipeline_queue:
-            QTimer.singleShot(0, self._run_next_selected_processing)
-        elif self.batch_active and self.pipeline_active:
-            self.pipeline_active = False
-            self._batch_export_current()
-            QTimer.singleShot(0, self._batch_next_media)
-        else:
-            self.statusBar().showMessage(f"Speaker detection complete: {number} speaker(s) detected.")
+        self.statusBar().showMessage(f"Speaker detection complete: {number} speaker(s) detected.")
 
     def diarization_error(self, message):
         self.pending_diarization = False
         self.pipeline_speaker_detection_requested = False
         self.pipeline_active = False
+        self.pipeline_queue = []
+        self.pipeline_rerun_confirmed = False
         self.pending_auto_detect_stories = False
+        if getattr(self, "batch_active", False):
+            self.batch_active = False
         self.progress.hide()
         self.cancel_button.hide()
         self.set_processing_stage(None)
@@ -1186,7 +1362,7 @@ class ProcessingMixin:
         if not self.audio_file:
             return
 
-        if self.stories and not self.pipeline_active:
+        if self.stories and not self.pipeline_active and not getattr(self, "pipeline_rerun_confirmed", False):
             answer = QMessageBox.question(
                 self,
                 "Detect Stories",
@@ -1210,11 +1386,20 @@ class ProcessingMixin:
         self.story_job_token += 1
         job_token = self.story_job_token
         self.thread = QThread()
+
+        transcript_segments = []
+        if isinstance(self.transcript, dict):
+            transcript_segments = self.transcript.get("segments", [])
+        elif isinstance(self.transcript, list):
+            transcript_segments = self.transcript
+
         self.worker = StoryAutoDetectWorker(
             self.audio_file,
             silence_threshold=self.silence_threshold,
             lead_in_padding=self.lead_in_padding,
-            audio_duration=self.duration,
+            audio_duration=getattr(self, "duration", 0),
+            transcript_segments=transcript_segments,
+            whisper_model=getattr(self, "whisper_model", "tiny"),
         )
         self.worker.moveToThread(self.thread)
         self.worker._job_token = job_token
@@ -1225,33 +1410,18 @@ class ProcessingMixin:
         self.worker.finished.connect(self.auto_detect_finished)
         self.worker.error.connect(self.auto_detect_error)
 
-        self.worker.finished.connect(self.thread.quit, Qt.ConnectionType.DirectConnection)
-        self.worker.error.connect(self.thread.quit, Qt.ConnectionType.DirectConnection)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.worker.error.connect(self.worker.deleteLater)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.error.connect(self.thread.quit)
+        self.thread.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
         self.thread.finished.connect(self.worker_thread_finished)
 
         self.thread.start()
 
     def auto_detect_progress(self, message, percent):
-        if (
-            self.sender() is not self.worker
-            or getattr(self.worker, "_job_token", None) != self.story_job_token
-        ):
-            return
         self.update_processing_progress(percent, message)
 
     def auto_detect_finished(self, new_stories):
-        if (
-            self.sender() is not self.worker
-            or getattr(self.worker, "_job_token", None) != self.story_job_token
-        ):
-            self.log_activity(
-                "[STORY DETECT] Discarded stale results from an older processing job.",
-                mark_dirty=False,
-            )
-            return
         self.progress.hide()
         self.cancel_button.hide()
         self.set_tools_actions_enabled(True)
@@ -1278,14 +1448,16 @@ class ProcessingMixin:
             self.log_activity("[AUTOMATION] Selected processing complete.")
 
     def auto_detect_error(self, message):
-        if (
-            self.sender() is not self.worker
-            or getattr(self.worker, "_job_token", None) != self.story_job_token
-        ):
-            return
         self.progress.hide()
         self.cancel_button.hide()
         self.set_tools_actions_enabled(True)
+        self.set_processing_stage(None)
+        if getattr(self, "pipeline_active", False):
+            self.pipeline_active = False
+            self.pipeline_queue = []
+            self.pipeline_rerun_confirmed = False
+        if getattr(self, "batch_active", False):
+            self.batch_active = False
 
         if message == "Process canceled by user.":
             self.statusBar().showMessage("Story detection canceled by user.")

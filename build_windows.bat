@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo =====================================================================
-echo  Radio ^& TV Story Segmenter v1.6 - Automated 1-Click Build (Windows)
+echo  Radio ^& TV Story Segmenter v1.7 - Automated 1-Click Build (Windows)
 echo =====================================================================
 echo.
 
@@ -57,8 +57,8 @@ if %ERRORLEVEL% neq 0 (
 :: Upgrade pip and install build dependencies
 echo [3/4] Installing / verifying lightweight CPU build dependencies...
 python -m pip install --upgrade pip --quiet
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --quiet
-pip install -r requirements.txt -r requirements-build.txt --quiet
+pip install --prefer-binary "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0" --index-url https://download.pytorch.org/whl/cpu --quiet
+pip install --prefer-binary -r requirements.txt -r requirements-build.txt --extra-index-url https://download.pytorch.org/whl/cpu --quiet
 
 :: 4. Execute build script
 echo [4/4] Running PyInstaller binary compilation...

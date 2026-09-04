@@ -222,24 +222,25 @@ class UiLayoutMixin:
         story_btns_row = QHBoxLayout()
         story_btns_row.setSpacing(4)
 
-        self.set_start_btn = QPushButton("Set Start", self)
-        self.set_start_btn.setToolTip("Set start boundary to current playhead")
-        self.set_start_btn.clicked.connect(self.set_story_start)
-        story_btns_row.addWidget(self.set_start_btn)
-
-        self.set_end_btn = QPushButton("Set End", self)
-        self.set_end_btn.setToolTip("Set end boundary to current playhead")
-        self.set_end_btn.clicked.connect(self.set_story_end)
-        story_btns_row.addWidget(self.set_end_btn)
-
         self.add_story_btn = QPushButton("Add Story", self)
-        self.add_story_btn.clicked.connect(self.add_story)
+        self.add_story_btn.setToolTip("Add story from active timeline selection or highlighted transcript text")
+        self.add_story_btn.clicked.connect(self.add_story_from_active_selection)
         story_btns_row.addWidget(self.add_story_btn)
+
+        self.select_all_stories_btn = QPushButton("Select All", self)
+        self.select_all_stories_btn.setToolTip("Select all stories in the list")
+        self.select_all_stories_btn.clicked.connect(self.select_all_stories)
+        story_btns_row.addWidget(self.select_all_stories_btn)
 
         self.delete_story_btn = QPushButton("Delete", self)
         self.delete_story_btn.clicked.connect(self.delete_selected_story)
         story_btns_row.addWidget(self.delete_story_btn)
 
+        self.export_stories_btn = QPushButton("Export...", self)
+        self.export_stories_btn.setToolTip("Export full episode, selected stories, or draft to WordPress")
+        self.export_stories_btn.clicked.connect(self.open_unified_export_dialog)
+        story_btns_row.addWidget(self.export_stories_btn)
+        
         stories_box_layout.addLayout(story_btns_row)
         right_layout.addWidget(stories_box, 2)
 
@@ -281,6 +282,9 @@ class UiLayoutMixin:
         self.timeline.canvas.multiSelectionChanged.connect(self.handle_timeline_multi_selection)
         self.timeline.canvas.dragOperationFinished.connect(self.handle_drag_finished)
         self.timeline.mediaDropped.connect(self.load_media_file)
+        
+        self.timeline.selectionRangeChanged.connect(self.handle_timeline_selection_range_changed)
+        self.timeline.storyCreatedFromSelection.connect(self.add_story_from_range)
 
         # Connect Transcript View signals
         self.transcript_view.linkClicked.connect(self.transcript_clicked)
@@ -702,6 +706,10 @@ class UiLayoutMixin:
     def toggle_transcript_editing_mode(self):
         """Toggle between Viewing Mode (navigation/click-to-seek) and Editing Mode (text editing)."""
         if not hasattr(self, "transcript_view"):
+            return
+        if getattr(self, "translation_display_mode", "en") != "en":
+            if hasattr(self, "statusBar"):
+                self.statusBar().showMessage("Editing is only available in English (Original) view.")
             return
         new_mode = not getattr(self.transcript_view, "is_editing_mode", False)
         self.transcript_view.set_editing_mode(new_mode)

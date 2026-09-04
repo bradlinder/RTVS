@@ -38,6 +38,8 @@ class MediaBatchMixin:
 
         # Do not leave references to a QThread that has already finished.
         if not thread.isRunning():
+            if hasattr(self, "timeline"):
+                self.timeline.set_background_generation_active("waveform", False)
             self.wf_thread = None
             self.wf_worker = None
             return True
@@ -60,10 +62,14 @@ class MediaBatchMixin:
         worker.moveToThread(thread); thread.started.connect(worker.run); worker.finished.connect(self._video_thumbnails_finished)
         worker.error.connect(lambda msg: self.log_activity(f"[MEDIA] Video thumbnail generation failed: {msg}", mark_dirty=False))
         worker.finished.connect(thread.quit); worker.error.connect(thread.quit); thread.finished.connect(worker.deleteLater); thread.finished.connect(thread.deleteLater)
-        self.video_thumbnail_thread=thread; self.video_thumbnail_worker=worker; thread.start()
+        self.video_thumbnail_thread=thread; self.video_thumbnail_worker=worker
+        if hasattr(self, "timeline"):
+            self.timeline.set_background_generation_active("thumbnails", True)
+        thread.start()
 
     def _video_thumbnails_finished(self, items):
         if hasattr(self, "timeline"):
+            self.timeline.set_background_generation_active("thumbnails", False)
             self.timeline.set_video_thumbnails(items)
         self.video_thumbnail_worker=None
         self.video_thumbnail_thread=None
@@ -78,6 +84,8 @@ class MediaBatchMixin:
             if not thread.wait(5000):
                 self.log_activity("[WARNING] Video thumbnail worker is still stopping; keeping it tracked to avoid a QThread lifetime crash.", mark_dirty=False)
                 return False
+        if hasattr(self, "timeline"):
+            self.timeline.set_background_generation_active("thumbnails", False)
         self.video_thumbnail_thread=None; self.video_thumbnail_worker=None
         return True
 
@@ -104,10 +112,13 @@ class MediaBatchMixin:
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
         thread.finished.connect(self._waveform_thread_finished)
-
+        if hasattr(self, "timeline"):
+            self.timeline.set_background_generation_active("waveform", True)
         thread.start()
 
     def _waveform_finished(self, peaks, cancelled=False):
+        if hasattr(self, "timeline"):
+            self.timeline.set_background_generation_active("waveform", False)
         if cancelled:
             self.log_activity("[WAVEFORM] Waveform generation canceled.")
             return
@@ -339,6 +350,12 @@ class MediaBatchMixin:
         self.timeline_thumbnail_position = str(self.settings_store.value("timeline_thumbnail_position", "above")).lower()
         if self.timeline_thumbnail_position not in ("above", "below"):
             self.timeline_thumbnail_position = "above"
+
+        self.transcript_selection_mode = str(self.settings_store.value("transcript_selection_mode", "replace") or "replace")
+        if self.transcript_selection_mode not in ("replace", "keep"):
+            self.transcript_selection_mode = "replace"
+        if hasattr(self, "transcript_view") and hasattr(self.transcript_view, "set_selection_mode"):
+            self.transcript_view.set_selection_mode(self.transcript_selection_mode)
 
         if hasattr(self, "timeline"):
             self.timeline.set_timeline_views(self.timeline_show_waveform, self.timeline_show_thumbnails)

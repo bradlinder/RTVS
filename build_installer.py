@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the installable Radio & TV Segmenter 1.1.1 application with PyInstaller.
+"""Build the installable Radio & TV Segmenter 1.7 application with PyInstaller.
 
 Run this script on the target operating system (Windows installers must be
 built on Windows, macOS ones on macOS -- PyInstaller does not cross-compile).
@@ -39,7 +39,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "1.6.1"
+    PROJECT_VERSION = "1.7"
 
 # Only the PySide6 submodules this app actually imports (verified against
 # every `from PySide6.X import ...` in the source tree). The previous build
@@ -141,10 +141,9 @@ def find_tool(name: str) -> str:
 
 
 def check_cpu_only_torch() -> None:
-    """Warn loudly (but don't hard-fail) if the build venv's torch has CUDA
-    baked in. This build is meant to be CPU-only and small; a CUDA-enabled
-    torch wheel alone adds well over a gigabyte. GPU acceleration is meant
-    to be installed on demand via Settings, not bundled here."""
+    """Check that the build venv's torch is CPU-only. This build is meant to be
+    CPU-only and small; a CUDA-enabled torch wheel alone adds 2+ GB. GPU acceleration
+    is an optional component provisioned on demand via Settings, not bundled here."""
     try:
         result = subprocess.run(
             [sys.executable, "-c", "import torch; print(torch.version.cuda or '')"],
@@ -156,13 +155,18 @@ def check_cpu_only_torch() -> None:
         return
 
     if cuda_version:
-        print(
-            f"[BUILD] WARNING: the torch installed in this build environment reports CUDA {cuda_version}. "
-            "This build is intended to be CPU-only and small. Re-create the build virtual environment and "
-            "install torch from the CPU wheel index, e.g.:\n"
-            "  pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu\n"
-            "Continuing with this build anyway, but the resulting installer will be much larger than expected."
+        is_ci = os.environ.get("CI", "").lower() in ("true", "1") or os.environ.get("GITHUB_ACTIONS") == "true"
+        msg = (
+            f"[BUILD] WARNING: torch installed in this build environment reports CUDA {cuda_version}.\n"
+            "This build is intended to be CPU-only and small (<500MB). Installing CUDA packages will\n"
+            "balloon the installer to >2GB and fail release asset limits.\n"
+            "To fix, install CPU-only torch before building:\n"
+            "  pip install 'torch>=2.0,<2.4' 'torchaudio>=2.0,<2.4' --index-url https://download.pytorch.org/whl/cpu\n"
+            "  pip install -r requirements.txt -r requirements-build.txt --extra-index-url https://download.pytorch.org/whl/cpu"
         )
+        if is_ci or os.environ.get("PRS_STRICT_CPU"):
+            raise SystemExit(f"\n[FATAL BUILD ERROR]\n{msg}\nAborting build because CUDA was detected during release CI.")
+        print(msg)
     else:
         print("[BUILD] torch in the build environment is CPU-only. Good.")
 
@@ -202,13 +206,37 @@ def provision_optional_runtime_tools(app_root: Path) -> None:
 
 
 def prune_unneeded_bundled_files(app_root: Path) -> None:
-    """Remove non-runtime files like C++ headers, test suites, and debug symbols to reduce size and installer memory."""
-    print("[BUILD] Pruning non-runtime assets from bundle...")
+    """Remove non-runtime files like C++ headers, test suites, debug symbols, and accidental CUDA bloat."""
+    print("[BUILD] Pruning non-runtime assets and symbol bloat from bundle...")
     internal_dirs = [app_root / "_internal", app_root]
-    
-    # 1. C++ headers and share directories that PyInstaller collect-all copies
+
+    # 1. Purge accidental CUDA/NVIDIA libraries that may have been pulled in by dependencies
+    cuda_purged = 0
+    cuda_lib_prefixes = (
+        "libtorch_cuda", "torch_cuda", "libnvrtc", "nvrtc", "libcudnn", "cudnn",
+        "libcublas", "cublas", "libcusolver", "cusolver", "libcurand", "curand",
+        "libcufft", "cufft", "libnccl", "nccl", "libnvJitLink", "libnvblas",
+    )
+    for base in internal_dirs:
+        if not base.exists():
+            continue
+        # Remove any nvidia package folders
+        for nvidia_dir in base.glob("**/nvidia"):
+            if nvidia_dir.is_dir():
+                print(f"[BUILD] Purging CUDA package directory: {nvidia_dir}")
+                shutil.rmtree(nvidia_dir, ignore_errors=True)
+                cuda_purged += 1
+        for item in list(base.rglob("*")):
+            if item.is_file() and any(item.name.startswith(p) for p in cuda_lib_prefixes):
+                item.unlink(missing_ok=True)
+                cuda_purged += 1
+    if cuda_purged:
+        print(f"[BUILD] Purged {cuda_purged} accidental CUDA files/directories from bundle.")
+
+    # 2. C++ headers, share directories, and developer includes
     header_patterns = [
-        "torch/include", "torch/share", "torchaudio/include", "scipy/include"
+        "torch/include", "torch/share", "torchaudio/include", "scipy/include",
+        "PySide6/include", "PySide6/glue", "PySide6/typesystems", "PySide6/scripts",
     ]
     for base in internal_dirs:
         if not base.exists():
@@ -219,7 +247,7 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
                 print(f"[BUILD] Removing unneeded directory: {target}")
                 shutil.rmtree(target, ignore_errors=True)
 
-    # 2. Test directories, debug symbols, and type stubs
+    # 3. Test directories, debug symbols, and type stubs
     pruned_files = 0
     for base in internal_dirs:
         if not base.exists():
@@ -229,10 +257,33 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
                 if item.suffix in (".pdb", ".pyi"):
                     item.unlink(missing_ok=True)
                     pruned_files += 1
-            elif item.is_dir() and item.name in ("tests", "testing") and any(k in str(item).lower() for k in ("torch", "scipy", "transformers", "ctranslate2")):
+            elif item.is_dir() and item.name in ("tests", "testing", "test") and any(k in str(item).lower() for k in ("torch", "scipy", "transformers", "ctranslate2", "pyside6", "sympy", "jinja2")):
                 shutil.rmtree(item, ignore_errors=True)
     if pruned_files:
         print(f"[BUILD] Pruned {pruned_files} debug/stub files from bundle.")
+
+    # 4. Strip unneeded symbols from Linux ELF shared objects and binaries
+    if sys.platform.startswith("linux") and shutil.which("strip"):
+        stripped_count = 0
+        for base in internal_dirs:
+            if not base.exists():
+                continue
+            for item in list(base.rglob("*")):
+                if item.is_file() and not item.is_symlink():
+                    if item.suffix == ".so" or ".so." in item.name or (item.stat().st_mode & 0o111 and not item.suffix):
+                        try:
+                            res = subprocess.run(
+                                ["strip", "--strip-unneeded", str(item)],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                check=False,
+                            )
+                            if res.returncode == 0:
+                                stripped_count += 1
+                        except Exception:
+                            pass
+        if stripped_count:
+            print(f"[BUILD] Stripped unneeded symbols from {stripped_count} Linux binaries/libraries.")
 
 
 def main() -> None:
@@ -257,7 +308,8 @@ def main() -> None:
     general_excludes = [
         *PYSIDE6_EXCLUDES,
         "torch.testing", "torch.distributed", "torch.onnx", "torch.compiler",
-        "torch.utils.benchmark", "torch.utils.tensorboard",
+        "torch.utils.benchmark", "torch.utils.tensorboard", "torch.cuda",
+        "torchaudio.cuda", "triton", "nvidia",
         "scipy.spatial.tests", "scipy.stats.tests", "scipy.optimize.tests",
         "scipy.linalg.tests", "scipy.sparse.tests", "scipy.ndimage.tests",
         "pytest", "unittest.test", "test", "tests",

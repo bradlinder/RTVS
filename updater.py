@@ -55,7 +55,7 @@ try:
     )
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "1.6.1"
+    PROJECT_VERSION = "1.7"
     DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
     INTERNAL_APP_ID = "RadioTVStorySegmenter"
 
@@ -194,17 +194,28 @@ def select_best_asset_for_platform(assets: list[dict]) -> dict | None:
                 candidates.append((5, asset))
 
         else:
-            # Linux / Unix
-            if name.endswith(".appimage"):
+            # Linux / Unix: Prioritize Debian/Ubuntu packages (.deb) when running on Debian/Ubuntu systems
+            is_debian = (
+                Path("/etc/debian_version").exists()
+                or ("ubuntu" in Path("/etc/os-release").read_text(errors="ignore").lower() if Path("/etc/os-release").exists() else False)
+                or ("debian" in Path("/etc/os-release").read_text(errors="ignore").lower() if Path("/etc/os-release").exists() else False)
+            )
+            if name.endswith(".deb"):
+                score = 30 if is_debian else 18
+                if "radiotv" in name or "segmenter" in name:
+                    score += 5
+                candidates.append((score, asset))
+            elif name.endswith(".appimage"):
                 score = 25
                 candidates.append((score, asset))
             elif name.endswith(".tar.gz") or name.endswith(".tgz"):
                 score = 15
                 if "linux" in name or "x86_64" in name:
-                    score += 10
+                    score += 5
                 candidates.append((score, asset))
-            elif name.endswith(".deb") or name.endswith(".rpm"):
-                candidates.append((8, asset))
+            elif name.endswith(".rpm"):
+                score = 30 if not is_debian and Path("/etc/redhat-release").exists() else 8
+                candidates.append((score, asset))
 
     if candidates:
         candidates.sort(key=lambda x: x[0], reverse=True)
@@ -268,8 +279,12 @@ def launch_and_install(file_path: str, parent: QWidget | None = None) -> bool:
                 path.chmod(0o755)
                 subprocess.Popen([str(path)])
                 return True
+            elif path.name.endswith(".deb"):
+                # Launch the native Debian/Ubuntu package installer GUI (e.g., Ubuntu Software, GDebi, QApt)
+                subprocess.Popen(["xdg-open", str(path)])
+                return True
             else:
-                # Open the downloads directory in file manager
+                # Open the downloads directory in the system file manager
                 subprocess.Popen(["xdg-open", str(path.parent)])
                 return True
         except Exception as exc:

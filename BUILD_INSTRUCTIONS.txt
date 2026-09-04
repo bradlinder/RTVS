@@ -1,9 +1,9 @@
 # ==============================================================================
-# Radio & TV Segmenter v1.6 — Executable & Installer Build Instructions
+# Radio & TV Segmenter v1.7 — Executable & Installer Build Instructions
 # ==============================================================================
 
 This guide provides comprehensive, step-by-step instructions for building
-standalone, installable executables of Radio & TV Segmenter v1.6 for
+standalone, installable executables of Radio & TV Segmenter v1.7 for
 Windows, macOS, and Linux.
 
 ------------------------------------------------------------------------------
@@ -30,7 +30,7 @@ repository root for Windows, macOS, and Linux:
   - It automatically initializes a dedicated build environment (.venv-build),
     installs all necessary build dependencies using CPU-only wheels, compiles
     the application via `python build_installer.py`, and if Inno Setup is
-    installed, builds the final Windows Setup installer `RadioTVSegmenter-1.6-Windows.exe`!
+    installed, builds the final Windows Setup installer `RadioTVSegmenter-1.7-Windows.exe`!
 
 * macOS (1-Click Shell Script):
   - Run `./build_macos.sh` in Terminal.
@@ -138,7 +138,7 @@ Step 4: Compile Inno Setup Installer (.exe)
    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\Windows\RadioTVStorySegmenter.iss
 
 4. The setup wizard executable is generated in:
-   `dist/installer/RadioTVSegmenter-1.6-Windows.exe`
+   `dist/installer/RadioTVSegmenter-1.7-Windows.exe`
 
 ==============================================================================
 4. macOS COMPILATION & DMG CREATION (macOS 12+ INTEL / APPLE SILICON)
@@ -176,20 +176,27 @@ Run the automated packaging script:
     bash installer/macOS/build_app.sh
 
 The resulting installable disk image is output to:
-`dist/RadioTVSegmenter-1.6-macOS.dmg`
+`dist/RadioTVSegmenter-1.7-macOS.dmg`
 
 ==============================================================================
 5. LINUX COMPILATION (UBUNTU / DEBIAN / FEDORA / ARCH)
 ==============================================================================
 
+Automated 1-Click Build (Debian/Ubuntu):
+----------------------------------------
+You can simply run the automated build script:
+    ./build_linux.sh
+
+Or follow manual steps below:
+
 Step 1: Install System Dependencies
 -----------------------------------
 Ubuntu/Debian:
     sudo apt update
-    sudo apt install python3-venv python3-dev ffmpeg libxcb-cursor0 libpulse0
+    sudo apt install python3-venv python3-dev ffmpeg libxcb-cursor0 libpulse0 binutils dpkg-dev
 
 Fedora:
-    sudo dnf install python3-devel ffmpeg libxcb pulseaudio-libs
+    sudo dnf install python3-devel ffmpeg libxcb pulseaudio-libs binutils
 
 Step 2: Set Up Build Virtual Environment
 ----------------------------------------
@@ -197,20 +204,27 @@ Step 2: Set Up Build Virtual Environment
     source venv_build/bin/activate
     python -m pip install --upgrade pip setuptools wheel
 
-    # Install CPU-only dependencies
-    pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
-    pip install -r requirements-build.txt
+    # Install CPU-only dependencies (ensures <500MB package size)
+    pip install --prefer-binary "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0" --index-url https://download.pytorch.org/whl/cpu
+    pip install --prefer-binary -r requirements.txt -r requirements-build.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
 Step 3: Run the Build Script
 ----------------------------
     python3 build_installer.py
 
-Step 4: Package for Distribution (.tar.gz or AppImage)
-------------------------------------------------------
-To create a standalone distributable tarball:
+Step 4: Package for Distribution (.deb and .tar.gz)
+---------------------------------------------------
+To build the Debian/Ubuntu package (.deb) with desktop integration and icons:
+
+    bash installer/Linux/build_deb.sh
+
+This generates `dist/RadioTVSegmenter-1.7-Linux-amd64.deb` which users can install via:
+    sudo apt install ./dist/RadioTVSegmenter-1.7-Linux-amd64.deb
+
+To create a standalone distributable tarball for other distributions:
 
     cd dist
-    tar -czvf RadioTVSegmenter-1.6-Linux-x86_64.tar.gz RadioTVSegmenter/
+    tar -czvf RadioTVSegmenter-1.7-Linux-x86_64.tar.gz RadioTVSegmenter/
 
 To run directly on Linux:
     ./dist/RadioTVSegmenter/RadioTVSegmenter
@@ -222,7 +236,7 @@ Before releasing a new build to users, execute these smoke tests:
 
 1. Launch & Window Title:
    - Run the compiled binary/installer directly.
-   - Verify window title shows "Radio & TV Segmenter v1.6".
+   - Verify window title shows "Radio & TV Segmenter v1.7".
 2. Theme Verification:
    - Switch to Settings > Appearance > Light Mode: confirm transcript text,
      speaker names, timestamps, and Export dialog checkboxes are clearly visible.

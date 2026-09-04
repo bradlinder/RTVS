@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter — v1.6
+"""Radio & TV Segmenter — v1.7
 
 This is the thin application composition root. UI/processing responsibilities
 are implemented in focused mixins so future changes can target smaller files
@@ -71,6 +71,7 @@ class MainWindow(
         self.processing_status = {"transcription": False, "diarization": False, "stories": False}
         self.pipeline_active = False
         self.pipeline_queue = []
+        self.pipeline_rerun_confirmed = False
         self.speaker_names = {}
         self.segment_speaker_overrides = {}
         self.translations = {}
@@ -158,6 +159,7 @@ class MainWindow(
         self.timeline_show_waveform = str(self.settings_store.value("timeline_show_waveform", "true")).lower() in {"1", "true", "yes"}
         self.timeline_show_thumbnails = str(self.settings_store.value("timeline_show_thumbnails", "true")).lower() in {"1", "true", "yes"}
         self.timeline_thumbnail_position = "above"
+        self.transcript_selection_mode = str(self.settings_store.value("transcript_selection_mode", "replace") or "replace")
 
         self.audio_output = QAudioOutput()
         self.audio_output.setVolume(1.0)

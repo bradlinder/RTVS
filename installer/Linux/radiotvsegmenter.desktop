@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Radio & TV Segmenter
+GenericName=Story Segmenter & Transcriber
+Comment=AI-powered story segmenting, transcription, and editing for broadcast audio/video
+Exec=/opt/RadioTVSegmenter/RadioTVSegmenter %F
+Icon=radiotvsegmenter
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;AudioVideoEditing;Qt;
+MimeType=audio/mpeg;audio/x-wav;audio/mp4;video/mp4;audio/ogg;audio/flac;
+Keywords=transcription;whisper;audio;segmenter;broadcast;radio;tv;
+StartupWMClass=RadioTVSegmenter

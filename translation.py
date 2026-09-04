@@ -58,8 +58,11 @@ class TranslationMixin:
 
     def has_spanish_translation(self) -> bool:
         """Check if an English-to-Spanish translation is available."""
-        key = self.translation_key("en", "es")
-        return self.translation_is_current(key)
+        item = self.get_spanish_translation_item()
+        if not item or not isinstance(item, dict):
+            return False
+        segments = item.get("segments", [])
+        return bool(segments)
 
     def get_spanish_translation_item(self) -> dict | None:
         """Return the translation dictionary for en-es if present."""
@@ -88,23 +91,40 @@ class TranslationMixin:
             self.transcript_language_selector.clear()
             self.transcript_language_selector.addItem("English (Original)", "en")
             if has_es:
-                self.transcript_language_selector.addItem("Español (Translation)", "es")
+                es_item = self.get_spanish_translation_item()
+                is_stale = isinstance(es_item, dict) and es_item.get("status") == "stale"
+                es_label = "Español (Translation - Outdated)" if is_stale else "Español (Translation)"
+                self.transcript_language_selector.addItem(es_label, "es")
                 self.transcript_language_selector.addItem("Bilingual (Split)", "split")
-            cur_idx = self.transcript_language_selector.findData(getattr(self, "translation_display_mode", "en"))
-            self.transcript_language_selector.setCurrentIndex(max(0, cur_idx))
+            target_mode = getattr(self, "translation_display_mode", "en")
+            if target_mode == "bilingual":
+                target_mode = "split"
+            cur_idx = self.transcript_language_selector.findData(target_mode)
+            if cur_idx < 0:
+                cur_idx = 0
+                self.translation_display_mode = "en"
+            self.transcript_language_selector.setCurrentIndex(cur_idx)
             self.transcript_language_selector.blockSignals(False)
 
         if hasattr(self, "export_translation_action") and self.export_translation_action is not None:
             self.export_translation_action.setEnabled(has_es)
 
-    def change_translation_display(self, mode: str | None = None):
+    def change_translation_display(self, mode: str | int | None = None):
         """Change the active translation display mode ('en', 'es', or 'split')."""
-        if mode is None:
+        if isinstance(mode, int):
+            if hasattr(self, "transcript_language_selector") and self.transcript_language_selector is not None:
+                mode = self.transcript_language_selector.itemData(mode)
+            else:
+                mode = "en"
+        elif mode is None:
             if hasattr(self, "transcript_language_selector") and self.transcript_language_selector is not None:
                 mode = self.transcript_language_selector.currentData()
             else:
                 mode = "en"
-        self.translation_display_mode = mode or "en"
+        mode_str = str(mode or "en")
+        if mode_str == "bilingual":
+            mode_str = "split"
+        self.translation_display_mode = mode_str
         self.render_transcript()
 
     def render_translation_view(self):
@@ -151,8 +171,18 @@ class TranslationMixin:
             QMessageBox.information(self, "Translation Busy", "A translation task is already running.")
             return
 
-        if not self.transcript or not self.transcript.get("segments"):
+        raw_segments = []
+        if isinstance(self.transcript, dict):
+            raw_segments = self.transcript.get("segments", [])
+        elif isinstance(self.transcript, list):
+            raw_segments = self.transcript
+
+        if not raw_segments:
             QMessageBox.warning(self, "No Transcript", "A transcript is required before running translation.")
+            if getattr(self, "pipeline_active", False):
+                self.pipeline_active = False
+                self.pipeline_queue = []
+                self.pipeline_rerun_confirmed = False
             return
 
         variant = getattr(self, "translation_model_variant", "tiny")
@@ -164,6 +194,10 @@ class TranslationMixin:
                     f"The {variant} translation model ({from_code}->{to_code}) is not installed.\n"
                     "Please install it via Settings > Manage Models."
                 )
+                if getattr(self, "pipeline_active", False):
+                    self.pipeline_active = False
+                    self.pipeline_queue = []
+                    self.pipeline_rerun_confirmed = False
                 return
 
         self.set_processing_stage("Translating transcript", f"{from_code} → {to_code}")
@@ -173,10 +207,15 @@ class TranslationMixin:
         self.set_tools_actions_enabled(False)
 
         device = getattr(self, "translation_device", "cpu")
+        segments = raw_segments
+
         worker = TranslationWorker(
-            transcript=copy.deepcopy(self.transcript),
+            segments=copy.deepcopy(segments),
             from_code=from_code,
             to_code=to_code,
+            install_if_missing=install_if_missing,
+            model_variant=variant,
+            transcript=copy.deepcopy(self.transcript),
             variant=variant,
             device=device,
         )
@@ -189,9 +228,11 @@ class TranslationMixin:
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_translation_progress)
         worker.finished.connect(self._on_translation_finished)
+        worker.cancelled.connect(self._on_translation_cancelled)
         worker.error.connect(self._on_translation_error)
 
         worker.finished.connect(thread.quit)
+        worker.cancelled.connect(thread.quit)
         worker.error.connect(thread.quit)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(self._on_translation_thread_finished)
@@ -203,13 +244,25 @@ class TranslationMixin:
         """Handle progress updates from TranslationWorker."""
         self.update_processing_progress(percent, message)
 
-    def _on_translation_finished(self, translated_transcript: dict, translation_key: str):
+    def _on_translation_finished(self, translated_transcript: Any, translation_key: str):
         """Handle successful translation results."""
         if not hasattr(self, "translations") or not isinstance(self.translations, dict):
             self.translations = {}
 
-        self.translations[translation_key] = translated_transcript
-        self.translations[translation_key]["status"] = "current"
+        if isinstance(translated_transcript, list):
+            translated_dict = copy.deepcopy(self.transcript) if isinstance(self.transcript, dict) else {}
+            translated_dict["segments"] = translated_transcript
+        elif isinstance(translated_transcript, dict):
+            translated_dict = translated_transcript
+        else:
+            translated_dict = {"segments": []}
+
+        translated_dict["status"] = "current"
+        self.translations[translation_key] = translated_dict
+        if hasattr(self, "processing_status") and isinstance(self.processing_status, dict):
+            self.processing_status["translation"] = True
+        if hasattr(self, "update_processing_stage_summary"):
+            self.update_processing_stage_summary()
 
         self.log_activity(f"[TRANSLATION] Completed translation ({translation_key}).")
         self.mark_project_dirty("Translation completed")
@@ -229,9 +282,38 @@ class TranslationMixin:
                 self.transcript_language_selector.blockSignals(False)
         self.render_transcript()
 
+        if getattr(self, "pipeline_active", False) and getattr(self, "pipeline_queue", []):
+            QTimer.singleShot(0, self._run_next_selected_processing)
+        elif getattr(self, "batch_active", False) and getattr(self, "pipeline_active", False):
+            self.pipeline_active = False
+            self.pipeline_rerun_confirmed = False
+            self._batch_export_current()
+            QTimer.singleShot(0, self._batch_next_media)
+        elif getattr(self, "pipeline_active", False):
+            self.pipeline_active = False
+            self.pipeline_rerun_confirmed = False
+            self.set_processing_stage(None)
+            self.log_activity("[AUTOMATION] Selected processing complete.")
+
+    def _on_translation_cancelled(self, results: Any, translation_key: str):
+        """Handle translation worker cancellation."""
+        self.log_activity(f"[TRANSLATION] Canceled by user ({translation_key}).")
+        if getattr(self, "pipeline_active", False):
+            self.pipeline_active = False
+            self.pipeline_queue = []
+            self.pipeline_rerun_confirmed = False
+        self.set_processing_stage("", "")
+        self.set_tools_actions_enabled(True)
+        if hasattr(self, "cancel_button") and self.cancel_button is not None:
+            self.cancel_button.hide()
+
     def _on_translation_error(self, error_message: str):
         """Handle translation worker failures."""
         self.log_activity(f"[TRANSLATION ERROR] {error_message}")
+        if getattr(self, "pipeline_active", False):
+            self.pipeline_active = False
+            self.pipeline_queue = []
+            self.pipeline_rerun_confirmed = False
         self.set_processing_stage("", "")
         self.set_tools_actions_enabled(True)
         if hasattr(self, "cancel_button") and self.cancel_button is not None:

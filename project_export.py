@@ -1440,15 +1440,17 @@ class ProjectExportMixin:
             if self.current_media_is_video:
                 QTimer.singleShot(0, self.start_video_thumbnail_generation)
         self.transcript = data.get("transcript")
-        self.update_translation_language_selector()
         self.diarization = data.get("diarization")
         self.speaker_names = {str(k): str(v) for k, v in data.get("speaker_names", {}).items() if str(v).strip()}
         self.segment_speaker_overrides = {int(k): str(v) for k, v in data.get("segment_speaker_overrides", {}).items()}
         self.stories = [Story.from_dict(item) for item in data.get("stories", [])]
         self.translations = data.get("translations", {}) if isinstance(data.get("translations", {}), dict) else {}
         self.translation_display_mode = str(data.get("translation_display_mode", "en"))
-        if self.translation_display_mode not in {"en", "es", "bilingual"}:
+        if self.translation_display_mode == "bilingual":
+            self.translation_display_mode = "split"
+        elif self.translation_display_mode not in {"en", "es", "split"}:
             self.translation_display_mode = "en"
+        self.update_translation_language_selector()
         if hasattr(self, "transcript_language_selector"):
             idx = self.transcript_language_selector.findData(self.translation_display_mode)
             if idx >= 0:
@@ -1621,7 +1623,12 @@ class ProjectExportMixin:
         else:
             self._handle_wordpress_export_result(result)
 
-    def _export_story_files(self, stories_with_indices, formats, base, options, directory, progress_dialog=None, start_progress_idx=0):
+    def cancel_export(self):
+        """Flag the running export operation to halt at the next iteration."""
+        self.export_cancelled = True
+        self.log_activity("[EXPORT] Cancel requested by user.")
+
+    def _export_story_files(self, stories_with_indices, formats, base, options, directory, start_idx=0, total_batch=None):
         out = Path(directory)
         create_bundle = str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"}
         if create_bundle:
@@ -1645,22 +1652,24 @@ class ProjectExportMixin:
                 languages_to_export.append(("es", "_es"))
 
         doc_base = base if base else (safe_filename(self.audio_file.stem) if self.audio_file else "Story")
-        total_stories = len(stories_with_indices)
+        total_stories = total_batch if total_batch is not None else len(stories_with_indices)
 
         for i, (idx, story) in enumerate(stories_with_indices):
-            if progress_dialog is not None:
-                if progress_dialog.wasCanceled():
-                    self.log_activity("[EXPORT] Export canceled by user.")
-                    return False
-                story_title = story.title.strip() if story.title else f"Story {idx + 1}"
-                progress_dialog.setLabelText(f"Exporting story {i + 1} of {total_stories}: '{story_title}'...")
-                progress_dialog.setValue(start_progress_idx + i)
-                QApplication.processEvents()
+            if getattr(self, "export_cancelled", False):
+                self.log_activity("[EXPORT] Export operation stopped by user.")
+                return False
 
             story_title = story.title.strip() if story.title else f"Story {idx + 1}"
+            current_count = start_idx + i + 1
+            pct = int(((start_idx + i) / max(1, total_stories)) * 100)
+            
+            # Update inline top-of-window header indicators
+            self.set_processing_stage("Exporting Stories", f"{current_count} of {total_stories}: '{story_title}'")
+            self.update_processing_progress(pct, f"Exporting {story_title}...")
+            QApplication.processEvents()
+
             story_slug = safe_filename(story.title) if story.title else f"Story_{idx + 1:02d}"
             story_base = f"{doc_base}_{idx + 1:02d}_{story_slug}" if story.title else f"{doc_base}_{idx + 1:02d}"
-
             segments = self.transcript_for_range(story.start, story.end)
 
             for lang_code, suffix in languages_to_export:
@@ -1690,7 +1699,7 @@ class ProjectExportMixin:
                         })
                     blocks = self.build_story_blocks(curr_spk_blocks) if curr_spk_blocks else []
 
-                # Export TXT to Transcripts subfolder
+                # Export TXT
                 if formats.get("txt"):
                     txt_file = transcripts_out / f"{file_base}.txt"
                     with open(txt_file, "w", encoding="utf-8") as f:
@@ -1709,7 +1718,7 @@ class ProjectExportMixin:
                                 prefix += f"{speaker}: "
                             f.write(f"{prefix}{p_text}\n\n")
 
-                # Export DOCX to Transcripts subfolder
+                # Export DOCX
                 if formats.get("docx"):
                     docx_file = transcripts_out / f"{file_base}.docx"
                     document = Document()
@@ -1735,20 +1744,16 @@ class ProjectExportMixin:
                         p.paragraph_format.space_after = Pt(6)
                     document.save(docx_file)
 
-                # Export Subtitles to Transcripts subfolder
+                # Export Subtitles
                 if formats.get("srt"):
                     self.write_subtitles(blocks, transcripts_out / f"{file_base}.srt", "srt", options.get("include_speakers", True))
                 if formats.get("vtt"):
                     self.write_subtitles(blocks, transcripts_out / f"{file_base}.vtt", "vtt", options.get("include_speakers", True))
 
-            # Export Media clip to Media subfolder
+            # Export Media Clip
             if formats.get("media") and self.audio_file:
                 media_file = media_out / f"{story_base}{self.audio_file.suffix.lower()}"
                 self.extract_media(story.start, story.end, media_file)
-
-            if progress_dialog is not None:
-                progress_dialog.setValue(start_progress_idx + i + 1)
-                QApplication.processEvents()
 
         return True
 
@@ -1763,7 +1768,6 @@ class ProjectExportMixin:
             return
 
         base = custom_base or (safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "export")))
-
         if directory is None:
             if self.project_file and ((self.project_file.parent / "Transcripts").is_dir() or (self.project_file.parent / "Media").is_dir()):
                 project_dir, _, _, chosen_base = self.prepare_export_directories()
@@ -1780,26 +1784,23 @@ class ProjectExportMixin:
         formats = custom_formats or {"txt": True, "docx": True, "srt": False, "vtt": False, "media": False}
         options = custom_options or {"include_speakers": True, "include_timestamps": False, "include_english": True, "include_spanish": False}
 
-        total_items = len(stories_to_export)
-        progress_dialog = QProgressDialog("Preparing export...", "Cancel", 0, total_items, self)
-        progress_dialog.setWindowTitle("Exporting Files")
-        progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        progress_dialog.setMinimumDuration(0)
-        progress_dialog.setValue(0)
-        progress_dialog.show()
-        QApplication.processEvents()
+        self.export_cancelled = False
+        if hasattr(self, "cancel_button"):
+            self.cancel_button.show()
 
         try:
-            success = self._export_story_files(stories_to_export, formats, base, options, directory, progress_dialog=progress_dialog)
-            if success and not progress_dialog.wasCanceled():
-                progress_dialog.setValue(total_items)
+            success = self._export_story_files(stories_to_export, formats, base, options, directory)
+            if success and not self.export_cancelled:
+                self.update_processing_progress(100, "Export complete.")
                 self.log_activity(f"[EXPORT] Exported {len(stories_to_export)} selected story/stories to {directory}")
                 QMessageBox.information(self, "Export Complete", f"Exported {len(stories_to_export)} story segment(s) to:\n{directory}")
         except Exception as exc:
             self.log_activity(f"[ERROR] Selected stories export failed: {exc}")
             QMessageBox.critical(self, "Export Error", str(exc))
         finally:
-            progress_dialog.close()
+            self.set_processing_stage(None)
+            if hasattr(self, "cancel_button"):
+                self.cancel_button.hide()
 
     def export_all_stories(self, custom_formats=None, custom_base=None, custom_options=None, directory=None):
         if not getattr(self, "stories", []):
@@ -1807,7 +1808,6 @@ class ProjectExportMixin:
             return
 
         base = custom_base or (safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "export")))
-
         if directory is None:
             if self.project_file and ((self.project_file.parent / "Transcripts").is_dir() or (self.project_file.parent / "Media").is_dir()):
                 project_dir, _, _, chosen_base = self.prepare_export_directories()
@@ -1825,30 +1825,26 @@ class ProjectExportMixin:
         options = custom_options or {"include_speakers": True, "include_timestamps": False, "include_english": True, "include_spanish": False}
 
         stories_to_export = list(enumerate(self.stories))
-        total_items = len(stories_to_export)
-        progress_dialog = QProgressDialog("Preparing export...", "Cancel", 0, total_items, self)
-        progress_dialog.setWindowTitle("Exporting Files")
-        progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        progress_dialog.setMinimumDuration(0)
-        progress_dialog.setValue(0)
-        progress_dialog.show()
-        QApplication.processEvents()
+        self.export_cancelled = False
+        if hasattr(self, "cancel_button"):
+            self.cancel_button.show()
 
         try:
-            success = self._export_story_files(stories_to_export, formats, base, options, directory, progress_dialog=progress_dialog)
-            if success and not progress_dialog.wasCanceled():
-                progress_dialog.setValue(total_items)
+            success = self._export_story_files(stories_to_export, formats, base, options, directory)
+            if success and not self.export_cancelled:
+                self.update_processing_progress(100, "Export complete.")
                 self.log_activity(f"[EXPORT] Exported all {len(stories_to_export)} stories to {directory}")
                 QMessageBox.information(self, "Export Complete", f"Exported all {len(stories_to_export)} story segment(s) to:\n{directory}")
         except Exception as exc:
             self.log_activity(f"[ERROR] All stories export failed: {exc}")
             QMessageBox.critical(self, "Export Error", str(exc))
         finally:
-            progress_dialog.close()
+            self.set_processing_stage(None)
+            if hasattr(self, "cancel_button"):
+                self.cancel_button.hide()
 
     def export_full_and_all_stories(self, custom_formats=None, custom_base=None, custom_options=None, directory=None):
         base = custom_base or (safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "export")))
-
         if directory is None:
             if self.project_file and ((self.project_file.parent / "Transcripts").is_dir() or (self.project_file.parent / "Media").is_dir()):
                 project_dir, _, _, chosen_base = self.prepare_export_directories()
@@ -1864,55 +1860,53 @@ class ProjectExportMixin:
 
         formats = custom_formats or {"txt": True, "docx": True, "srt": False, "vtt": False, "media": False}
         options = custom_options or {"include_speakers": True, "include_timestamps": False, "include_english": True, "include_spanish": False}
-
         stories_to_export = list(enumerate(self.stories)) if getattr(self, "stories", []) else []
         total_items = 1 + len(stories_to_export)
-        progress_dialog = QProgressDialog("Preparing export...", "Cancel", 0, total_items, self)
-        progress_dialog.setWindowTitle("Exporting Files")
-        progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        progress_dialog.setMinimumDuration(0)
-        progress_dialog.setValue(0)
-        progress_dialog.show()
-        QApplication.processEvents()
+
+        self.export_cancelled = False
+        if hasattr(self, "cancel_button"):
+            self.cancel_button.show()
 
         try:
+            self.set_processing_stage("Exporting Full & Stories", f"1 of {total_items}: Full Episode")
+            self.update_processing_progress(0, "Exporting full episode...")
+            QApplication.processEvents()
+
             ok = self.export_full_episode(
                 custom_formats=formats,
                 custom_base=base,
                 custom_options=options,
                 directory=directory,
                 show_completion=False,
-                progress_dialog=progress_dialog,
-                progress_value=0,
             )
-            if ok and not progress_dialog.wasCanceled():
-                progress_dialog.setValue(1)
-                QApplication.processEvents()
-                if stories_to_export:
-                    self._export_story_files(
-                        stories_to_export,
-                        formats,
-                        base,
-                        options,
-                        directory,
-                        progress_dialog=progress_dialog,
-                        start_progress_idx=1,
-                    )
-                if not progress_dialog.wasCanceled():
-                    progress_dialog.setValue(total_items)
-                    self.log_activity(f"[EXPORT] Exported full episode and all stories to {directory}")
-                    QMessageBox.information(self, "Export Complete", f"Exported full episode and story segments to:\n{directory}")
+
+            if ok and not self.export_cancelled and stories_to_export:
+                self._export_story_files(
+                    stories_to_export,
+                    formats,
+                    base,
+                    options,
+                    directory,
+                    start_idx=1,
+                    total_batch=total_items,
+                )
+
+            if not self.export_cancelled:
+                self.update_processing_progress(100, "Export complete.")
+                self.log_activity(f"[EXPORT] Exported full episode and all stories to {directory}")
+                QMessageBox.information(self, "Export Complete", f"Exported full episode and story segments to:\n{directory}")
         except Exception as exc:
             self.log_activity(f"[ERROR] Full & story export failed: {exc}")
             QMessageBox.critical(self, "Export Error", str(exc))
         finally:
-            progress_dialog.close()
+            self.set_processing_stage(None)
+            if hasattr(self, "cancel_button"):
+                self.cancel_button.hide()
 
     def _handle_wordpress_export_result(self, result):
         client = getattr(self, "_get_wp_client", lambda: None)()
         if not client:
             return
-
         wp_posts = result.get("wp_posts", [])
         if not wp_posts:
             QMessageBox.warning(self, "No Posts", "No posts were configured for export.")
@@ -1922,22 +1916,18 @@ class ProjectExportMixin:
         inc_es = result.get("include_spanish", False)
         pres = result.get("spanish_presentation", "accordion")
         primary = result.get("primary_language", "en")
-
         total_posts = len(wp_posts)
-        progress_dialog = QProgressDialog("Preparing WordPress export...", "Cancel", 0, total_posts, self)
-        progress_dialog.setWindowTitle("Publishing to WordPress")
-        progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        progress_dialog.setMinimumDuration(0)
-        progress_dialog.setValue(0)
-        progress_dialog.show()
-        QApplication.processEvents()
+
+        self.export_cancelled = False
+        if hasattr(self, "cancel_button"):
+            self.cancel_button.show()
 
         created_posts = []
         failed_posts = []
 
         try:
             for idx, post in enumerate(wp_posts):
-                if progress_dialog.wasCanceled():
+                if getattr(self, "export_cancelled", False):
                     self.log_activity("[WORDPRESS] Export canceled by user.")
                     break
 
@@ -1945,8 +1935,10 @@ class ProjectExportMixin:
                 task_label = post.get("task_label") or post_title
                 media_name = safe_filename(post_title) if post_title else "audio"
                 media_filename = f"{media_name}.mp3"
-                progress_dialog.setLabelText(f"Exporting post {idx + 1} of {total_posts}: '{post_title}'...")
-                progress_dialog.setValue(idx)
+
+                pct = int((idx / max(1, total_posts)) * 100)
+                self.set_processing_stage("WordPress Publishing", f"{idx + 1} of {total_posts}: '{post_title}'")
+                self.update_processing_progress(pct, f"Publishing '{post_title}'...")
                 QApplication.processEvents()
 
                 try:
@@ -1981,13 +1973,12 @@ class ProjectExportMixin:
                         "title": post_title,
                         "error": str(exc),
                     })
-
-                progress_dialog.setValue(idx + 1)
-                QApplication.processEvents()
         finally:
-            progress_dialog.close()
+            self.set_processing_stage(None)
+            if hasattr(self, "cancel_button"):
+                self.cancel_button.hide()
 
-        # Show a single consolidated result notification after all stories have been posted
+        # Final summaries
         if created_posts and not failed_posts:
             if len(created_posts) == 1:
                 p = created_posts[0]
@@ -2001,7 +1992,7 @@ class ProjectExportMixin:
                     f"Preview Link: {p['link']}",
                 )
             else:
-                posts_summary = "\n".join([f"• #{p['id']}: {p['title']}" for p in created_posts])
+                posts_summary = "\n".join([f"  #{p['id']}: {p['title']}" for p in created_posts])
                 QMessageBox.information(
                     self,
                     "WordPress Export Complete",
@@ -2009,8 +2000,8 @@ class ProjectExportMixin:
                     f"Created Posts:\n{posts_summary}",
                 )
         elif created_posts and failed_posts:
-            success_summary = "\n".join([f"• #{p['id']}: {p['title']}" for p in created_posts])
-            fail_summary = "\n".join([f"• {f['title']}: {f['error']}" for f in failed_posts])
+            success_summary = "\n".join([f"  #{p['id']}: {p['title']}" for p in created_posts])
+            fail_summary = "\n".join([f"  {f['title']}: {f['error']}" for f in failed_posts])
             QMessageBox.warning(
                 self,
                 "WordPress Export Finished with Errors",
@@ -2019,7 +2010,7 @@ class ProjectExportMixin:
                 f"Failed Posts:\n{fail_summary}",
             )
         elif failed_posts:
-            fail_summary = "\n".join([f"• {f['title']}: {f['error']}" for f in failed_posts])
+            fail_summary = "\n".join([f"  {f['title']}: {f['error']}" for f in failed_posts])
             QMessageBox.critical(
                 self,
                 "WordPress Export Failed",

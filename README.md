@@ -1,6 +1,6 @@
-# Radio & TV Segmenter 1.1.1
+# Radio & TV Segmenter 1.7
 
-Install-oriented release candidate for Windows and macOS.
+Cross-platform story segmenter and transcriber for Windows, macOS, and Linux (Debian/Ubuntu).
 
 ## Distribution model
 
@@ -40,6 +40,28 @@ installer/macOS/build_app.sh
 
 Set `DEVELOPER_ID_APPLICATION` before running the script to sign the app. Set `NOTARY_PROFILE` to an existing `notarytool` keychain profile to submit and staple the DMG.
 
+### Linux (Debian / Ubuntu) installer
+
+Build `dist/RadioTVSegmenter` first, then run:
+
+```text
+bash installer/Linux/build_deb.sh
+```
+
+Or run the automated 1-click build script:
+
+```text
+./build_linux.sh
+```
+
+The resulting package `dist/RadioTVSegmenter-1.7-Linux-amd64.deb` can be installed on any Debian or Ubuntu system using:
+
+```text
+sudo apt install ./dist/RadioTVSegmenter-1.7-Linux-amd64.deb
+```
+
+A standalone compressed tarball (`dist/RadioTVSegmenter-1.7-Linux-x86_64.tar.gz`) is also generated for non-Debian distributions.
+
 ## Optional GPU support
 
 The base installer does not contain CUDA, NVIDIA libraries, or a second Python environment. On supported Windows systems, Settings > Processing > GPU Acceleration (NVIDIA CUDA) can provision the optional environment after installation. The Windows package contains only the small `uv` runtime manager needed to create the private Python environment; the large CUDA-enabled packages are downloaded only if the user chooses GPU acceleration.
@@ -58,7 +80,7 @@ macOS currently runs CPU-only because the optional backend is NVIDIA CUDA.
 Radio & TV Segmenter includes an integrated update mechanism that connects directly to GitHub Releases:
 
 - **Check for Updates Dialog**: Access via **About > Check for Updates…** or the **Preferences > Updates & GitHub** category.
-- **Automated Platform Asset Matching**: Queries the latest GitHub release metadata and identifies the correct binary package for the current operating system (`.exe` on Windows, `.dmg` on macOS, `.tar.gz` on Linux).
+- **Automated Platform Asset Matching**: Queries the latest GitHub release metadata and identifies the correct binary package for the current operating system (`.exe` on Windows, `.dmg` on macOS, `.deb` on Debian/Ubuntu, `.tar.gz` on Linux).
 - **Background Download & Installation**: Downloads releases with live progress and transfer speed indicators, then launches the installer and gracefully closes the running application.
 - **Configurable Startup Checks**: Supports optional silent update checks on startup, alerting you in the status bar whenever a new version is published.
 - **Repository Customization**: By default queries `bradlinder/RTVS` (https://github.com/bradlinder/RTVS), or a custom fork via `GITHUB_REPO` environment variable or the Preferences dialog.
