@@ -716,7 +716,7 @@ class UnifiedExportDialog(QDialog):
             excerpt = generate_wp_excerpt(raw_text, 55) if 'generate_wp_excerpt' in globals() else raw_text[:55]
             new_items.append({
                 "task_label": "Full Episode",
-                "title": f"{base_name} - Full Episode",
+                "title": base_name,
                 "excerpt": excerpt,
                 "start": None,
                 "end": None,
@@ -1937,9 +1937,19 @@ class ProjectExportMixin:
                 media_filename = f"{media_name}.mp3"
 
                 pct = int((idx / max(1, total_posts)) * 100)
-                self.set_processing_stage("WordPress Publishing", f"{idx + 1} of {total_posts}: '{post_title}'")
-                self.update_processing_progress(pct, f"Publishing '{post_title}'...")
+                self.set_processing_stage("WordPress Publishing", f"Post {idx + 1} of {total_posts}: '{post_title}'")
+                self.update_processing_progress(pct, f"Starting WordPress export for '{post_title}'…")
                 QApplication.processEvents()
+
+                def wp_progress(step, step_total, description, _idx=idx, _title=post_title):
+                    # Four user-visible steps per post: prepare/convert, upload,
+                    # prepare post, and create draft. Keep the overall progress
+                    # bar moving across all posts rather than resetting per post.
+                    fraction = max(0.0, min(1.0, ((step - 1) / step_total)))
+                    overall = ((_idx + fraction) / max(1, total_posts)) * 100
+                    self.current_processing_stage_detail = f"Post {_idx + 1} of {total_posts}: Step {step} of {step_total} — {description}"
+                    self.update_processing_progress(int(overall), description)
+                    QApplication.processEvents()
 
                 try:
                     post_data = self._execute_wordpress_upload(
@@ -1958,8 +1968,12 @@ class ProjectExportMixin:
                         category_ids=post.get("category_ids", []),
                         show_completion_dialog=False,
                         media_filename=media_filename,
+                        progress_callback=wp_progress,
                     )
                     if post_data and isinstance(post_data, dict):
+                        self.current_processing_stage_detail = f"Post {idx + 1} of {total_posts}: Step 4 of 4 — Export complete"
+                        self.update_processing_progress(int(((idx + 1) / max(1, total_posts)) * 100), f"Finished '{post_title}'.")
+                        QApplication.processEvents()
                         post_id = post_data.get("id", "Draft")
                         post_link = post_data.get("link") or f"{client.site_url}/?p={post_id}"
                         created_posts.append({

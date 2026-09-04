@@ -142,63 +142,152 @@ class WordPressClient:
         return []
 
     def get_authors(self) -> list[dict]:
-        """Fetch users and co-authors for author attribution."""
+        """Fetch PublishPress Authors profiles, including guest authors without users."""
         import requests
-        authors = []
+
+        authors: list[dict] = []
+        seen: set[int] = set()
+
+        def add_author(item: dict, default_guest: bool = False) -> None:
+            try:
+                term_id = int(item.get("term_id", item.get("id")))
+            except (TypeError, ValueError):
+                return
+            if term_id in seen:
+                return
+            name = item.get("display_name") or item.get("name")
+            if isinstance(name, dict):
+                name = name.get("rendered", "")
+            if not name:
+                return
+            try:
+                user_id = int(item.get("user_id") or 0)
+            except (TypeError, ValueError):
+                user_id = 0
+            is_guest = bool(item.get("is_guest", default_guest)) or user_id == 0
+            seen.add(term_id)
+            authors.append({
+                "id": user_id or term_id,
+                "term_id": term_id,
+                "user_id": user_id,
+                "name": str(name),
+                "slug": item.get("slug", ""),
+                "type": "Guest Author" if is_guest else "PublishPress Author",
+                "is_guest": is_guest,
+            })
+
+        # PublishPress Authors is the authoritative source. Its author profiles are
+        # taxonomy terms, so this includes guest authors with no WP user account.
         try:
-            # 1. Standard WordPress Users
-            url = f"{self.api_base}/users"
-            params = {"per_page": 100, "_fields": "id,name,slug"}
-            resp = requests.get(url, auth=self._get_auth(), params=params, timeout=15)
-            if resp.status_code == 200:
-                for u in resp.json():
-                    authors.append({
-                        "id": u.get("id"),
-                        "name": u.get("name"),
-                        "slug": u.get("slug"),
-                        "type": "WP User",
-                        "is_guest": False,
-                    })
+            for page in range(1, 11):
+                resp = requests.get(
+                    f"{self.site_url}/wp-json/publishpress-authors/v1/authors",
+                    auth=self._get_auth(),
+                    params={"per_page": 100, "page": page}, timeout=15,
+                )
+                if resp.status_code != 200:
+                    break
+                data = resp.json()
+                if isinstance(data, dict):
+                    data = data.get("authors", data.get("data", []))
+                if not isinstance(data, list) or not data:
+                    break
+                for item in data:
+                    if isinstance(item, dict):
+                        add_author(item)
+                if len(data) < 100:
+                    break
         except Exception:
             pass
 
-        # 2. Check for Co-Authors Plus guest authors taxonomy if available
-        try:
-            url_coauthors = f"{self.api_base}/guest-authors"
-            resp = requests.get(url_coauthors, auth=self._get_auth(), params={"per_page": 100}, timeout=10)
-            if resp.status_code == 200:
-                for ga in resp.json():
-                    authors.append({
-                        "id": ga.get("id"),
-                        "name": ga.get("display_name", ga.get("name")),
-                        "slug": ga.get("slug"),
-                        "type": "Guest Author",
-                        "is_guest": True,
-                    })
-        except Exception:
-            pass
+        # Fallback for installations exposing the author taxonomy directly.
+        if not authors:
+            for taxonomy in ("author", "ppma_author"):
+                try:
+                    resp = requests.get(
+                        f"{self.api_base}/{taxonomy}", auth=self._get_auth(),
+                        params={"per_page": 100}, timeout=15,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if isinstance(data, list):
+                            for item in data:
+                                if isinstance(item, dict):
+                                    add_author(item, default_guest=True)
+                    if authors:
+                        break
+                except Exception:
+                    continue
 
+        # Final fallback for sites without PublishPress Authors.
+        if not authors:
+            try:
+                resp = requests.get(
+                    f"{self.api_base}/users", auth=self._get_auth(),
+                    params={"per_page": 100, "_fields": "id,name,slug"}, timeout=15,
+                )
+                if resp.status_code == 200:
+                    for u in resp.json():
+                        try:
+                            uid = int(u.get("id"))
+                        except (TypeError, ValueError):
+                            continue
+                        authors.append({
+                            "id": uid, "term_id": None, "user_id": uid,
+                            "name": u.get("name", ""), "slug": u.get("slug", ""),
+                            "type": "WP User", "is_guest": False,
+                        })
+            except Exception:
+                pass
         return authors
 
     def upload_media(self, file_path: str, filename: str | None = None) -> dict:
-        """Upload an audio file to the WordPress Media Library."""
+        """Upload media using WordPress's standard multipart API, with raw fallback."""
+        import mimetypes
         import requests
         path = Path(file_path)
         if not path.is_file():
             raise FileNotFoundError(f"Media file not found: {file_path}")
-
         upload_filename = filename or path.name
-        headers = {
-            "Content-Disposition": f'attachment; filename="{upload_filename}"',
-            "Content-Type": "audio/mpeg",
-        }
+        mime_type = mimetypes.guess_type(upload_filename)[0] or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        if path.suffix.lower() == ".mp3":
+            mime_type = "audio/mpeg"
+        elif path.suffix.lower() == ".wav":
+            mime_type = "audio/wav"
         url = f"{self.api_base}/media"
-        with open(path, "rb") as f:
-            resp = requests.post(url, auth=self._get_auth(), headers=headers, data=f, timeout=120)
+        errors = []
 
-        if resp.status_code not in (200, 201):
-            raise RuntimeError(f"WordPress Media upload failed (HTTP {resp.status_code}): {resp.text[:300]}")
-        return resp.json()
+        # requests generates the required multipart Content-Disposition header,
+        # including name="file" and the actual filename.
+        try:
+            with open(path, "rb") as f:
+                resp = requests.post(
+                    url, auth=self._get_auth(),
+                    files={"file": (upload_filename, f, mime_type)},
+                    headers={"Accept": "application/json"}, timeout=180,
+                )
+            if resp.status_code in (200, 201):
+                return resp.json()
+            errors.append(f"multipart HTTP {resp.status_code}: {resp.text[:500]}")
+        except Exception as exc:
+            errors.append(f"multipart exception: {exc}")
+
+        # Raw upload fallback. This path requires Content-Disposition on the request.
+        try:
+            headers = {
+                "Accept": "application/json",
+                "Content-Disposition": f'attachment; filename="{upload_filename}"',
+                "Content-Type": mime_type,
+                "Content-Length": str(path.stat().st_size),
+            }
+            with open(path, "rb") as f:
+                resp = requests.post(url, auth=self._get_auth(), headers=headers, data=f, timeout=180)
+            if resp.status_code in (200, 201):
+                return resp.json()
+            errors.append(f"raw HTTP {resp.status_code}: {resp.text[:500]}")
+        except Exception as exc:
+            errors.append(f"raw exception: {exc}")
+        raise RuntimeError("WordPress Media upload failed (" + "; ".join(errors) + ")")
 
     def create_post(
         self,
@@ -222,6 +311,8 @@ class WordPressClient:
             payload["categories"] = category_ids
         if author_ids:
             payload["author"] = author_ids[0]
+        if author_term_ids:
+            payload["ppma_author"] = [int(term_id) for term_id in author_term_ids]
 
         url = f"{self.api_base}/posts"
         resp = requests.post(url, auth=self._get_auth(), json=payload, timeout=30)
@@ -362,42 +453,65 @@ class WordPressExportMixin:
         category_ids: list[int] | None = None,
         show_completion_dialog: bool = False,
         media_filename: str | None = None,
+        progress_callback=None,
     ) -> dict:
-        """Extract media clip, upload to WordPress media library, and create draft post."""
+        """Extract media clip, upload to WordPress media library, and create draft post.
+
+        progress_callback, when supplied, receives a human-readable step description
+        and a 1-based step number out of four.
+        """
+        def report_progress(step: int, description: str) -> None:
+            if progress_callback:
+                try:
+                    progress_callback(step, 4, description)
+                except Exception:
+                    pass
+
         audio_src = self.audio_file
         if not audio_src or not Path(audio_src).exists():
             raise RuntimeError("No media file is loaded in the active project to export.")
 
         media_url = ""
-        # 1. Extract audio clip using ffmpeg if slice start/end is given
+        # 1. Prepare the media file. This can take a while for large WAV files.
+        report_progress(1, "Preparing audio for WordPress…")
         temp_audio = None
         try:
             target_media = str(audio_src)
-            if start is not None and end is not None and (start > 0 or end < self.duration):
+            source_suffix = Path(audio_src).suffix.lower()
+            needs_clip = start is not None and end is not None and (start > 0 or end < self.duration)
+            needs_mp3 = source_suffix == ".wav"
+
+            # Always convert WAV to MP3 for WordPress, including full-file exports.
+            # This keeps the actual bytes, extension, and MIME type consistent.
+            if needs_clip or needs_mp3:
+                report_progress(1, "Converting audio to MP3…")
                 temp_dir = Path(tempfile.gettempdir()) / "rtvs_wp_export"
                 temp_dir.mkdir(parents=True, exist_ok=True)
-                ext = "mp3"
-                slice_name = safe_filename(media_filename or post_title or "audio_clip")
-                temp_audio = temp_dir / f"{slice_name}_{int(start)}_{int(end)}.{ext}"
+                base = Path(safe_filename(media_filename or post_title or "audio_clip")).stem
+                if needs_clip:
+                    temp_audio = temp_dir / f"{base}_{int(start or 0)}_{int(end or 0)}.mp3"
+                else:
+                    temp_audio = temp_dir / f"{base}.mp3"
                 ff = ffmpeg_path()
-                if ff:
-                    import subprocess
-                    cmd = [
-                        str(ff), "-y",
-                        "-ss", str(start),
-                        "-to", str(end),
-                        "-i", str(audio_src),
-                        "-vn",
-                        "-c:a", "libmp3lame",
-                        "-b:a", "128k",
-                        str(temp_audio)
-                    ]
-                    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    if res.returncode == 0 and temp_audio.is_file():
-                        target_media = str(temp_audio)
+                if not ff:
+                    raise RuntimeError("FFmpeg is required to convert WAV audio to MP3 for WordPress export, but FFmpeg was not found.")
+                import subprocess
+                cmd = [str(ff), "-y"]
+                if needs_clip:
+                    cmd += ["-ss", str(start), "-to", str(end)]
+                cmd += ["-i", str(audio_src), "-vn", "-c:a", "libmp3lame", "-b:a", "128k", str(temp_audio)]
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if res.returncode != 0 or not temp_audio.is_file() or temp_audio.stat().st_size == 0:
+                    detail = res.stderr.decode("utf-8", errors="replace")[-1200:]
+                    raise RuntimeError(f"FFmpeg WAV-to-MP3 conversion failed: {detail}")
+                target_media = str(temp_audio)
 
-            # 2. Upload media file to WordPress
-            media_item = client.upload_media(target_media, filename=media_filename)
+            report_progress(2, "Uploading audio to WordPress…")
+            upload_name = media_filename
+            if Path(target_media).suffix.lower() == ".mp3":
+                upload_name = f"{Path(media_filename or post_title or Path(target_media).stem).stem}.mp3"
+
+            media_item = client.upload_media(target_media, filename=upload_name)
             media_url = media_item.get("source_url", "")
         finally:
             if temp_audio and temp_audio.exists():
@@ -406,58 +520,123 @@ class WordPressExportMixin:
                 except Exception:
                     pass
 
-        # 3. Build post content HTML
+        # 3. Build post content HTML. WordPress should mirror the local transcript
+        # export style: speaker-labelled paragraphs when enabled, no timestamps,
+        # and no redundant "Transcript" heading.
+        report_progress(3, "Formatting transcript for WordPress…")
         content_parts = []
         if media_url:
             content_parts.append(
                 f'<!-- wp:audio -->\n'
-                f'<figure class="wp-block-audio"><audio controls src="{html.escape(media_url)}"></audio></figure>\n'
+                f'<figure class="wp-block-audio"><audio controls src="{html.escape(media_url, quote=True)}"></audio></figure>\n'
                 f'<!-- /wp:audio -->\n'
             )
 
-        # Build transcript text for the story time range
-        en_text = ""
-        es_text = ""
-        if hasattr(self, "_get_transcript_text_slice"):
-            if include_english:
-                en_text = self._get_transcript_text_slice(start or 0.0, end)
-        elif self.transcript:
-            segs = self.transcript.get("segments", [])
-            selected = [
-                s.get("text", "") for s in segs
-                if (start is None or s.get("end", 0) >= start) and (end is None or s.get("start", 0) <= end)
-            ]
-            en_text = " ".join(selected)
+        def language_blocks(lang_code: str):
+            if lang_code == "en":
+                segments = self.transcript.get("segments", []) if self.transcript else []
+                if start is not None or end is not None:
+                    lo = float(start or 0.0)
+                    hi = float(end) if end is not None else None
+                    segments = [
+                        seg for seg in segments
+                        if (hi is None or float(seg.get("start", 0.0)) <= hi)
+                        and float(seg.get("end", seg.get("start", 0.0))) >= lo
+                    ]
+                return self.build_story_blocks(segments) if segments else []
 
-        if include_spanish and hasattr(self, "translations"):
-            es_data = self.translations.get("en-es") or self.translations.get("en_es") or {}
-            es_segs = es_data.get("segments", [])
-            selected_es = [
-                s.get("text", "") for s in es_segs
-                if (start is None or s.get("end", 0) >= start) and (end is None or s.get("start", 0) <= end)
-            ]
-            es_text = " ".join(selected_es)
+            es_data = getattr(self, "translations", {}).get("en-es") or getattr(self, "translations", {}).get("en_es") or {}
+            es_segs = es_data.get("segments", []) if isinstance(es_data, dict) else []
+            source_segs = self.transcript.get("segments", []) if self.transcript else []
+            selected = []
+            lo = float(start or 0.0)
+            hi = float(end) if end is not None else None
+            for idx, t_seg in enumerate(es_segs):
+                source_seg = source_segs[idx] if idx < len(source_segs) else {}
+                t_start = float(t_seg.get("start", source_seg.get("start", 0.0)))
+                t_end = float(t_seg.get("end", source_seg.get("end", t_start + 1.0)))
+                if (hi is not None and t_start > hi) or t_end < lo:
+                    continue
+                selected.append({
+                    "speaker": self.get_effective_speaker_name(idx, source_seg) if source_seg else "",
+                    "text": t_seg.get("text", "").strip(),
+                    "start": t_start,
+                    "end": t_end,
+                    "_source_index": idx,
+                })
+            return self.build_story_blocks(selected) if selected else []
 
-        # Format transcript according to presentation preference
-        if en_text and es_text:
+        def append_blocks(blocks):
+            for block in blocks:
+                text = str(block.get("text", "") or "").strip()
+                if not text:
+                    continue
+                speaker = str(block.get("speaker", "") or "").strip()
+                if speaker:
+                    content_parts.append(
+                        f'<p><strong>{html.escape(speaker)}</strong>: {html.escape(text)}</p>'
+                    )
+                else:
+                    content_parts.append(f'<p>{html.escape(text)}</p>')
+
+        en_blocks = language_blocks("en") if include_english else []
+        es_blocks = language_blocks("es") if include_spanish else []
+
+        if en_blocks and es_blocks:
             if spanish_presentation == "accordion":
-                content_parts.append(f"<!-- wp:paragraph --><p>{html.escape(en_text)}</p><!-- /wp:paragraph -->\n")
-                content_parts.append(
-                    f'<details><summary><b>Transcripción en Español</b></summary>\n'
-                    f'<p>{html.escape(es_text)}</p>\n'
-                    f'</details>\n'
+                # 1. Select primary vs secondary text and label
+                if primary_language == "es":
+                    primary_blocks = es_blocks
+                    secondary_blocks = en_blocks
+                    btn_text = "Read in English"
+                else:
+                    primary_blocks = en_blocks
+                    secondary_blocks = es_blocks
+                    btn_text = "Leer en Español"
+
+                # 2. Button styling on summary tag for the top toggle
+                summary_btn_style = (
+                    "display: inline-block; "
+                    "padding: 8px 18px; "
+                    "background-color: #0073aa; "
+                    "color: #ffffff; "
+                    "border-radius: 4px; "
+                    "font-weight: bold; "
+                    "cursor: pointer; "
+                    "margin-bottom: 16px; "
+                    "user-select: none; "
+                    "list-style: none; "
+                    "outline: none;"
                 )
-            else:  # stacked
-                content_parts.append(f"<!-- wp:paragraph --><p><b>English Transcript:</b><br>{html.escape(en_text)}</p><!-- /wp:paragraph -->\n")
-                content_parts.append(f"<!-- wp:paragraph --><p><b>Transcripción en Español:</b><br>{html.escape(es_text)}</p><!-- /wp:paragraph -->\n")
-        elif en_text:
-            content_parts.append(f"<!-- wp:paragraph --><p>{html.escape(en_text)}</p><!-- /wp:paragraph -->\n")
-        elif es_text:
-            content_parts.append(f"<!-- wp:paragraph --><p>{html.escape(es_text)}</p><!-- /wp:paragraph -->\n")
+
+                # 3. Render the secondary language accordion at the top
+                content_parts.append(
+                    f'<details class="rtvs-language-accordion" style="margin-bottom: 24px;">'
+                    f'<summary role="button" style="{summary_btn_style}">{btn_text}</summary>'
+                    f'<div class="rtvs-secondary-transcript" style="margin-top: 12px;">'
+                )
+                append_blocks(secondary_blocks)
+                content_parts.append('</div></details>')
+
+                # 4. Render primary language directly below the toggle button
+                append_blocks(primary_blocks)
+            elif spanish_presentation == "es_first":
+                append_blocks(es_blocks)
+                content_parts.append('<h2>English</h2>')
+                append_blocks(en_blocks)
+            else:  # en_first
+                append_blocks(en_blocks)
+                content_parts.append('<h2>Español</h2>')
+                append_blocks(es_blocks)
+        elif en_blocks:
+            append_blocks(en_blocks)
+        elif es_blocks:
+            append_blocks(es_blocks)
 
         full_content = "\n".join(content_parts)
 
         # 4. Create Post
+        report_progress(4, "Creating WordPress draft…")
         post_data = client.create_post(
             title=post_title,
             content=full_content,
