@@ -4,7 +4,6 @@ set -euo pipefail
 # ==============================================================================
 # Radio & TV Segmenter — Debian / Ubuntu (.deb) Package Builder
 # ==============================================================================
-
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 APP_NAME="RadioTVSegmenter"
 PKG_NAME="radiotvsegmenter"
@@ -15,7 +14,6 @@ DIST="$ROOT/dist"
 SOURCE_APP="$DIST/$APP_NAME"
 DEB_FILENAME="RadioTVSegmenter-${VERSION}-Linux-amd64.deb"
 DEB_OUTPUT="$DIST/$DEB_FILENAME"
-DEB_CANONICAL_OUTPUT="$DIST/${PKG_NAME}_${VERSION}_amd64.deb"
 
 echo "====================================================================="
 echo " Packaging Debian / Ubuntu Package (.deb) for ${APP_NAME} v${VERSION}"
@@ -104,7 +102,6 @@ Description: Radio & TV Segmenter
  automatically transcribe audio/video, detect speakers, identify stories,
  and export polished broadcast segments.
 EOF
-
 chmod 644 "$STAGING/DEBIAN/control"
 
 # Generate DEBIAN/postinst script (updates desktop & icon caches)
@@ -137,18 +134,17 @@ chmod 755 "$STAGING/DEBIAN/postrm"
 
 # 5. Build .deb package using high-efficiency XZ compression
 echo "[5/5] Building .deb archive using XZ compression..."
-rm -f "$DEB_OUTPUT" "$DEB_CANONICAL_OUTPUT"
+rm -f "$DEB_OUTPUT"
 dpkg-deb --build --root-owner-group -Zxz "$STAGING" "$DEB_OUTPUT"
-cp "$DEB_OUTPUT" "$DEB_CANONICAL_OUTPUT"
 
 # Cleanup staging directory
 rm -rf "$STAGING"
 
 PKG_SIZE=$(ls -lh "$DEB_OUTPUT" | awk '{print $5}')
+
 echo ""
 echo "====================================================================="
 echo " DEBIAN PACKAGE CREATED SUCCESSFULLY!"
 echo " Output File : $DEB_OUTPUT (${PKG_SIZE})"
-echo " Standard Ref: $DEB_CANONICAL_OUTPUT"
 echo " Installation: sudo apt install ./${DEB_FILENAME}"
 echo "====================================================================="
