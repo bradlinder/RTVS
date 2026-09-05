@@ -12,13 +12,16 @@ from pathlib import Path
 from PySide6.QtCore import QProcess, QProcessEnvironment, QThread, Qt, QTimer
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
+    QProgressDialog,
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
     QCheckBox,
     QPushButton,
     QMessageBox,
+    QInputDialog,
 )
 
 from prs_shared import (
@@ -620,6 +623,8 @@ class ProcessingMixin:
         """
         executable, worker_args, env_overrides = self._resolve_worker_command(args)
         env_overrides = dict(env_overrides or {})
+        storage_dir = str(get_models_storage_dir())
+        env_overrides.setdefault("PRS_MODELS_DIR", storage_dir)
         env_overrides.setdefault("HF_HOME", str(get_models_storage_dir() / "huggingface"))
         return executable, worker_args, env_overrides
 
@@ -708,47 +713,61 @@ class ProcessingMixin:
 
         model_name = self.current_whisper_model()
         self.whisper_model = model_name
-        if not self.is_whisper_model_available(model_name):
-            label = model_name.replace("-v3", "").title()
-            answer = QMessageBox.question(
-                self,
-                "Model Not Installed",
-                f"Whisper {label} is not yet installed locally.\n\n"
-                "Would you like to download it now? Once downloaded, transcription will begin automatically.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                self.log_activity(
-                    f"[TRANSCRIPTION] Model '{model_name}' is not installed; transcription canceled by user.",
-                    mark_dirty=False
+        try:
+            if not self.is_whisper_model_available(model_name):
+                label = model_name.replace("-v3", "").title()
+                answer = QMessageBox.question(
+                    self,
+                    "Model Not Installed",
+                    f"Whisper {label} is not yet installed locally.\n\n"
+                    "Would you like to download it now? Once downloaded, transcription will begin automatically.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
                 )
-                self.pipeline_active = False
-                self.pipeline_queue = []
-                self.set_tools_actions_enabled(True)
-                return
+                if answer != QMessageBox.StandardButton.Yes:
+                    self.log_activity(
+                        f"[TRANSCRIPTION] Model '{model_name}' is not installed; transcription canceled by user.",
+                        mark_dirty=False
+                    )
+                    self.pipeline_active = False
+                    self.pipeline_queue = []
+                    self.progress.hide()
+                    self.cancel_button.hide()
+                    self.set_tools_actions_enabled(True)
+                    return
 
-            # Modal download with progress
-            progress_box = QProgressDialog(f"Downloading Whisper {label} model...", None, 0, 0, self)
-            progress_box.setWindowTitle("Downloading Model")
-            progress_box.setWindowModality(Qt.WindowModality.WindowModal)
-            progress_box.setCancelButton(None)
-            progress_box.show()
-            QApplication.processEvents()
+                # Modal download with progress
+                progress_box = QProgressDialog(f"Downloading Whisper {label} model...", None, 0, 0, self)
+                progress_box.setWindowTitle("Downloading Model")
+                progress_box.setWindowModality(Qt.WindowModality.WindowModal)
+                progress_box.setCancelButton(None)
+                progress_box.show()
+                QApplication.processEvents()
 
-            err = self._install_whisper_model_background(model_name)
-            progress_box.close()
+                err = self._install_whisper_model_background(model_name)
+                progress_box.close()
 
-            if err:
-                QMessageBox.critical(self, "Download Failed", f"Could not download Whisper '{model_name}':\n\n{err}")
-                self.pipeline_active = False
-                self.pipeline_queue = []
-                self.set_tools_actions_enabled(True)
-                return
+                if err:
+                    QMessageBox.critical(self, "Download Failed", f"Could not download Whisper '{model_name}':\n\n{err}")
+                    self.pipeline_active = False
+                    self.pipeline_queue = []
+                    self.progress.hide()
+                    self.cancel_button.hide()
+                    self.set_tools_actions_enabled(True)
+                    return
 
-            self.log_activity(f"[MODELS] Whisper {label} downloaded successfully. Starting transcription...")
-            if hasattr(self, "refresh_whisper_model_chooser"):
-                self.refresh_whisper_model_chooser()
+                self.log_activity(f"[MODELS] Whisper {label} downloaded successfully. Starting transcription...")
+                if hasattr(self, "refresh_whisper_model_chooser"):
+                    self.refresh_whisper_model_chooser()
+        except Exception as exc:
+            self.set_tools_actions_enabled(True)
+            self.progress.hide()
+            self.cancel_button.hide()
+            self.pipeline_active = False
+            self.pipeline_queue = []
+            self.log_activity(f"[TRANSCRIPTION] Error preparing model '{model_name}': {exc}")
+            QMessageBox.critical(self, "Transcription Error", f"Failed to prepare model '{model_name}':\n\n{exc}")
+            return
 
         if not self.pipeline_active:
             self.processing_status["transcription"] = False
@@ -782,12 +801,20 @@ class ProcessingMixin:
         
         self.transcription_process = process
 
+        beam_size = getattr(self, "whisper_beam_size", 5)
+        if hasattr(self, "settings_store"):
+            try:
+                beam_size = int(self.settings_store.value("whisper_beam_size", beam_size) or 5)
+            except Exception:
+                beam_size = 5
+
         try:
             worker_executable, worker_args, env_overrides = self._worker_command([
                 "--transcribe",
                 str(self.audio_file),
                 model_name,
                 getattr(self, "whisper_initial_prompt", ""),
+                str(beam_size),
             ])
         except FileNotFoundError as exc:
             self.cleanup_transcription_process()
@@ -1127,6 +1154,77 @@ class ProcessingMixin:
             self.log_activity("[SPEAKER DETECT] A job is already running.")
             return
 
+        expected_speakers = str(getattr(self, "expected_speakers", "auto") or "auto")
+
+        # Interactive speaker estimate: batch processing is deliberately
+        # non-interactive, while standalone Detect Speakers and
+        # Transcribe & Detect Speakers jobs can ask before each detection.
+        ask_each_time = str(self.settings_store.value("ask_expected_speakers", "true")).lower() in {"1", "true", "yes"}
+        if not getattr(self, "batch_active", False) and ask_each_time:
+            choices = [
+                "Auto-Detect",
+                "1 Speaker (Solo)",
+                "2 Speakers (Interview)",
+                "3+ Speakers (Panel / Group)",
+            ]
+            current_map = {"auto": 0, "1": 1, "2": 2, "3+": 3}
+            choice, ok = QInputDialog.getItem(
+                self,
+                "Detect Speakers",
+                "Estimated number of speakers:",
+                choices,
+                current_map.get(expected_speakers, 0),
+                False,
+            )
+            if not ok:
+                self.log_activity("[SPEAKER DETECT] Speaker estimate dialog canceled by user.")
+                if getattr(self, "pipeline_active", False):
+                    self.pipeline_queue = []
+                    self.pipeline_active = False
+                    self.pipeline_rerun_confirmed = False
+                    self.set_tools_actions_enabled(True)
+                return
+            expected_speakers = {
+                "Auto-Detect": "auto",
+                "1 Speaker (Solo)": "1",
+                "2 Speakers (Interview)": "2",
+                "3+ Speakers (Panel / Group)": "3+",
+            }.get(choice, "auto")
+            self.expected_speakers = expected_speakers
+        elif not getattr(self, "batch_active", False):
+            # With prompting disabled, standalone jobs intentionally use the
+            # engine's automatic speaker-count mode rather than a remembered
+            # estimate from a previous job.
+            expected_speakers = "auto"
+            self.expected_speakers = "auto"
+
+        # Pre-transcribed bypass: with a single expected speaker there is
+        # nothing to detect that the transcript doesn't already imply --
+        # skip spawning the local worker process entirely and just label
+        # every existing transcript segment "Speaker 1" in memory.
+        transcript_segments = (self.transcript or {}).get("segments") if self.transcript else None
+        if expected_speakers == "1" and transcript_segments:
+            self.log_activity(
+                "[SPEAKER DETECT] Single expected speaker with an existing transcript -- "
+                "assigning \"Speaker 1\" to every segment without running the local helper."
+            )
+            last_end = max((float(seg.get("end", 0.0) or 0.0) for seg in transcript_segments), default=0.0)
+            result = {
+                "num_speakers": 1,
+                "speakers": ["Speaker 1"],
+                "audio_duration": float(self.duration) if self.duration else last_end,
+                "segments": [
+                    {
+                        "start": float(seg.get("start", 0.0) or 0.0),
+                        "end": float(seg.get("end", 0.0) or 0.0),
+                        "speaker": "Speaker 1",
+                    }
+                    for seg in transcript_segments
+                ],
+            }
+            self.diarization_finished(result)
+            return
+
         self.set_tools_actions_enabled(False)
         self.progress.setValue(0)
         self.progress.show()
@@ -1157,7 +1255,7 @@ class ProcessingMixin:
 
         try:
             worker_executable, worker_args, env_overrides = self._worker_command([
-                "--diarize", str(self.audio_file), str(self.speaker_sensitivity)
+                "--diarize", str(self.audio_file), "--expected-speakers", str(expected_speakers)
             ])
         except FileNotFoundError as exc:
             self.cleanup_diarization_process()
@@ -1239,7 +1337,7 @@ class ProcessingMixin:
                 self.progress.setValue(percent)
                 self.statusBar().showMessage(status)
                 if hasattr(self, "processing_stage_label") and self.processing_stage_label is not None:
-                    self.processing_stage_label.setText(f"Speaker Detection ({percent}%)")
+                    self.processing_stage_label.setText(status)
                 self.log_activity(f"[SPEAKER DETECT] {status}")
 
             elif kind == "finished":
@@ -1327,6 +1425,10 @@ class ProcessingMixin:
         )
 
         self.render_transcript()
+        # The progress-stage label is a transient processing indicator.  Do not
+        # leave the last diarization percentage (for example, 95%) above the
+        # timeline after speaker detection has completed.
+        self.set_processing_stage(None)
         if before_state is not None and hasattr(self, "_commit_project_state_change"):
             self._commit_project_state_change(before_state, "Speaker Detection")
         self.save_project()

@@ -96,7 +96,7 @@ class GpuAccelerationMixin:
         layout = QVBoxLayout(dialog)
 
         intro = QLabel(
-            "Transcription and speaker diarization run on the CPU by default, which keeps "
+            "Transcription and speaker detection run on the CPU by default, which keeps "
             "the install small and works on any machine. If this computer has a supported "
             "NVIDIA GPU, you can download an additional CUDA-enabled environment to speed "
             "those steps up. This is a separate download (a few gigabytes) and is optional."
@@ -143,7 +143,7 @@ class GpuAccelerationMixin:
             confirm = QMessageBox.question(
                 dialog, "Uninstall GPU Acceleration",
                 "Remove the downloaded GPU acceleration environment? Transcription and "
-                "diarization will fall back to CPU.",
+                "speaker detection will fall back to CPU.",
             )
             if confirm != QMessageBox.StandardButton.Yes:
                 return

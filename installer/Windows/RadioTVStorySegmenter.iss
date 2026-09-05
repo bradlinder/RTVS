@@ -1,5 +1,5 @@
 #define MyAppName "Radio & TV Segmenter"
-#define MyAppVersion "1.7"
+#define MyAppVersion "1.9.1"
 #define MyAppPublisher "Radio & TV Segmenter"
 #define MyAppURL "https://github.com/bradlinder/RTVS"
 #define MyAppExeName "RadioTVSegmenter.exe"
@@ -27,6 +27,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 Uninstallable=yes
 LicenseFile=..\..\NOTICES.txt
+ChangesAssociations=yes
 
 [Files]
 Source: "..\..\dist\RadioTVSegmenter\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -35,6 +36,12 @@ Source: "..\..\dist\RadioTVSegmenter\*"; DestDir: "{app}"; Flags: recursesubdirs
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\resources\icon.ico"
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\resources\icon.ico"
 Name: "{group}\Third-Party Notices & Licenses"; Filename: "{app}\NOTICES.txt"
+
+[Registry]
+Root: HKA; Subkey: "Software\Classes\.rtvs"; ValueType: string; ValueName: ""; ValueData: "RTVSProject"; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\RTVSProject"; ValueType: string; ValueName: ""; ValueData: "Radio & TV Segmenter Project"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\RTVSProject\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\resources\icon.ico"
+Root: HKA; Subkey: "Software\Classes\RTVSProject\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent

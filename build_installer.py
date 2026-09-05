@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the installable Radio & TV Segmenter 1.7 application with PyInstaller.
+"""Build the installable Radio & TV Segmenter 1.8 application with PyInstaller.
 
 Run this script on the target operating system (Windows installers must be
 built on Windows, macOS ones on macOS -- PyInstaller does not cross-compile).
@@ -39,7 +39,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "1.7"
+    PROJECT_VERSION = "1.9.1"
 
 # Only the PySide6 submodules this app actually imports (verified against
 # every `from PySide6.X import ...` in the source tree). The previous build
@@ -334,6 +334,10 @@ def main() -> None:
         "--collect-all", "diarize",
         "--collect-all", "keyring",
         "--collect-all", "docx",
+        "--collect-all", "onnxruntime",
+        "--collect-all", "sherpa_onnx",
+        "--collect-all", "psutil",
+        "--collect-all", "scipy",
     ]
 
     icon_file = ROOT / "resources" / ("icon.ico" if sys.platform == "win32" else "icon.png")
@@ -357,6 +361,26 @@ def main() -> None:
 
     if sys.platform == "darwin":
         app_root = DIST / f"{APP_NAME}.app" / "Contents" / "MacOS"
+        plist_path = DIST / f"{APP_NAME}.app" / "Contents" / "Info.plist"
+        if plist_path.exists():
+            try:
+                import plistlib
+                with open(plist_path, "rb") as fp:
+                    pl = plistlib.load(fp)
+                pl["CFBundleDocumentTypes"] = [
+                    {
+                        "CFBundleTypeName": "Radio & TV Segmenter Project",
+                        "CFBundleTypeRole": "Editor",
+                        "CFBundleTypeExtensions": ["rtvs", "json"],
+                        "CFBundleTypeIconFile": "icon.icns",
+                        "LSHandlerRank": "Owner",
+                    }
+                ]
+                with open(plist_path, "wb") as fp:
+                    plistlib.dump(pl, fp)
+                print(f"[BUILD] Registered .rtvs file association in {plist_path}")
+            except Exception as e:
+                print(f"[BUILD WARNING] Could not update Info.plist document types: {e}")
     else:
         app_root = DIST / APP_NAME
     runtime_bin = app_root / "runtime" / "bin"

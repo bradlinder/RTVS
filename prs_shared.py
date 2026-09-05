@@ -72,6 +72,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
     QAbstractItemView,
     QTextEdit,
     QTextBrowser,
@@ -225,7 +228,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "1.7.5"
+PROJECT_VERSION = "1.9.1"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -1447,6 +1450,12 @@ class InteractiveTranscriptEdit(QTextEdit):
             lambda _, s=target_seg_idx, t=target_time: self.requestInsertSpeaker.emit(s, t, "__NEW__")
         )
 
+        if hasattr(main_win, "open_speaker_manager_dialog"):
+            manage_spk_act = QAction("Manage Speakers & Detection Clusters...", self)
+            manage_spk_act.triggered.connect(main_win.open_speaker_manager_dialog)
+            menu.addAction(manage_spk_act)
+            menu.addSeparator()
+
         if not self.is_editing_mode:
             add_vocab = QAction("Add Selected Text to Glossary", self)
             add_vocab.setEnabled(self.has_active_selection())
@@ -1467,7 +1476,7 @@ class InteractiveTranscriptEdit(QTextEdit):
             menu.addAction(find_action)
 
             menu.addSeparator()
-            exit_action = QAction("Exit Editing Mode", self)
+            exit_action = QAction("View Transcript", self)
             exit_action.triggered.connect(lambda: self.set_editing_mode(False))
             menu.addAction(exit_action)
 
@@ -1762,8 +1771,85 @@ class StoryAutoDetectWorker(QObject):
 
 
 # ============================================================
-# Waveform Extraction Worker (48,000 Samples)
+# Waveform Extraction Worker & Binary Peak Cache (.peaks)
 # ============================================================
+
+PEAKS_MAGIC = b"RTVSPEAK"
+PEAKS_VERSION = 1
+
+def get_waveform_peak_cache_path(audio_file):
+    """
+    Return local or appdata path for waveform peak binary cache file.
+    Prefers project-adjacent <media>.peaks, falling back to appdata cache.
+    """
+    if not audio_file:
+        return None
+    try:
+        audio_p = Path(audio_file)
+        if audio_p.parent.exists() and os.access(str(audio_p.parent), os.W_OK):
+            return audio_p.with_name(audio_p.name + ".peaks")
+    except Exception:
+        pass
+    try:
+        cache_dir = get_app_data_dir() / "cache" / "peaks"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha256(str(audio_file).encode("utf-8")).hexdigest()[:16]
+        return cache_dir / f"{key}_{Path(audio_file).name}.peaks"
+    except Exception:
+        return None
+
+def read_waveform_peak_cache(audio_file, points_per_second=WAVEFORM_POINTS_PER_SECOND):
+    """
+    Read cached waveform peak envelope from binary cache.
+    Returns list of float peaks or None if cache is missing or stale.
+    """
+    cache_path = get_waveform_peak_cache_path(audio_file)
+    if not cache_path or not cache_path.exists():
+        return None
+    try:
+        audio_p = Path(audio_file)
+        if audio_p.exists() and audio_p.stat().st_mtime > cache_path.stat().st_mtime:
+            return None
+        with open(cache_path, "rb") as f:
+            magic = f.read(8)
+            if magic != PEAKS_MAGIC:
+                return None
+            header_bytes = f.read(10)
+            if len(header_bytes) < 10:
+                return None
+            version, pps, count = struct.unpack("<HfI", header_bytes)
+            if version != PEAKS_VERSION or count == 0:
+                return None
+            raw_data = f.read(count * 4)
+            if len(raw_data) != count * 4:
+                return None
+            peaks = list(struct.unpack(f"<{count}f", raw_data))
+            return peaks
+    except Exception:
+        return None
+
+def write_waveform_peak_cache(audio_file, peaks, points_per_second=WAVEFORM_POINTS_PER_SECOND):
+    """
+    Write waveform peak envelope to binary cache with atomic rename.
+    """
+    if not audio_file or not peaks:
+        return
+    try:
+        cache_path = get_waveform_peak_cache_path(audio_file)
+        if not cache_path:
+            return
+        tmp_path = cache_path.with_name(cache_path.name + ".tmp")
+        count = len(peaks)
+        with open(tmp_path, "wb") as f:
+            f.write(PEAKS_MAGIC)
+            f.write(struct.pack("<HfI", PEAKS_VERSION, float(points_per_second), count))
+            f.write(struct.pack(f"<{count}f", *peaks))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, cache_path)
+    except Exception:
+        pass
+
 
 class WaveformWorker(QObject):
     finished = Signal(list, bool)
@@ -1869,6 +1955,12 @@ class WaveformWorker(QObject):
 
             if samples_in_peak:
                 peaks.append(peak_value / max_possible_val)
+
+            if peaks:
+                try:
+                    write_waveform_peak_cache(self.audio_file, peaks, effective_pps)
+                except Exception:
+                    pass
 
             self.finished.emit(peaks, False)
         except Exception:
@@ -3178,8 +3270,13 @@ class BatchFileListWidget(QListWidget):
             event.acceptProposedAction()
         else:
             event.ignore()
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
     def dropEvent(self, event):
-        paths=[u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+        paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
         if paths:
             self.filesDropped.emit(paths)
             event.acceptProposedAction()
@@ -3190,10 +3287,11 @@ class BatchProcessingDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Batch Processing")
-        self.resize(680, 640)
+        self.resize(700, 670)
+        self.setAcceptDrops(True)
         
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Add media files or documents. Choose to run the full automated pipeline or select specific processes."))
+        layout.addWidget(QLabel("Add media files or documents. Drag and drop files or folders directly into the list below."))
 
         # File List View
         self.files = BatchFileListWidget()
@@ -3231,21 +3329,71 @@ class BatchProcessingDialog(QDialog):
 
         # Custom process checkboxes
         self.custom_proc_widget = QWidget()
-        custom_proc_layout = QHBoxLayout(self.custom_proc_widget)
+        custom_proc_layout = QVBoxLayout(self.custom_proc_widget)
         custom_proc_layout.setContentsMargins(20, 0, 0, 0)
+
         self.proc_transcribe = QCheckBox("Transcription")
         self.proc_transcribe.setChecked(True)
-        self.proc_diarize = QCheckBox("Diarization")
+        custom_proc_layout.addWidget(self.proc_transcribe)
+
+        # -- Speaker Detection (formerly "Diarize Speakers") --
+        speaker_row = QHBoxLayout()
+        self.proc_diarize = QCheckBox("Speaker Detection")
         self.proc_diarize.setChecked(True)
+        speaker_row.addWidget(self.proc_diarize)
+        speaker_row.addWidget(QLabel("Expected Speakers:"))
+        self.batch_expected_speakers_combo = QComboBox()
+        self.batch_expected_speakers_combo.addItem("Auto-Detect", "auto")
+        self.batch_expected_speakers_combo.addItem("1 Speaker (Solo Fast-Path)", "1")
+        self.batch_expected_speakers_combo.addItem("2 Speakers (Interview)", "2")
+        self.batch_expected_speakers_combo.addItem("3+ Speakers (Panel / Group)", "3+")
+        default_expected = str(getattr(parent, "expected_speakers", "auto") or "auto")
+        default_idx = self.batch_expected_speakers_combo.findData(default_expected)
+        self.batch_expected_speakers_combo.setCurrentIndex(default_idx if default_idx >= 0 else 0)
+        speaker_row.addWidget(self.batch_expected_speakers_combo, 1)
+        custom_proc_layout.addLayout(speaker_row)
+        self.proc_diarize.toggled.connect(self.batch_expected_speakers_combo.setEnabled)
+        self.batch_expected_speakers_combo.setEnabled(self.proc_diarize.isChecked())
+
+        # -- Story Detection --
+        stories_row = QHBoxLayout()
         self.proc_stories = QCheckBox("Story Detection")
         self.proc_stories.setChecked(True)
-        self.proc_translate = QCheckBox("Spanish Translation")
-        self.proc_translate.setChecked(False)
+        stories_row.addWidget(self.proc_stories)
+        stories_row.addWidget(QLabel("Silence Gap:"))
+        self.batch_gap_spin = QDoubleSpinBox()
+        self.batch_gap_spin.setRange(0.5, 30.0)
+        self.batch_gap_spin.setSingleStep(0.5)
+        self.batch_gap_spin.setSuffix(" sec")
+        self.batch_gap_spin.setValue(1.5)
+        stories_row.addWidget(self.batch_gap_spin)
+        stories_row.addWidget(QLabel("Lead-in:"))
+        self.batch_pad_spin = QDoubleSpinBox()
+        self.batch_pad_spin.setRange(0.0, 5.0)
+        self.batch_pad_spin.setSingleStep(0.1)
+        self.batch_pad_spin.setSuffix(" sec")
+        self.batch_pad_spin.setValue(0.2)
+        stories_row.addWidget(self.batch_pad_spin)
+        custom_proc_layout.addLayout(stories_row)
+        self.proc_stories.toggled.connect(self.batch_gap_spin.setEnabled)
+        self.proc_stories.toggled.connect(self.batch_pad_spin.setEnabled)
+        self.batch_gap_spin.setEnabled(self.proc_stories.isChecked())
+        self.batch_pad_spin.setEnabled(self.proc_stories.isChecked())
 
-        custom_proc_layout.addWidget(self.proc_transcribe)
-        custom_proc_layout.addWidget(self.proc_diarize)
-        custom_proc_layout.addWidget(self.proc_stories)
-        custom_proc_layout.addWidget(self.proc_translate)
+        # -- Translation (formerly "Spanish Translation") --
+        translate_row = QHBoxLayout()
+        self.proc_translate = QCheckBox("Translation")
+        self.proc_translate.setChecked(False)
+        translate_row.addWidget(self.proc_translate)
+        translate_row.addWidget(QLabel("Direction:"))
+        self.batch_translate_direction_combo = QComboBox()
+        self.batch_translate_direction_combo.addItem("Auto-Detect (Flip EN \u2194 ES)", "auto")
+        self.batch_translate_direction_combo.addItem("English to Spanish", "en-es")
+        self.batch_translate_direction_combo.addItem("Spanish to English", "es-en")
+        translate_row.addWidget(self.batch_translate_direction_combo, 1)
+        custom_proc_layout.addLayout(translate_row)
+        self.proc_translate.toggled.connect(self.batch_translate_direction_combo.setEnabled)
+        self.batch_translate_direction_combo.setEnabled(self.proc_translate.isChecked())
         proc_layout.addWidget(self.custom_proc_widget)
         self.custom_proc_widget.setEnabled(False)
 
@@ -3256,7 +3404,7 @@ class BatchProcessingDialog(QDialog):
         opts_group = QGroupBox("2. Project & Save Options")
         opts_layout = QVBoxLayout(opts_group)
 
-        self.save_project_check = QCheckBox("Auto-save updated project (.json) files to specified directory (or default)")
+        self.save_project_check = QCheckBox("Auto-save updated project (.rtvs) files to specified directory (or default)")
         self.save_project_check.setChecked(True)
         opts_layout.addWidget(self.save_project_check)
 
@@ -3302,19 +3450,20 @@ class BatchProcessingDialog(QDialog):
         self.include_speakers.setChecked(True)
         self.include_times = QCheckBox("Include timestamps")
         self.include_times.setChecked(False)
-        self.translate_check = QCheckBox("Translate outputs to Spanish (_es)")
+        self.translate_check = QCheckBox("Translate")
         details_row.addWidget(self.include_speakers)
         details_row.addWidget(self.include_times)
         details_row.addWidget(self.translate_check)
         export_layout.addLayout(details_row)
 
-        self.doc_direction = QComboBox()
-        self.doc_direction.addItem("English → Spanish", "en-es")
-        self.doc_direction.addItem("Spanish → English", "es-en")
-        doc_row = QHBoxLayout()
-        doc_row.addWidget(QLabel("Document Translation Direction:"))
-        doc_row.addWidget(self.doc_direction)
-        export_layout.addLayout(doc_row)
+        self.batch_export_translate_direction_combo = QComboBox()
+        self.batch_export_translate_direction_combo.addItem("Auto-Detect", "auto")
+        self.batch_export_translate_direction_combo.addItem("English → Spanish", "en-es")
+        self.batch_export_translate_direction_combo.addItem("Spanish → English", "es-en")
+        export_translate_row = QHBoxLayout()
+        export_translate_row.addWidget(QLabel("Translation Direction:"))
+        export_translate_row.addWidget(self.batch_export_translate_direction_combo, 1)
+        export_layout.addLayout(export_translate_row)
 
         layout.addWidget(self.export_group)
 
@@ -3328,33 +3477,205 @@ class BatchProcessingDialog(QDialog):
             self.include_speakers.setEnabled(not checked)
             self.include_times.setEnabled(not checked)
             self.translate_check.setEnabled(not checked)
+            self.batch_export_translate_direction_combo.setEnabled((not checked) and self.translate_check.isChecked())
 
         self.save_project_only_check.toggled.connect(_on_save_project_only_toggled)
+        self.translate_check.toggled.connect(self.batch_export_translate_direction_combo.setEnabled)
+        self.batch_export_translate_direction_combo.setEnabled(self.translate_check.isChecked())
+        self.batch_translate_direction_combo.currentIndexChanged.connect(
+            lambda idx: self.batch_export_translate_direction_combo.setCurrentIndex(idx)
+            if 0 <= idx < self.batch_export_translate_direction_combo.count() else None
+        )
+        self.batch_export_translate_direction_combo.currentIndexChanged.connect(
+            lambda idx: self.batch_translate_direction_combo.setCurrentIndex(idx)
+            if 0 <= idx < self.batch_translate_direction_combo.count() else None
+        )
 
-        # Dialog Action Buttons
+        # Dialog Action Buttons and Default Management
         btns = QHBoxLayout()
+        self.save_defaults_btn = QPushButton("Save Options as Default")
+        self.reset_defaults_btn = QPushButton("Reset to Defaults")
         self.start = QPushButton("Start Batch")
+        self.start.setDefault(True)
         cancel = QPushButton("Cancel")
+        btns.addWidget(self.save_defaults_btn)
+        btns.addWidget(self.reset_defaults_btn)
         btns.addStretch()
         btns.addWidget(self.start)
         btns.addWidget(cancel)
         layout.addLayout(btns)
 
+        # Load remembered preferences or defaults
+        self._load_saved_options()
+
         # Signal Connections
         add.clicked.connect(self.add_files)
         rem.clicked.connect(lambda: [self.files.takeItem(self.files.row(i)) for i in self.files.selectedItems()])
         browse.clicked.connect(self.choose_output)
+        self.save_defaults_btn.clicked.connect(lambda: self.save_options_to_settings(as_default=True))
+        self.reset_defaults_btn.clicked.connect(self.reset_options_to_defaults)
         cancel.clicked.connect(self.reject)
-        self.start.clicked.connect(self.accept)
+        self.start.clicked.connect(self._on_start_clicked)
         
         self.files.filesDropped.connect(self.add_paths)
         self.files.model().rowsInserted.connect(self.auto_detect_options)
         self.files.model().rowsRemoved.connect(self.auto_detect_options)
 
+    def _load_saved_options(self):
+        parent = self.parent()
+        settings = getattr(parent, "settings_store", None)
+        if not settings:
+            return
+        pipe_mode = str(settings.value("batch_opt_pipeline_mode", "full"))
+        if pipe_mode == "custom":
+            self.pipeline_custom_radio.setChecked(True)
+        else:
+            self.pipeline_full_radio.setChecked(True)
+
+        def _to_bool(val, default):
+            if val is None:
+                return default
+            return str(val).lower() in ("true", "1", "yes")
+
+        self.proc_transcribe.setChecked(_to_bool(settings.value("batch_opt_proc_transcribe"), True))
+        self.proc_diarize.setChecked(_to_bool(settings.value("batch_opt_proc_diarize"), True))
+        self.proc_stories.setChecked(_to_bool(settings.value("batch_opt_proc_stories"), True))
+        self.proc_translate.setChecked(_to_bool(settings.value("batch_opt_proc_translate"), False))
+
+        expected = str(settings.value("batch_opt_expected_speakers", getattr(parent, "expected_speakers", "auto") or "auto"))
+        idx_exp = self.batch_expected_speakers_combo.findData(expected)
+        if idx_exp >= 0:
+            self.batch_expected_speakers_combo.setCurrentIndex(idx_exp)
+        try:
+            self.batch_gap_spin.setValue(float(settings.value("batch_opt_story_gap", 1.5) or 1.5))
+            self.batch_pad_spin.setValue(float(settings.value("batch_opt_story_pad", 0.2) or 0.2))
+        except (TypeError, ValueError):
+            pass
+        translate_dir = str(settings.value("batch_opt_translate_direction", "auto"))
+        idx_dir = self.batch_translate_direction_combo.findData(translate_dir)
+        if idx_dir >= 0:
+            self.batch_translate_direction_combo.setCurrentIndex(idx_dir)
+            self.batch_export_translate_direction_combo.setCurrentIndex(idx_dir)
+
+        self.save_project_check.setChecked(_to_bool(settings.value("batch_opt_save_project"), True))
+        self.skip_existing_check.setChecked(_to_bool(settings.value("batch_opt_skip_existing"), True))
+        self.save_project_only_check.setChecked(_to_bool(settings.value("batch_opt_save_project_only"), False))
+
+        scope = str(settings.value("batch_opt_scope", "full"))
+        idx = self.scope_combo.findData(scope)
+        if idx >= 0:
+            self.scope_combo.setCurrentIndex(idx)
+
+        self.fmt_txt.setChecked(_to_bool(settings.value("batch_opt_fmt_txt"), True))
+        self.fmt_docx.setChecked(_to_bool(settings.value("batch_opt_fmt_docx"), True))
+        self.fmt_srt.setChecked(_to_bool(settings.value("batch_opt_fmt_srt"), False))
+        self.fmt_vtt.setChecked(_to_bool(settings.value("batch_opt_fmt_vtt"), False))
+
+        self.include_speakers.setChecked(_to_bool(settings.value("batch_opt_include_speakers"), True))
+        self.include_times.setChecked(_to_bool(settings.value("batch_opt_include_times"), False))
+        self.translate_check.setChecked(_to_bool(settings.value("batch_opt_translate_check"), False))
+
+    def save_options_to_settings(self, as_default=False):
+        parent = self.parent()
+        settings = getattr(parent, "settings_store", None)
+        if not settings:
+            return
+        pipe_mode = "custom" if self.pipeline_custom_radio.isChecked() else "full"
+        settings.setValue("batch_opt_pipeline_mode", pipe_mode)
+        settings.setValue("batch_opt_proc_transcribe", self.proc_transcribe.isChecked())
+        settings.setValue("batch_opt_proc_diarize", self.proc_diarize.isChecked())
+        settings.setValue("batch_opt_proc_stories", self.proc_stories.isChecked())
+        settings.setValue("batch_opt_proc_translate", self.proc_translate.isChecked())
+        settings.setValue("batch_opt_expected_speakers", self.batch_expected_speakers_combo.currentData())
+        settings.setValue("batch_opt_story_gap", self.batch_gap_spin.value())
+        settings.setValue("batch_opt_story_pad", self.batch_pad_spin.value())
+        settings.setValue("batch_opt_translate_direction", self.batch_export_translate_direction_combo.currentData())
+
+        settings.setValue("batch_opt_save_project", self.save_project_check.isChecked())
+        settings.setValue("batch_opt_skip_existing", self.skip_existing_check.isChecked())
+        settings.setValue("batch_opt_save_project_only", self.save_project_only_check.isChecked())
+
+        settings.setValue("batch_opt_scope", self.scope_combo.currentData())
+        settings.setValue("batch_opt_fmt_txt", self.fmt_txt.isChecked())
+        settings.setValue("batch_opt_fmt_docx", self.fmt_docx.isChecked())
+        settings.setValue("batch_opt_fmt_srt", self.fmt_srt.isChecked())
+        settings.setValue("batch_opt_fmt_vtt", self.fmt_vtt.isChecked())
+
+        settings.setValue("batch_opt_include_speakers", self.include_speakers.isChecked())
+        settings.setValue("batch_opt_include_times", self.include_times.isChecked())
+        settings.setValue("batch_opt_translate_check", self.translate_check.isChecked())
+        if as_default:
+            QMessageBox.information(self, "Batch Options", "Current batch export options saved as defaults.")
+
+    def reset_options_to_defaults(self):
+        self.pipeline_full_radio.setChecked(True)
+        self.proc_transcribe.setChecked(True)
+        self.proc_diarize.setChecked(True)
+        self.proc_stories.setChecked(True)
+        self.proc_translate.setChecked(False)
+        idx_exp = self.batch_expected_speakers_combo.findData("auto")
+        if idx_exp >= 0:
+            self.batch_expected_speakers_combo.setCurrentIndex(idx_exp)
+        self.batch_gap_spin.setValue(1.5)
+        self.batch_pad_spin.setValue(0.2)
+        idx_dir = self.batch_translate_direction_combo.findData("auto")
+        if idx_dir >= 0:
+            self.batch_translate_direction_combo.setCurrentIndex(idx_dir)
+            self.batch_export_translate_direction_combo.setCurrentIndex(idx_dir)
+
+        self.save_project_check.setChecked(True)
+        self.skip_existing_check.setChecked(True)
+        self.save_project_only_check.setChecked(False)
+
+        idx = self.scope_combo.findData("full")
+        if idx >= 0:
+            self.scope_combo.setCurrentIndex(idx)
+
+        self.fmt_txt.setChecked(True)
+        self.fmt_docx.setChecked(True)
+        self.fmt_srt.setChecked(False)
+        self.fmt_vtt.setChecked(False)
+
+        self.include_speakers.setChecked(True)
+        self.include_times.setChecked(False)
+        self.translate_check.setChecked(False)
+       
+        self.save_options_to_settings()
+        QMessageBox.information(self, "Batch Options", "Batch export options reset to factory defaults.")
+
+    def _on_start_clicked(self):
+        self.save_options_to_settings(as_default=False)
+        self.accept()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+        if paths:
+            self.add_paths(paths)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
     def add_paths(self, paths):
         for f in paths:
-            if Path(f).is_file() and not any(self.files.item(i).text() == f for i in range(self.files.count())):
-                self.files.addItem(f)
+            p = Path(f)
+            if p.is_file() and not any(self.files.item(i).text() == str(p) for i in range(self.files.count())):
+                self.files.addItem(str(p))
+            elif p.is_dir():
+                for sub in sorted(p.rglob("*")):
+                    if sub.is_file() and not any(self.files.item(i).text() == str(sub) for i in range(self.files.count())):
+                        self.files.addItem(str(sub))
         self.auto_detect_options()
 
     def add_files(self):
@@ -3399,7 +3720,6 @@ class BatchProcessingDialog(QDialog):
         self.fmt_srt.setEnabled(has_media)
         self.fmt_vtt.setEnabled(has_media)
         self.scope_combo.setEnabled(has_media)
-        self.doc_direction.setVisible(has_docs and not has_media)
 
 # ============================================================
 # Global Subprocess & Child Process Management

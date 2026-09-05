@@ -1,14 +1,17 @@
-"""Radio & TV Segmenter — v1.7
+"""Radio & TV Segmenter — v1.8
 
 This is the thin application composition root. UI/processing responsibilities
 are implemented in focused mixins so future changes can target smaller files
 without changing the MainWindow-facing API.
 """
 import sys
-from bootstrap import configure_runtime_environment
+from bootstrap import configure_runtime_environment, ensure_sherpa_onnx_runtime
 
-# Bootstrap lightweight core UI dependencies before importing third-party modules.
+# Bootstrap writable model/cache locations and verify the Parakeet runtime before
+# importing the rest of the application. Source builds can install it automatically;
+# packaged builds contain it via build_installer.py.
 configure_runtime_environment()
+_sherpa_runtime_ready = ensure_sherpa_onnx_runtime()
 
 # If invoked as a background AI worker subprocess, dispatch immediately without loading the GUI.
 if len(sys.argv) > 1 and sys.argv[1] in ("--prs-worker", "--worker"):
@@ -96,7 +99,8 @@ class MainWindow(
         self.whisper_model = "small"
         self.silence_threshold = 3.0
         self.lead_in_padding = 0.5
-        self.speaker_sensitivity = 8
+        self.expected_speakers = "auto"
+        self.translation_direction = "auto"
 
         self.pending_diarization = False
         self.pending_auto_detect_stories = False

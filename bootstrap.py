@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib.util
+import subprocess
 from pathlib import Path
 
 APP_NAME = "RadioTVStorySegmenter"
@@ -43,9 +45,41 @@ def configure_runtime_environment() -> Path:
     return root
 
 
+def ensure_sherpa_onnx_runtime():
+    """Make sure the Parakeet runtime is importable before the GUI starts.
+
+    Source/portable Python runs may not have installed requirements yet.  In
+    that case install the same constrained sherpa-onnx package used by the
+    application.  A frozen build should already contain the package; the
+    build script explicitly collects it so this check is also a useful
+    diagnostic rather than attempting to pip-install into a PyInstaller EXE.
+    """
+    module_name = "sherpa_onnx"
+    package_spec = "sherpa-onnx>=1.13,<2"
+
+    if importlib.util.find_spec(module_name) is not None:
+        return True
+
+    if getattr(sys, "frozen", False):
+        print("[STARTUP] sherpa-onnx is missing from the packaged application.", file=sys.stderr)
+        return False
+
+    print("[STARTUP] sherpa-onnx is not installed; installing it now...", flush=True)
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", package_spec],
+            check=True,
+        )
+        return importlib.util.find_spec(module_name) is not None
+    except Exception as exc:
+        print(f"[STARTUP] Could not install sherpa-onnx automatically: {exc}", file=sys.stderr)
+        return False
+
+
 def check_and_install_core():
-    """Backward-compatible name; dependencies are bundled by the installer."""
-    return configure_runtime_environment()
+    """Backward-compatible startup dependency check."""
+    configure_runtime_environment()
+    return ensure_sherpa_onnx_runtime()
 
 if __name__ == "__main__":
     configure_runtime_environment()

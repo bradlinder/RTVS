@@ -990,6 +990,7 @@ class ProjectExportMixin:
             "format": "Radio & TV Story Segmenter Project",
             "version": PROJECT_VERSION,
             "audio_file": self.project_audio_reference(),
+            "audio_file_abs": str(Path(self.audio_file).resolve()) if self.audio_file else None,
             "duration": self.duration,
             "transcript": self.transcript,
             "diarization": self.diarization,
@@ -1006,7 +1007,7 @@ class ProjectExportMixin:
                 "translation_model_variant": self.translation_model_variant,
                 "silence_threshold": self.silence_threshold,
                 "lead_in_padding": self.lead_in_padding,
-                "speaker_sensitivity": self.speaker_sensitivity,
+                "expected_speakers": getattr(self, "expected_speakers", "auto"),
                 "show_speaker_labels": self.show_speaker_labels,
                 "show_timestamps": self.show_timestamps,
                 "language": self.language,
@@ -1023,13 +1024,34 @@ class ProjectExportMixin:
 
     def _write_project_file(self, file_path: str):
         """Writes project state dictionary directly to disk."""
+        destination = Path(file_path).expanduser().resolve()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        self.project_file = destination
+
+        # Optional: Copy source media file into project folder
+        copy_media = str(self.settings_store.value("copy_media_to_project_folder", "false")).lower() in {"1", "true", "yes"}
+        if copy_media and self.audio_file and Path(self.audio_file).exists():
+            src_media = Path(self.audio_file).resolve()
+            media_subfolder = destination.parent / "Media"
+            if media_subfolder.is_dir() or str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"}:
+                media_subfolder.mkdir(parents=True, exist_ok=True)
+                target_media = media_subfolder / src_media.name
+            else:
+                target_media = destination.parent / src_media.name
+
+            if target_media.resolve() != src_media:
+                try:
+                    shutil.copy2(src_media, target_media)
+                    self.audio_file = target_media
+                    self.log_activity(f"[PROJECT] Copied media file to project folder: {target_media.name}", mark_dirty=False)
+                except Exception as exc:
+                    self.log_activity(f"[WARNING] Could not copy media to project folder: {exc}", mark_dirty=False)
+
         data = self.project_data()
         errors = self.validate_project_data(data)
         if errors:
             raise ValueError("Validation failed: " + "; ".join(errors))
 
-        destination = Path(file_path).expanduser().resolve()
-        destination.parent.mkdir(parents=True, exist_ok=True)
         temp_path = destination.with_name(destination.name + ".tmp")
         try:
             with open(temp_path, "w", encoding="utf-8") as f:
@@ -1044,7 +1066,6 @@ class ProjectExportMixin:
                 pass
             raise
 
-        self.project_file = destination
         self.project_dirty = False
         self._remember_saved_project(str(destination))
         self.update_window_title()
@@ -1159,10 +1180,10 @@ class ProjectExportMixin:
             if create_bundle:
                 project_bundle_dir = out_dir / base_name
                 project_bundle_dir.mkdir(parents=True, exist_ok=True)
-                file_path = str(project_bundle_dir / f"{base_name}.json")
+                file_path = str(project_bundle_dir / f"{base_name}.rtvs")
             else:
                 out_dir.mkdir(parents=True, exist_ok=True)
-                file_path = str(out_dir / f"{base_name}.json")
+                file_path = str(out_dir / f"{base_name}.rtvs")
 
             self._write_project_file(file_path)
             self.log_activity(f"[BATCH] Auto-saved project to {file_path}")
@@ -1170,15 +1191,15 @@ class ProjectExportMixin:
 
         # Interactive Save As dialog
         if create_bundle:
-            initial_path = str(target_base_dir / base_name / f"{base_name}.json")
+            initial_path = str(target_base_dir / base_name / f"{base_name}.rtvs")
         else:
-            initial_path = str(target_base_dir / f"{base_name}.json")
+            initial_path = str(target_base_dir / f"{base_name}.rtvs")
 
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Project As",
             initial_path,
-            "Project Files (*.json)"
+            "RadioTV Story Segmenter Projects (*.rtvs);;Legacy Projects (*.json);;All Files (*.*)"
         )
         if file_path:
             target_path = Path(file_path)
@@ -1273,6 +1294,26 @@ class ProjectExportMixin:
         backup_file = self.project_file.with_name(self.project_file.name + ".backup")
         try:
             self.project_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Optional: Copy source media file into project folder
+            copy_media = str(self.settings_store.value("copy_media_to_project_folder", "false")).lower() in {"1", "true", "yes"}
+            if copy_media and self.audio_file and Path(self.audio_file).exists():
+                src_media = Path(self.audio_file).resolve()
+                media_subfolder = self.project_file.parent / "Media"
+                if media_subfolder.is_dir() or str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"}:
+                    media_subfolder.mkdir(parents=True, exist_ok=True)
+                    target_media = media_subfolder / src_media.name
+                else:
+                    target_media = self.project_file.parent / src_media.name
+
+                if target_media.resolve() != src_media:
+                    try:
+                        shutil.copy2(src_media, target_media)
+                        self.audio_file = target_media
+                        self.log_activity(f"[PROJECT] Copied media file to project folder: {target_media.name}", mark_dirty=False)
+                    except Exception as exc:
+                        self.log_activity(f"[WARNING] Could not copy media to project folder: {exc}", mark_dirty=False)
+
             data = self.project_data()
             errors = self.validate_project_data(data)
             if errors:
@@ -1318,8 +1359,13 @@ class ProjectExportMixin:
 
     def find_adjacent_project(self, media_path):
         # A project is now named after its source media file:
-        # episode.mp4 -> episode.json
-        candidates = [media_path.parent / f"{media_path.stem}.json"]
+        # episode.mp4 -> episode.rtvs (or legacy episode.json)
+        candidates = [
+            media_path.parent / f"{media_path.stem}.rtvs",
+            media_path.parent / f"{media_path.stem}.json",
+            media_path.parent / media_path.stem / f"{media_path.stem}.rtvs",
+            media_path.parent / media_path.stem / f"{media_path.stem}.json",
+        ]
         for candidate in candidates:
             if not candidate.exists() or not candidate.is_file():
                 continue
@@ -1338,19 +1384,55 @@ class ProjectExportMixin:
                 continue
         return None
 
-    def resolve_project_media(self, project_file, audio_reference):
+    def resolve_project_media(self, project_file, audio_reference, audio_file_abs=None):
+        # 1. Check remembered absolute path if available and exists on disk
+        if audio_file_abs:
+            abs_candidate = Path(audio_file_abs).expanduser().resolve()
+            if abs_candidate.exists() and abs_candidate.is_file():
+                return abs_candidate
+
         if not audio_reference:
             return None
-        audio_path = Path(audio_reference)
-        if not audio_path.is_absolute():
-            audio_path = project_file.parent / audio_path
-        audio_path = audio_path.resolve()
-        if audio_path.exists() and audio_path.is_file():
-            return audio_path
 
-        basename_candidate = project_file.parent / Path(audio_reference).name
+        ref_path = Path(audio_reference)
+
+        # 2. Check audio_reference if already absolute and exists
+        if ref_path.is_absolute():
+            cand = ref_path.resolve()
+            if cand.exists() and cand.is_file():
+                return cand
+
+        proj_dir = project_file.parent
+
+        # 3. Check relative to project_file.parent
+        rel_candidate = (proj_dir / ref_path).resolve()
+        if rel_candidate.exists() and rel_candidate.is_file():
+            return rel_candidate
+
+        # 4. Check inside Media/ subfolder in project dir
+        media_candidate = (proj_dir / "Media" / ref_path.name).resolve()
+        if media_candidate.exists() and media_candidate.is_file():
+            return media_candidate
+
+        # 5. Check direct basename in project directory
+        basename_candidate = (proj_dir / ref_path.name).resolve()
         if basename_candidate.exists() and basename_candidate.is_file():
-            return basename_candidate.resolve()
+            return basename_candidate
+
+        # 6. Check in default projects directory
+        default_dir = getattr(self, "default_project_directory", "")
+        if default_dir:
+            cand = (Path(default_dir) / ref_path.name).resolve()
+            if cand.exists() and cand.is_file():
+                return cand
+
+        # 7. Check in last media directory
+        last_media = getattr(self, "last_media_directory", "")
+        if last_media:
+            cand = (Path(last_media) / ref_path.name).resolve()
+            if cand.exists() and cand.is_file():
+                return cand
+
         return None
 
     def load_project_file(self, filename, prompt=True, preserve_media=False):
@@ -1397,7 +1479,7 @@ class ProjectExportMixin:
             return False
 
         self.project_file = project_path
-        audio_path = self.resolve_project_media(project_path, data.get("audio_file"))
+        audio_path = self.resolve_project_media(project_path, data.get("audio_file"), data.get("audio_file_abs"))
 
         if audio_path is None and data.get("audio_file"):
             answer = QMessageBox.question(
@@ -1461,14 +1543,20 @@ class ProjectExportMixin:
         settings = data.get("settings", {})
         self.auto_save_minutes = float(settings.get("auto_save_minutes", data.get("auto_save_minutes", 5)))
         self.skip_seconds = float(settings.get("skip_seconds", data.get("skip_seconds", 5)))
-        self.whisper_model = str(settings.get("whisper_model", data.get("whisper_model", "small")))
+        # Transcription Model is a global user preference, not a project setting.
+        saved_global_whisper = str(self.settings_store.value("whisper_model", getattr(self, "whisper_model", "small")) or "small")
+        allowed_whisper = {"tiny", "base", "small", "distil-medium.en", "medium", "distil-large-v3", "large-v3", "parakeet-onnx"}
+        self.whisper_model = saved_global_whisper if saved_global_whisper in allowed_whisper else "small"
+        self.settings_store.setValue("whisper_model", self.whisper_model)
+        self.settings_store.sync()
         self.translation_model_variant = str(settings.get("translation_model_variant", data.get("translation_model_variant", "tiny")))
         if self.translation_model_variant not in {"tiny", "standard"}: self.translation_model_variant = "tiny"
-        if self.whisper_model not in {"tiny", "base", "small", "medium", "large-v3"}:
-            self.whisper_model = "small"
         self.silence_threshold = float(settings.get("silence_threshold", data.get("silence_threshold", 3.0)))
         self.lead_in_padding = float(settings.get("lead_in_padding", data.get("lead_in_padding", 0.5)))
-        self.speaker_sensitivity = max(1, min(10, int(settings.get("speaker_sensitivity", data.get("speaker_sensitivity", 8)))))
+        # "expected_speakers" replaces the old "speaker_sensitivity" (1-10) setting;
+        # projects saved by older builds only have the latter, which no longer maps
+        # to anything meaningful, so such projects just fall back to "auto".
+        self.expected_speakers = str(settings.get("expected_speakers", data.get("expected_speakers", "auto")) or "auto")
         self.show_speaker_labels = bool(settings.get("show_speaker_labels", self.show_speaker_labels))
         self.show_timestamps = bool(settings.get("show_timestamps", self.show_timestamps))
         self.language = str(settings.get("language", self.language)) if str(settings.get("language", self.language)) in {"en","es"} else self.language
@@ -1476,11 +1564,6 @@ class ProjectExportMixin:
         if hasattr(self, "show_speaker_labels_action"):
             self.show_speaker_labels_action.setChecked(self.show_speaker_labels)
             self.show_timestamps_action.setChecked(self.show_timestamps)
-        if hasattr(self, "sensitivity_slider"):
-            self.sensitivity_slider.blockSignals(True)
-            self.sensitivity_slider.setValue(self.speaker_sensitivity)
-            self.sensitivity_slider.blockSignals(False)
-            self.update_sensitivity_tooltip(self.speaker_sensitivity)
         self.timeline.set_skip_seconds(self.skip_seconds)
         if hasattr(self, "skip_display"):
             self.skip_display.setValue(int(self.skip_seconds))
@@ -1547,9 +1630,15 @@ class ProjectExportMixin:
         if not filename:
             filename, _ = QFileDialog.getOpenFileName(
                 self, "Load Project", self._dialog_directory(),
-                "Project Files (*.json);;All Files (*)",
+                "RadioTV Story Segmenter Projects (*.rtvs);;Legacy Projects (*.json);;All Files (*.*)",
             )
         if filename:
+            try:
+                directory = str(Path(filename).resolve().parent)
+                self.settings_store.setValue("last_open_directory", directory)
+                self.settings_store.sync()
+            except Exception:
+                pass
             return self.load_project_file(filename, prompt=True, preserve_media=False)
         return False
 
@@ -1609,7 +1698,7 @@ class ProjectExportMixin:
 
             # Keep project session file saved at root of the directory
             if self.audio_file or self.transcript:
-                self._write_project_file(str(project_dir / f"{chosen_name}.json"))
+                self._write_project_file(str(project_dir / f"{chosen_name}.rtvs"))
 
             # Route exports directly to project_dir
             if scope == "full":
@@ -1642,14 +1731,21 @@ class ProjectExportMixin:
             media_out = out
 
         languages_to_export = []
-        if options.get("include_english", True):
-            languages_to_export.append(("en", ""))
-        if options.get("include_spanish", False):
-            has_es = self.has_spanish_translation() if hasattr(self, "has_spanish_translation") else (
-                self.translation_is_current(self.translation_key("en", "es")) if hasattr(self, "translation_is_current") else False
-            )
-            if has_es:
-                languages_to_export.append(("es", "_es"))
+        batch_direction = options.get("translation_direction")
+        if batch_direction and options.get("include_spanish", False):
+            source_code, target_code, target_suffix = self.translation_export_spec(options)
+            languages_to_export.append((source_code, ""))
+            if self.get_translation_item(source_code, target_code):
+                languages_to_export.append((target_code, target_suffix))
+        else:
+            if options.get("include_english", True):
+                languages_to_export.append(("en", ""))
+            if options.get("include_spanish", False):
+                has_es = self.has_spanish_translation() if hasattr(self, "has_spanish_translation") else (
+                    self.translation_is_current(self.translation_key("en", "es")) if hasattr(self, "translation_is_current") else False
+                )
+                if has_es:
+                    languages_to_export.append(("es", "_es"))
 
         doc_base = base if base else (safe_filename(self.audio_file.stem) if self.audio_file else "Story")
         total_stories = total_batch if total_batch is not None else len(stories_with_indices)
@@ -1674,12 +1770,19 @@ class ProjectExportMixin:
 
             for lang_code, suffix in languages_to_export:
                 file_base = f"{story_base}{suffix}"
-                if lang_code == "en":
+                batch_direction = options.get("translation_direction")
+                source_code = self.translation_export_spec(options)[0] if batch_direction else "en"
+                if lang_code == source_code:
                     blocks = self.build_story_blocks(segments) if segments else []
                 else:
-                    item = self.get_spanish_translation_item() if hasattr(self, "get_spanish_translation_item") else (
-                        self.translations.get("en-es") or self.translations.get("en_es") or {}
-                    )
+                    batch_direction = options.get("translation_direction")
+                    if batch_direction:
+                        source_code, target_code, _target_suffix = self.translation_export_spec(options)
+                        item = self.get_translation_item(source_code, target_code)
+                    else:
+                        item = self.get_spanish_translation_item() if hasattr(self, "get_spanish_translation_item") else (
+                            self.translations.get("en-es") or self.translations.get("en_es") or {}
+                        )
                     trans_segs = item.get("segments", []) if item else []
                     source_segs = self.transcript.get("segments", []) if self.transcript else []
                     curr_spk_blocks = []
@@ -1704,7 +1807,7 @@ class ProjectExportMixin:
                     txt_file = transcripts_out / f"{file_base}.txt"
                     with open(txt_file, "w", encoding="utf-8") as f:
                         source_name = self.audio_file.name if self.audio_file else "Text-only project"
-                        lang_label = " (Spanish)" if lang_code == "es" else ""
+                        lang_label = " (Spanish)" if lang_code == "es" else (" (English)" if lang_code == "en" else "")
                         f.write(f"{story_title}{lang_label}\n{source_name} ({format_time(story.start)} - {format_time(story.end)})\n" + "=" * 70 + "\n\n")
                         for block in blocks:
                             speaker = (block.get("speaker") or "").strip() if options.get("include_speakers", True) else ""
@@ -1724,7 +1827,7 @@ class ProjectExportMixin:
                     document = Document()
                     document.styles["Normal"].font.name = "Arial"
                     document.styles["Normal"].font.size = Pt(11)
-                    lang_label = " (Spanish)" if lang_code == "es" else ""
+                    lang_label = " (Spanish)" if lang_code == "es" else (" (English)" if lang_code == "en" else "")
                     document.add_heading(f"{story_title}{lang_label}", 0)
                     if self.audio_file:
                         document.add_paragraph(f"Recording: {self.audio_file.name} ({format_time(story.start)} - {format_time(story.end)})")
@@ -2079,14 +2182,21 @@ class ProjectExportMixin:
 
         try:
             languages_to_export = []
-            if options.get("include_english", True):
-                languages_to_export.append(("en", ""))
-            if options.get("include_spanish", False):
-                has_es = self.has_spanish_translation() if hasattr(self, "has_spanish_translation") else (
-                    self.translation_is_current(self.translation_key("en", "es")) if hasattr(self, "translation_is_current") else False
-                )
-                if has_es:
-                    languages_to_export.append(("es", "_es"))
+            batch_direction = options.get("translation_direction")
+            if batch_direction and options.get("include_spanish", False):
+                source_code, target_code, target_suffix = self.translation_export_spec(options)
+                languages_to_export.append((source_code, ""))
+                if self.get_translation_item(source_code, target_code):
+                    languages_to_export.append((target_code, target_suffix))
+            else:
+                if options.get("include_english", True):
+                    languages_to_export.append(("en", ""))
+                if options.get("include_spanish", False):
+                    has_es = self.has_spanish_translation() if hasattr(self, "has_spanish_translation") else (
+                        self.translation_is_current(self.translation_key("en", "es")) if hasattr(self, "translation_is_current") else False
+                    )
+                    if has_es:
+                        languages_to_export.append(("es", "_es"))
 
             doc_title = base if base else (safe_filename(self.audio_file.stem) if self.audio_file else "Transcript")
 
@@ -2101,13 +2211,20 @@ class ProjectExportMixin:
             for lang_code, suffix in languages_to_export:
                 file_base = f"{base}{suffix}"
 
-                if lang_code == "en":
+                batch_direction = options.get("translation_direction")
+                source_code = self.translation_export_spec(options)[0] if batch_direction else "en"
+                if lang_code == source_code:
                     segments = self.transcript.get("segments", []) if self.transcript else []
                     blocks = self.build_story_blocks(segments) if segments else []
                 else:
-                    item = self.get_spanish_translation_item() if hasattr(self, "get_spanish_translation_item") else (
-                        self.translations.get("en-es") or self.translations.get("en_es") or {}
-                    )
+                    batch_direction = options.get("translation_direction")
+                    if batch_direction:
+                        source_code, target_code, _target_suffix = self.translation_export_spec(options)
+                        item = self.get_translation_item(source_code, target_code)
+                    else:
+                        item = self.get_spanish_translation_item() if hasattr(self, "get_spanish_translation_item") else (
+                            self.translations.get("en-es") or self.translations.get("en_es") or {}
+                        )
                     trans_segs = item.get("segments", []) if item else []
                     source_segs = self.transcript.get("segments", []) if self.transcript else []
                     curr_spk_blocks = []
@@ -2130,7 +2247,7 @@ class ProjectExportMixin:
                     txt_file = transcripts_out / f"{file_base}.txt"
                     with open(txt_file, "w", encoding="utf-8") as f:
                         source_name = self.audio_file.name if self.audio_file else "Text-only project"
-                        lang_label = " (Spanish)" if lang_code == "es" else ""
+                        lang_label = " (Spanish)" if lang_code == "es" else (" (English)" if lang_code == "en" else "")
                         f.write(f"{doc_title}{lang_label}\n{source_name}\n" + "=" * 70 + "\n\n")
 
                         if self.diarization and lang_code == "en":
@@ -2157,7 +2274,7 @@ class ProjectExportMixin:
                     document = Document()
                     document.styles["Normal"].font.name = "Arial"
                     document.styles["Normal"].font.size = Pt(11)
-                    lang_label = " (Spanish)" if lang_code == "es" else ""
+                    lang_label = " (Spanish)" if lang_code == "es" else (" (English)" if lang_code == "en" else "")
                     document.add_heading(f"{doc_title}{lang_label}", 0)
                     if self.audio_file:
                         document.add_paragraph(f"Recording: {self.audio_file.name}")
@@ -2666,4 +2783,9 @@ class ProjectExportMixin:
 
     def _get_transcript_text_slice(self, start: float, end: float | None = None) -> str:
         segments = self.transcript_for_range(start, end)
-        return " ".join(s.get("text", "").strip() for s in segments if s.get("text", "").strip())
+        parts = []
+        for s in segments:
+            t = s.get("text", "").strip()
+            if t:
+                parts.append(t)
+        return " ".join(parts)

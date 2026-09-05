@@ -17,7 +17,95 @@ class WhisperModelInstallWorker(QObject):
     def run(self):
         error = None
         try:
-            WhisperModel(self.model_name, device="cpu", compute_type="int8", download_root=str(get_models_storage_dir()))
+            target_model = self.model_name
+            if target_model.startswith("parakeet"):
+                target_dir = get_models_storage_dir() / "parakeet_onnx"
+                target_dir.mkdir(parents=True, exist_ok=True)
+                from huggingface_hub import hf_hub_download
+                repo_id = "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
+                downloaded_any = False
+                for fname in ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]:
+                    try:
+                        hf_hub_download(
+                            repo_id=repo_id,
+                            filename=fname,
+                            local_dir=str(target_dir),
+                            local_dir_use_symlinks=False,
+                            resume_download=True,
+                        )
+                        downloaded_any = True
+                    except Exception as dl_err:
+                        raise RuntimeError(f"Could not download {fname} from {repo_id}: {dl_err}")
+                if not downloaded_any:
+                    raise RuntimeError(f"Failed to download Parakeet ONNX artifacts from {repo_id}")
+            elif target_model in ("distil-medium.en", "distil-large-v3") or target_model.startswith("distil-") or target_model in ("tiny", "base", "small", "medium", "large-v3"):
+                if target_model == "distil-medium.en":
+                    resolved = "Systran/faster-distil-whisper-medium.en"
+                elif target_model == "distil-large-v3":
+                    resolved = "Systran/faster-distil-whisper-large-v3"
+                elif target_model.startswith("distil-"):
+                    clean = target_model[7:]
+                    resolved = f"Systran/faster-distil-whisper-{clean}"
+                elif "/" in target_model:
+                    resolved = target_model
+                else:
+                    resolved = f"Systran/faster-whisper-{target_model}"
+
+                target_dir = get_models_storage_dir() / "huggingface" / "hub" / f"models--{resolved.replace('/', '--')}"
+                target_dir.mkdir(parents=True, exist_ok=True)
+                download_success = False
+                try:
+                    from huggingface_hub import snapshot_download
+                    snapshot_download(
+                        repo_id=resolved,
+                        local_dir=str(target_dir),
+                        local_dir_use_symlinks=False,
+                        resume_download=True,
+                    )
+                    download_success = True
+                except Exception as snap_err:
+                    # Windows privilege / WinError 1314 fallback: download files directly without symlinks
+                    from huggingface_hub import hf_hub_download
+                    essential_files = ["config.json", "model.bin", "tokenizer.json", "vocabulary.json", "vocabulary.txt"]
+                    for fname in essential_files:
+                        try:
+                            hf_hub_download(
+                                repo_id=resolved,
+                                filename=fname,
+                                local_dir=str(target_dir),
+                                local_dir_use_symlinks=False,
+                                resume_download=True,
+                            )
+                            download_success = True
+                        except Exception:
+                            pass
+                    if not download_success:
+                        raise snap_err
+            else:
+                resolved = self.model_name
+                target_dir = get_models_storage_dir() / "huggingface" / "hub" / f"models--{resolved.replace('/', '--')}"
+                target_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    from huggingface_hub import snapshot_download
+                    snapshot_download(
+                        repo_id=resolved,
+                        local_dir=str(target_dir),
+                        local_dir_use_symlinks=False,
+                        resume_download=True,
+                    )
+                except Exception:
+                    from huggingface_hub import hf_hub_download
+                    for fname in ["config.json", "model.bin", "tokenizer.json", "vocabulary.json"]:
+                        try:
+                            hf_hub_download(
+                                repo_id=resolved,
+                                filename=fname,
+                                local_dir=str(target_dir),
+                                local_dir_use_symlinks=False,
+                                resume_download=True,
+                            )
+                        except Exception:
+                            pass
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
         self.finished.emit(error)
@@ -26,22 +114,86 @@ class WhisperModelInstallWorker(QObject):
 class ModelManagementMixin:
     def model_cache_path(self, model_name):
         models_dir = get_models_storage_dir()
-        cache_root = models_dir / "huggingface" / "hub"
-        candidates = [
-            cache_root / f"models--Systran--faster-whisper-{model_name}",
-            get_app_data_dir() / "models" / "huggingface" / "hub" / f"models--Systran--faster-whisper-{model_name}",
-            Path(__file__).resolve().parent / "models" / f"faster-whisper-{model_name}",
+        if model_name.startswith("parakeet"):
+            parakeet_dirs = [
+                models_dir / "parakeet_onnx",
+                get_app_data_dir() / "models" / "parakeet_onnx",
+                Path(__file__).resolve().parent / "models" / "parakeet_onnx",
+                models_dir,
+            ]
+            for pd in parakeet_dirs:
+                if pd.exists() and any(pd.rglob("*.onnx")):
+                    return pd
+            return models_dir / "parakeet_onnx"
+
+        # Determine the canonical Hugging Face hub folder slug
+        if model_name == "distil-medium.en":
+            slugs = [
+                "models--Systran--faster-distil-whisper-medium.en",
+                "models--Systran--faster-distil-medium.en",
+                "models--Systran--faster-distil-whisper-distil-medium.en",
+            ]
+        elif model_name == "distil-large-v3":
+            slugs = [
+                "models--Systran--faster-distil-whisper-large-v3",
+                "models--Systran--faster-distil-large-v3",
+                "models--Systran--faster-distil-whisper-distil-large-v3",
+            ]
+        elif model_name.startswith("distil-"):
+            clean = model_name[7:]
+            slugs = [
+                f"models--Systran--faster-distil-whisper-{clean}",
+                f"models--Systran--faster-distil-whisper-{model_name}",
+                f"models--Systran--faster-{model_name}",
+            ]
+        else:
+            slugs = [
+                f"models--Systran--faster-whisper-{model_name}",
+                f"models--openai--whisper-{model_name}",
+            ]
+
+        cache_roots = [
+            models_dir / "huggingface" / "hub",
+            models_dir / "hub",
+            models_dir,
+            get_app_data_dir() / "models" / "huggingface" / "hub",
+            Path.home() / ".cache" / "huggingface" / "hub",
+            Path(__file__).resolve().parent / "models",
         ]
-        return next((p for p in candidates if p.exists()), candidates[0])
+
+        candidates = []
+        for cr in cache_roots:
+            for slug in slugs:
+                candidates.append(cr / slug)
+        for slug in slugs:
+            clean_dir_name = slug.replace("models--Systran--", "").replace("models--openai--", "")
+            for cr in cache_roots:
+                candidates.append(cr / clean_dir_name)
+        candidates.append(models_dir / model_name)
+
+        # 1. Prefer candidate containing actual weights
+        for p in candidates:
+            if p.exists() and (any(p.rglob("model.bin")) or any(p.rglob("*.bin")) or any(p.rglob("*.safetensors"))):
+                return p
+
+        # 2. Fallback to first existing directory
+        for p in candidates:
+            if p.exists():
+                return p
+
+        return candidates[0]
 
     def is_whisper_model_available(self, model_name):
         path = self.model_cache_path(model_name)
         if not path.exists():
             return False
-        if path.is_dir() and any(path.rglob("model.bin")):
-            return True
-        if path.is_dir() and any(path.rglob("*.bin")):
-            return True
+        if model_name.startswith("parakeet"):
+            required = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
+            return all(any(path.rglob(name)) for name in required)
+        if path.is_dir():
+            has_bin = any(path.rglob("model.bin")) or any(path.rglob("*.bin"))
+            has_safetensors = any(path.rglob("*.safetensors"))
+            return has_bin or has_safetensors
         return False
 
     def refresh_whisper_model_chooser(self):
@@ -50,7 +202,16 @@ class ModelManagementMixin:
         current = self.whisper_model
         self.model_input.blockSignals(True)
         self.model_input.clear()
-        models = [("tiny", "Tiny"), ("base", "Base"), ("small", "Small"), ("medium", "Medium"), ("large-v3", "Large")]
+        models = [
+            ("tiny", "Tiny"),
+            ("base", "Base"),
+            ("small", "Small"),
+            ("distil-medium.en", "Distil-Medium.en (4x Fast)"),
+            ("medium", "Medium"),
+            ("distil-large-v3", "Distil-Large-v3 (Fast Large)"),
+            ("large-v3", "Large"),
+            ("parakeet-onnx", "Parakeet ONNX (Ultra-Fast)"),
+        ]
         for model_id, label in models:
             available = self.is_whisper_model_available(model_id)
             display = f"{label} ✓" if available else f"{label} — download when used"
@@ -199,8 +360,12 @@ class ModelManagementMixin:
         layout.addWidget(QLabel("<b>Transcription models</b>"))
         whisper_models = [
             ("tiny", "Whisper Tiny"), ("base", "Whisper Base"),
-            ("small", "Whisper Small"), ("medium", "Whisper Medium"),
+            ("small", "Whisper Small"),
+            ("distil-medium.en", "Distil-Whisper Medium (English)"),
+            ("medium", "Whisper Medium"),
+            ("distil-large-v3", "Distil-Whisper Large v3"),
             ("large-v3", "Whisper Large"),
+            ("parakeet-onnx", "Parakeet ONNX Fast TDT"),
         ]
         for model_id, label in whisper_models:
             path = self.model_cache_path(model_id)
@@ -232,10 +397,12 @@ class ModelManagementMixin:
             busy = self.translation_thread is not None or getattr(self, "_model_install_thread", None) is not None
             for item in rows:
                 if item["kind"] == "whisper":
+                    item["path"] = self.model_cache_path(item["model_id"])
                     installed_now = self.is_whisper_model_available(item["model_id"])
                 else:
                     variant, pair = item["model_id"].split(":", 1)
                     f, t = pair.split("-", 1)
+                    item["path"] = TranslationWorker.model_dir(f, t, variant)
                     installed_now = TranslationWorker.model_is_installed(f, t, variant)
                 item["status"].setText("✓ Installed" if installed_now else "Not installed")
                 item["size"].setText(size_text(item["path"]) if installed_now else "—")
@@ -313,7 +480,30 @@ class ModelManagementMixin:
         # runs in WhisperModelInstallWorker on a QThread.
         error = None
         try:
-            WhisperModel(model_name, device="cpu", compute_type="int8", download_root=str(get_models_storage_dir()))
+            if model_name.startswith("parakeet"):
+                target_dir = get_models_storage_dir() / "parakeet_onnx"
+                target_dir.mkdir(parents=True, exist_ok=True)
+                from huggingface_hub import hf_hub_download
+                repo_id = "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
+                for fname in ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]:
+                    hf_hub_download(repo_id=repo_id, filename=fname, local_dir=str(target_dir))
+            else:
+                if model_name == "distil-medium.en":
+                    resolved = "Systran/faster-distil-whisper-medium.en"
+                elif model_name == "distil-large-v3":
+                    resolved = "Systran/faster-distil-whisper-large-v3"
+                elif model_name.startswith("distil-"):
+                    clean = model_name[7:]
+                    resolved = f"Systran/faster-distil-whisper-{clean}"
+                elif "/" in model_name:
+                    resolved = model_name
+                else:
+                    resolved = f"Systran/faster-whisper-{model_name}"
+
+                cache_dir = str(get_models_storage_dir() / "huggingface" / "hub")
+                Path(cache_dir).mkdir(parents=True, exist_ok=True)
+                from huggingface_hub import snapshot_download
+                snapshot_download(repo_id=resolved, cache_dir=cache_dir, resume_download=True)
         except Exception as exc:
             error = str(exc)
         return error

@@ -51,6 +51,7 @@ class TranscriptStoryMixin:
                         "seg_idx": seg_idx,
                         "speaker_name": spk_name,
                         "raw_speaker": raw_spk,
+                        "deleted": bool(w.get("deleted", False)),
                     })
             else:
                 seg_text = segment.get("text", "")
@@ -62,6 +63,7 @@ class TranscriptStoryMixin:
                         "seg_idx": seg_idx,
                         "speaker_name": spk_name,
                         "raw_speaker": raw_spk,
+                        "deleted": False,
                     })
 
         if not word_tokens:
@@ -144,8 +146,9 @@ class TranscriptStoryMixin:
                 current_char_pos += w_len
 
                 esc_w = html.escape(w_text)
+                w_style = f"color:{word_color}; text-decoration:none;"
                 word_html_list.append(
-                    f'<a href="word:{w_start}:{w_seg}" style="color:{word_color}; text-decoration:none;">{esc_w}</a>'
+                    f'<a href="word:{w_start}:{w_seg}" style="{w_style}">{esc_w}</a>'
                 )
 
             current_char_pos += 2
@@ -305,7 +308,9 @@ class TranscriptStoryMixin:
             cleaned_text = cleaned_text.strip()
 
             if len(groups) == 1:
-                segments[groups[0][0]]["text"] = cleaned_text
+                target_seg = segments[groups[0][0]]
+                target_seg["text"] = cleaned_text
+                self.sync_segment_words(target_seg, cleaned_text)
                 continue
 
             # This paragraph was built from more than one original segment
@@ -324,7 +329,9 @@ class TranscriptStoryMixin:
                     n = round(len(words) * (orig_count / total_original_words))
                     n = max(0, min(n, len(remaining_words)))
                     share, remaining_words = remaining_words[:n], remaining_words[n:]
-                segments[seg_idx]["text"] = " ".join(share)
+                seg_text = " ".join(share)
+                segments[seg_idx]["text"] = seg_text
+                self.sync_segment_words(segments[seg_idx], seg_text)
 
         if self.translations:
             for key in self.translations:
@@ -794,6 +801,164 @@ class TranscriptStoryMixin:
         self.statusBar().showMessage(f"Removed '{removed_name}' label at {format_time(segments[seg_idx].get('start', 0))}.")
         return True
 
+    def sync_segment_words(self, segment, new_text):
+        """
+        Interpolate and maintain word-level timestamps when segment text is edited.
+        Preserves exact timing of unchanged words, and linearly interpolates
+        timestamps for modified, inserted, or substituted words (Token Splicing).
+        """
+        if not isinstance(segment, dict):
+            return
+
+        old_words = segment.get("words")
+        new_tokens = [tok.strip() for tok in new_text.split()] if isinstance(new_text, str) else []
+
+        seg_start = float(segment.get("start", 0.0))
+        seg_end = float(segment.get("end", seg_start + 1.0))
+        total_dur = max(0.01, seg_end - seg_start)
+
+        if not old_words or not isinstance(old_words, list):
+            if not new_tokens:
+                segment["words"] = []
+                return
+            w_dur = total_dur / len(new_tokens)
+            segment["words"] = [
+                {
+                    "word": tok,
+                    "start": round(seg_start + i * w_dur, 3),
+                    "end": round(seg_start + (i + 1) * w_dur, 3),
+                    "deleted": False,
+                }
+                for i, tok in enumerate(new_tokens)
+            ]
+            return
+
+        if not new_tokens:
+            segment["words"] = []
+            return
+
+        import difflib
+        old_toks = [str(w.get("word", "")).strip() for w in old_words]
+        matcher = difflib.SequenceMatcher(None, [t.lower() for t in old_toks], [t.lower() for t in new_tokens])
+
+        new_words_list = []
+
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == 'equal':
+                for old_idx, new_idx in zip(range(i1, i2), range(j1, j2)):
+                    w_obj = dict(old_words[old_idx])
+                    w_obj["word"] = new_tokens[new_idx]
+                    new_words_list.append(w_obj)
+            elif tag == 'replace':
+                t_start = float(old_words[i1].get("start", seg_start))
+                t_end = float(old_words[i2 - 1].get("end", seg_end))
+                t_span = max(0.01, t_end - t_start)
+                num_new = max(1, j2 - j1)
+                w_dur = t_span / num_new
+                for k, new_idx in enumerate(range(j1, j2)):
+                    new_words_list.append({
+                        "word": new_tokens[new_idx],
+                        "start": round(t_start + k * w_dur, 3),
+                        "end": round(t_start + (k + 1) * w_dur, 3),
+                        "deleted": False,
+                    })
+            elif tag == 'insert':
+                if i1 > 0 and i1 <= len(old_words):
+                    t_start = float(old_words[i1 - 1].get("end", seg_start))
+                else:
+                    t_start = seg_start
+
+                if i1 < len(old_words):
+                    t_end = float(old_words[i1].get("start", seg_end))
+                else:
+                    t_end = seg_end
+
+                if t_end < t_start:
+                    t_end = t_start + 0.2 * (j2 - j1)
+                t_span = max(0.01, t_end - t_start)
+                num_new = max(1, j2 - j1)
+                w_dur = t_span / num_new
+                for k, new_idx in enumerate(range(j1, j2)):
+                    new_words_list.append({
+                        "word": new_tokens[new_idx],
+                        "start": round(t_start + k * w_dur, 3),
+                        "end": round(t_start + (k + 1) * w_dur, 3),
+                        "deleted": False,
+                    })
+            elif tag == 'delete':
+                pass
+
+        segment["words"] = new_words_list
+
+    def merge_speakers(self, source_speaker: str, target_speaker: str) -> bool:
+        """
+        Global speaker merge: reassigns all segment tags, diarization tracks, and overrides
+        from source_speaker to target_speaker across the entire timeline in one pass.
+        """
+        source = (source_speaker or "").strip()
+        target = (target_speaker or "").strip()
+        if not source or not target or source == target:
+            return False
+
+        if not self.transcript or not self.transcript.get("segments"):
+            return False
+
+        self.flush_pending_transcript_undo() if hasattr(self, "flush_pending_transcript_undo") else None
+        before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
+
+        segments = self.transcript.get("segments", [])
+        reassigned_segments = 0
+
+        for idx, seg in enumerate(segments):
+            curr_name = self.get_effective_speaker_name(idx, seg)
+            raw_spk = self.segment_speaker_overrides.get(idx) or seg.get("speaker")
+            if curr_name == source or str(raw_spk) == source:
+                override_key = f"SEG_{idx}_SPEAKER"
+                self.speaker_names[override_key] = target
+                self.segment_speaker_overrides[idx] = override_key
+                seg["speaker"] = target
+                reassigned_segments += 1
+
+        # Reassign diarization clusters
+        diar_data = getattr(self, "diarization", None)
+        if isinstance(diar_data, dict) and "segments" in diar_data:
+            for d_seg in diar_data["segments"]:
+                raw_d = str(d_seg.get("speaker", ""))
+                disp_d = self.display_speaker(raw_d)
+                if disp_d == source or raw_d == source:
+                    d_seg["speaker"] = target
+            unique_speakers = {s.get("speaker") for s in diar_data["segments"] if s.get("speaker")}
+            diar_data["num_speakers"] = len(unique_speakers)
+            self._diar_index_key = None
+
+        # Alias mapping update
+        self.speaker_names[source] = target
+        if hasattr(self, "custom_speakers"):
+            if source in self.custom_speakers:
+                self.custom_speakers.remove(source)
+            if target not in self.custom_speakers:
+                self.custom_speakers.append(target)
+
+        if before_state is not None and hasattr(self, "_commit_project_state_change"):
+            self._commit_project_state_change(
+                before_state,
+                f"Merge Speaker '{source}' into '{target}'"
+            )
+
+        self.log_activity(f"[SPEAKER] Merged speaker '{source}' into '{target}' across {reassigned_segments} segment(s).")
+        self.save_project()
+        self.render_transcript()
+        if hasattr(self, "timeline"):
+            self.timeline.update()
+        if hasattr(self, "statusBar"):
+            self.statusBar().showMessage(f"Merged '{source}' into '{target}'.")
+        return True
+
+    def open_speaker_manager_dialog(self):
+        """Display the dedicated Speaker Manager & Diarization Clusters dialog."""
+        dialog = SpeakerManagerDialog(self)
+        dialog.exec()
+
     def merge_contiguous_speaker_segments(self):
         if not self.transcript or "segments" not in self.transcript:
             return
@@ -1184,3 +1349,174 @@ class TranscriptStoryMixin:
             "No Selection",
             "Make a selection first by right-click dragging across the timeline or highlighting transcript text."
         )
+
+
+class SpeakerManagerDialog(QDialog):
+    """
+    Manager dialog for inspecting, aliasing, and merging detected speaker clusters.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.main_win = parent
+        self.setWindowTitle("Manage Speakers & Detection Clusters")
+        self.resize(720, 460)
+        self._init_ui()
+        self._populate()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+
+        desc = QLabel(
+            "<b>Speakers & Detection Clusters</b><br>"
+            "Inspect all detected speaker clusters, rename / assign global aliases, or merge redundant clusters."
+        )
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        self.table = QTableWidget(self)
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels([
+            "Speaker Name / Alias", "Cluster / Raw ID", "Turns", "Total Duration", "Actions"
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        layout.addWidget(self.table)
+
+        btn_row = QHBoxLayout()
+        self.merge_all_btn = QPushButton("Merge Two Speakers...", self)
+        self.merge_all_btn.clicked.connect(self._on_quick_merge)
+        btn_row.addWidget(self.merge_all_btn)
+
+        btn_row.addStretch()
+
+        close_btn = QPushButton("Close", self)
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    def _populate(self):
+        self.table.setRowCount(0)
+        if not self.main_win or not getattr(self.main_win, "transcript", None):
+            return
+
+        segments = self.main_win.transcript.get("segments", [])
+        speaker_stats = {}
+
+        for idx, seg in enumerate(segments):
+            name = self.main_win.get_effective_speaker_name(idx, seg) or "Unknown Speaker"
+            raw = str(self.main_win.segment_speaker_overrides.get(idx) or seg.get("speaker") or name)
+            start = float(seg.get("start", 0.0))
+            end = float(seg.get("end", start))
+            dur = max(0.0, end - start)
+
+            if name not in speaker_stats:
+                speaker_stats[name] = {"raw": raw, "turns": 0, "duration": 0.0}
+            speaker_stats[name]["turns"] += 1
+            speaker_stats[name]["duration"] += dur
+
+        self.table.setRowCount(len(speaker_stats))
+        for row, (name, info) in enumerate(sorted(speaker_stats.items(), key=lambda x: -x[1]["duration"])):
+            name_item = QTableWidgetItem(name)
+            self.table.setItem(row, 0, name_item)
+
+            raw_item = QTableWidgetItem(info["raw"])
+            raw_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row, 1, raw_item)
+
+            turns_item = QTableWidgetItem(str(info["turns"]))
+            turns_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row, 2, turns_item)
+
+            dur_item = QTableWidgetItem(format_time(info["duration"]))
+            dur_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row, 3, dur_item)
+
+            action_widget = QWidget(self)
+            action_layout = QHBoxLayout(action_widget)
+            action_layout.setContentsMargins(4, 2, 4, 2)
+            action_layout.setSpacing(6)
+
+            rename_btn = QPushButton("Rename / Alias", action_widget)
+            rename_btn.clicked.connect(lambda _, n=name, r=info["raw"]: self._rename_speaker(n, r))
+            action_layout.addWidget(rename_btn)
+
+            merge_btn = QPushButton("Merge Into...", action_widget)
+            merge_btn.clicked.connect(lambda _, n=name: self._merge_speaker_into(n))
+            action_layout.addWidget(merge_btn)
+
+            self.table.setCellWidget(row, 4, action_widget)
+
+    def _rename_speaker(self, current_name, raw_id):
+        new_name, accepted = QInputDialog.getText(
+            self, "Rename Speaker Alias",
+            f"Enter new display alias for '{current_name}':",
+            QLineEdit.EchoMode.Normal, current_name
+        )
+        if accepted and new_name.strip() and new_name.strip() != current_name:
+            target = new_name.strip()
+            self.main_win.speaker_names[str(raw_id)] = target
+            self.main_win.speaker_names[current_name] = target
+            self.main_win.add_custom_speaker_to_glossary(target)
+
+            segments = self.main_win.transcript.get("segments", [])
+            for idx, seg in enumerate(segments):
+                if self.main_win.get_effective_speaker_name(idx, seg) == current_name:
+                    override_key = f"SEG_{idx}_SPEAKER"
+                    self.main_win.speaker_names[override_key] = target
+                    self.main_win.segment_speaker_overrides[idx] = override_key
+
+            self.main_win.render_transcript()
+            self.main_win.save_project()
+            self.main_win.log_activity(f"[SPEAKER] Renamed speaker '{current_name}' to '{target}'.")
+            self._populate()
+
+    def _merge_speaker_into(self, source_name):
+        known = [s for s in self.main_win.get_all_known_speakers() if s != source_name]
+        if not known:
+            QMessageBox.information(self, "Merge Speakers", "No other speakers available to merge into.")
+            return
+
+        target, accepted = QInputDialog.getItem(
+            self, "Merge Speaker",
+            f"Merge all turns from '{source_name}' into which speaker?",
+            known, 0, False
+        )
+        if accepted and target:
+            confirm = QMessageBox.question(
+                self, "Confirm Merge",
+                f"Are you sure you want to merge all occurrences of '{source_name}' into '{target}'?\n\n"
+                f"This will reassign all segments and diarization tracks across the entire timeline.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if confirm == QMessageBox.StandardButton.Yes:
+                self.main_win.merge_speakers(source_name, target)
+                self._populate()
+
+    def _on_quick_merge(self):
+        known = self.main_win.get_all_known_speakers()
+        if len(known) < 2:
+            QMessageBox.information(self, "Merge Speakers", "At least two distinct speakers are required to merge.")
+            return
+
+        source, ok1 = QInputDialog.getItem(
+            self, "Merge Speakers", "Select Source Speaker to merge (will be replaced):", known, 0, False
+        )
+        if not ok1 or not source:
+            return
+
+        candidates = [s for s in known if s != source]
+        target, ok2 = QInputDialog.getItem(
+            self, "Merge Speakers", f"Select Target Speaker (to receive '{source}'):", candidates, 0, False
+        )
+        if not ok2 or not target:
+            return
+
+        self.main_win.merge_speakers(source, target)
+        self._populate()
+

@@ -29,16 +29,60 @@ class TranslationMixin:
     """Mixin class managing transcript translation, language toggling, and worker lifecycle."""
 
     def source_language_code(self) -> str:
-        """Return the source language code (defaults to 'en')."""
-        return "en"
+        """Return the source language code for translation.
+
+        Honors an explicit direction chosen via the batch dialog's
+        Translation control ("en-es" or "es-en"); for "auto" (the default),
+        flips based on the transcript's Whisper-detected language so a
+        Spanish-language recording translates to English and vice versa.
+        """
+        direction = str(getattr(self, "translation_direction", "auto") or "auto")
+        if direction == "es-en":
+            return "es"
+        if direction == "en-es":
+            return "en"
+        detected = str((self.transcript or {}).get("language", "en") or "en").lower()
+        return "es" if detected.startswith("es") else "en"
 
     def target_language_code(self) -> str:
-        """Return the target language code (defaults to 'es')."""
-        return "es"
+        """Return the target language code for translation (see source_language_code)."""
+        direction = str(getattr(self, "translation_direction", "auto") or "auto")
+        if direction == "es-en":
+            return "en"
+        if direction == "en-es":
+            return "es"
+        detected = str((self.transcript or {}).get("language", "en") or "en").lower()
+        return "en" if detected.startswith("es") else "es"
 
     def translation_key(self, from_code: str = "en", to_code: str = "es") -> str:
         """Generate standardized dictionary key for language translation pair."""
         return f"{from_code}-{to_code}"
+
+    def get_translation_item(self, from_code: str, to_code: str) -> dict | None:
+        """Return a current translation for an explicit language pair."""
+        if not isinstance(getattr(self, "translations", None), dict):
+            return None
+        data = self.translations.get(self.translation_key(from_code, to_code))
+        if data is None:
+            data = self.translations.get(f"{from_code}_{to_code}")
+        if not isinstance(data, dict) or data.get("status") == "stale":
+            return None
+        return data if data.get("segments") else None
+
+    def translation_export_spec(self, options: dict | None = None):
+        """Return (source, target, suffix) for batch translation exports.
+
+        Normal interactive exports remain English + optional Spanish. Batch
+        exports may explicitly request either direction, so the exported
+        translated document uses the actual requested target language.
+        """
+        options = options or {}
+        direction = str(options.get("translation_direction", "en-es") or "en-es")
+        if direction not in {"en-es", "es-en"}:
+            direction = "es-en" if self.source_language_code() == "es" else "en-es"
+        source, target = direction.split("-")
+        suffix = f"_{target}"
+        return source, target, suffix
 
     def translation_is_current(self, key: str | None = None) -> bool:
         """Check if translation for the given key exists, has content, and is not stale."""

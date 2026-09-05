@@ -161,10 +161,10 @@ class UiLayoutMixin:
         self.translate_button.clicked.connect(lambda: self.start_translation("en", "es"))
         search_bar.addWidget(self.translate_button)
 
-        self.transcript_mode_toggle_btn = QPushButton("Viewing Mode", self)
+        self.transcript_mode_toggle_btn = QPushButton("Edit Transcript", self)
         self.transcript_mode_toggle_btn.setCheckable(True)
         self.transcript_mode_toggle_btn.setChecked(False)
-        self.transcript_mode_toggle_btn.setToolTip("Toggle between Viewing Mode (click to play/seek audio) and Editing Mode (type/edit transcript text).")
+        self.transcript_mode_toggle_btn.setToolTip("Click to edit transcript text.")
         self.transcript_mode_toggle_btn.clicked.connect(self.toggle_transcript_editing_mode)
         search_bar.addWidget(self.transcript_mode_toggle_btn)
 
@@ -491,29 +491,34 @@ class UiLayoutMixin:
         # ==========================================
         tools_menu = menubar.addMenu("&Tools")
 
-        self.transcribe_action = QAction("&Transcribe Audio (Whisper)...", self)
+        self.transcribe_action = QAction("&Transcribe Audio...", self)
+        self.transcribe_action.setShortcut(platform_seq("Ctrl+T"))
         self.transcribe_action.setEnabled(False)
         self.transcribe_action.triggered.connect(self.start_transcription)
         tools_menu.addAction(self.transcribe_action)
 
-        self.diarize_action = QAction("Speaker &Diarization...", self)
+        self.diarize_action = QAction("&Detect Speakers...", self)
+        self.diarize_action.setShortcut(platform_seq("Ctrl+D"))
         self.diarize_action.setEnabled(False)
         self.diarize_action.triggered.connect(self.start_diarization)
         tools_menu.addAction(self.diarize_action)
 
         self.auto_detect_action = QAction("&Auto-Detect Stories...", self)
+        self.auto_detect_action.setShortcut(platform_seq("Ctrl+Shift+A"))
         self.auto_detect_action.setEnabled(False)
         self.auto_detect_action.triggered.connect(self.start_auto_detect_stories)
         tools_menu.addAction(self.auto_detect_action)
 
         tools_menu.addSeparator()
 
-        self.transcribe_diarize_action = QAction("Transcribe + Diari&ze...", self)
+        self.transcribe_diarize_action = QAction("Transcribe && Detect &Speakers...", self)
+        self.transcribe_diarize_action.setShortcut(platform_seq("Ctrl+Shift+T"))
         self.transcribe_diarize_action.setEnabled(False)
         self.transcribe_diarize_action.triggered.connect(self.start_transcribe_and_diarize)
         tools_menu.addAction(self.transcribe_diarize_action)
 
         self.transcribe_diarize_detect_action = QAction("&Run Processing...", self)
+        self.transcribe_diarize_detect_action.setShortcut(platform_seq("Ctrl+R"))
         self.transcribe_diarize_detect_action.setEnabled(False)
         self.transcribe_diarize_detect_action.triggered.connect(self.start_full_auto_pipeline)
         tools_menu.addAction(self.transcribe_diarize_detect_action)
@@ -521,6 +526,7 @@ class UiLayoutMixin:
         tools_menu.addSeparator()
 
         self.translate_action = QAction("Translate &Transcript (OPUS-MT)...", self)
+        self.translate_action.setShortcut(platform_seq("Ctrl+Shift+L"))
         self.translate_action.setEnabled(False)
         self.translate_action.triggered.connect(lambda: self.start_translation("en", "es"))
         tools_menu.addAction(self.translate_action)
@@ -528,6 +534,7 @@ class UiLayoutMixin:
         tools_menu.addSeparator()
 
         self.batch_processing_action = QAction("&Batch Processing...", self)
+        self.batch_processing_action.setShortcut(platform_seq("Ctrl+B"))
         self.batch_processing_action.triggered.connect(self.open_batch_processing_dialog)
         tools_menu.addAction(self.batch_processing_action)
 
@@ -537,30 +544,35 @@ class UiLayoutMixin:
         settings_menu = menubar.addMenu("&Settings")
 
         pref_act = QAction("&Preferences...", self)
-        # QKeySequence.Preferences maps automatically to Cmd+, on macOS and Ctrl+, on Windows/Linux
-        pref_act.setShortcut(QKeySequence.Preferences)
+        # Ctrl+P on Windows/Linux, Cmd+P on macOS (platform_seq automatically adapts Meta/Ctrl)
+        pref_act.setShortcut(platform_seq("Ctrl+P"))
         pref_act.triggered.connect(self.open_preferences_dialog)
         settings_menu.addAction(pref_act)
 
         wp_settings_act = QAction("&WordPress Export Settings...", self)
+        wp_settings_act.setShortcut(platform_seq("Ctrl+Shift+W"))
         wp_settings_act.triggered.connect(self._open_wp_settings)
         settings_menu.addAction(wp_settings_act)
 
         self.translation_model_action = QAction("&Manage AI Models...", self)
+        self.translation_model_action.setShortcut(platform_seq("Ctrl+M"))
         self.translation_model_action.triggered.connect(self.open_translation_model_manager)
         settings_menu.addAction(self.translation_model_action)
 
         gpu_act = QAction("&GPU Acceleration Settings...", self)
+        gpu_act.setShortcut(platform_seq("Ctrl+G"))
         gpu_act.triggered.connect(self.open_gpu_acceleration_settings)
         settings_menu.addAction(gpu_act)
 
         glossary_act = QAction("&Glossary & Custom Vocabulary...", self)
+        glossary_act.setShortcut(platform_seq("Ctrl+Shift+G"))
         glossary_act.triggered.connect(self.open_glossary_dialog)
         settings_menu.addAction(glossary_act)
 
         settings_menu.addSeparator()
 
         update_act = QAction("Check for &Updates...", self)
+        update_act.setShortcut(platform_seq("Ctrl+U"))
         update_act.triggered.connect(self.check_for_updates)
         settings_menu.addAction(update_act)
 
@@ -678,21 +690,27 @@ class UiLayoutMixin:
         has_stories = bool(status.get("stories"))
 
         if hasattr(self, "transcribe_action"):
-            self.transcribe_action.setText("Transcribe Audio (Complete)" if has_transcription else "Transcribe Audio (Whisper)...")
+            self.transcribe_action.setText("Transcribe Audio (Complete)" if has_transcription else "Transcribe Audio...")
         if hasattr(self, "diarize_action"):
-            self.diarize_action.setText("Speaker Diarization (Complete)" if has_diarization else "Speaker Diarization...")
+            self.diarize_action.setText("Detect Speakers (Complete)" if has_diarization else "Detect Speakers...")
         if hasattr(self, "auto_detect_action"):
             self.auto_detect_action.setText("Auto-Detect Stories (Complete)" if has_stories else "Auto-Detect Stories...")
 
     def open_project_dialog(self):
-        """Prompt user to open a project file (*.json)."""
+        """Prompt user to open a project file (*.rtvs)."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open Project",
             self._dialog_directory(),
-            "Project Files (*.json);;All Files (*.*)",
+            "RadioTV Story Segmenter Projects (*.rtvs);;Legacy Projects (*.json);;All Files (*.*)",
         )
         if file_path:
+            try:
+                directory = str(Path(file_path).resolve().parent)
+                self.settings_store.setValue("last_open_directory", directory)
+                self.settings_store.sync()
+            except Exception:
+                pass
             self.load_project_file(file_path, prompt=True, preserve_media=False)
 
     def open_find_dialog(self):
@@ -719,11 +737,16 @@ class UiLayoutMixin:
         if hasattr(self, "transcript_mode_toggle_btn"):
             self.transcript_mode_toggle_btn.setChecked(is_editing)
             if is_editing:
-                self.transcript_mode_toggle_btn.setText("Editing Mode")
+                self.transcript_mode_toggle_btn.setText("View Transcript")
+                self.transcript_mode_toggle_btn.setToolTip("Click to exit editing mode and return to interactive viewing.")
                 self.transcript_mode_toggle_btn.setStyleSheet("font-weight: bold; background-color: #2b5278; color: white;")
             else:
-                self.transcript_mode_toggle_btn.setText("Viewing Mode")
+                self.transcript_mode_toggle_btn.setText("Edit Transcript")
+                self.transcript_mode_toggle_btn.setToolTip("Click to edit transcript text.")
                 self.transcript_mode_toggle_btn.setStyleSheet("")
+        if not is_editing and hasattr(self, "render_transcript"):
+            # Re-render so word-level clickable anchors and highlights are freshly constructed
+            self.render_transcript()
 
     def show_shortcuts_dialog(self):
         """Display a searchable or structured reference table of all active shortcuts."""

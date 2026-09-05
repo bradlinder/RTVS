@@ -40,6 +40,7 @@ echo "[1/5] Creating Debian package filesystem layout..."
 mkdir -p "$STAGING/opt/$APP_NAME"
 mkdir -p "$STAGING/usr/bin"
 mkdir -p "$STAGING/usr/share/applications"
+mkdir -p "$STAGING/usr/share/mime/packages"
 mkdir -p "$STAGING/usr/share/icons/hicolor/scalable/apps"
 mkdir -p "$STAGING/usr/share/icons/hicolor/256x256/apps"
 mkdir -p "$STAGING/usr/share/doc/$PKG_NAME"
@@ -64,6 +65,11 @@ ln -sf "/opt/$APP_NAME/$APP_NAME" "$STAGING/usr/bin/$APP_NAME"
 echo "[4/5] Installing desktop integration files & metadata..."
 cp "$ROOT/installer/Linux/radiotvsegmenter.desktop" "$STAGING/usr/share/applications/radiotvsegmenter.desktop"
 chmod 644 "$STAGING/usr/share/applications/radiotvsegmenter.desktop"
+
+if [[ -f "$ROOT/installer/Linux/radiotvsegmenter-mimetypes.xml" ]]; then
+    cp "$ROOT/installer/Linux/radiotvsegmenter-mimetypes.xml" "$STAGING/usr/share/mime/packages/radiotvsegmenter.xml"
+    chmod 644 "$STAGING/usr/share/mime/packages/radiotvsegmenter.xml"
+fi
 
 if [[ -f "$ROOT/resources/icon.svg" ]]; then
     cp "$ROOT/resources/icon.svg" "$STAGING/usr/share/icons/hicolor/scalable/apps/radiotvsegmenter.svg"
@@ -114,6 +120,9 @@ fi
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -q /usr/share/icons/hicolor || true
 fi
+if command -v update-mime-database >/dev/null 2>&1; then
+    update-mime-database /usr/share/mime || true
+fi
 exit 0
 EOF
 chmod 755 "$STAGING/DEBIAN/postinst"
@@ -127,6 +136,9 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -q /usr/share/icons/hicolor || true
+fi
+if command -v update-mime-database >/dev/null 2>&1; then
+    update-mime-database /usr/share/mime || true
 fi
 exit 0
 EOF

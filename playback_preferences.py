@@ -69,6 +69,16 @@ class PlaybackPreferencesMixin:
         def excepthook(exc_type, exc_value, exc_tb):
             text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
             write_diag("CRASH/EXCEPTION", text)
+            try:
+                crash_file = self.log_dir / f"crash_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+                with crash_file.open("w", encoding="utf-8") as cf:
+                    cf.write(f"{APP_DISPLAY_NAME} v{PROJECT_VERSION} Crash Report\n")
+                    cf.write(f"Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    cf.write(f"Python: {sys.version}\n")
+                    cf.write(f"Platform: {sys.platform}\n\n")
+                    cf.write(text)
+            except Exception:
+                pass
             # Never let the crash reporter throw a second exception.
             if getattr(self, "activity_list", None) is not None:
                 try:
@@ -85,6 +95,15 @@ class PlaybackPreferencesMixin:
                 thread_name = getattr(args.thread, "name", "unknown")
                 text = "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback))
                 write_diag("THREAD-CRASH", f"thread={thread_name}\n{text}")
+                try:
+                    crash_file = self.log_dir / f"crash_report_thread_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+                    with crash_file.open("w", encoding="utf-8") as cf:
+                        cf.write(f"{APP_DISPLAY_NAME} v{PROJECT_VERSION} Thread Crash Report\n")
+                        cf.write(f"Thread: {thread_name}\n")
+                        cf.write(f"Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                        cf.write(text)
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -97,8 +116,15 @@ class PlaybackPreferencesMixin:
             QMessageBox.information(self, "Activity Log", "There are no activity log entries to export.")
             return
 
+        default_dir = getattr(self, "log_dir", get_app_data_dir() / "logs")
+        try:
+            default_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        default_file = str(default_dir / f"activity_log_{datetime.now().strftime('%Y-%m-%d')}.txt")
+
         filename, _ = QFileDialog.getSaveFileName(
-            self, "Export Activity Log", "activity_log.txt", "Text Files (*.txt);;All Files (*)"
+            self, "Export Activity Log", default_file, "Text Files (*.txt);;All Files (*)"
         )
         if not filename:
             return
@@ -366,6 +392,7 @@ class PlaybackPreferencesMixin:
         
         stage_rem, total_rem, eta_str = self.calculate_processing_eta(percent)
         
+        is_batch = getattr(self, "batch_active", False) and getattr(self, "batch_total_files", 0) > 1
         is_pipeline = getattr(self, "pipeline_active", False) and getattr(self, "pipeline_total_stages", 0) > 1
         stage_name = getattr(self, "current_processing_stage_name", "Processing")
         stage_detail = getattr(self, "current_processing_stage_detail", "")
@@ -374,7 +401,30 @@ class PlaybackPreferencesMixin:
         if stage_detail:
             stage_desc += f" ({stage_detail})"
             
-        if is_pipeline:
+        if is_batch:
+            import time
+            batch_curr = max(1, getattr(self, "batch_current_file_idx", 1))
+            batch_total = max(1, getattr(self, "batch_total_files", 1))
+            
+            file_remaining = total_rem
+            file_eta_str = self._format_time_remaining(file_remaining)
+            
+            file_elapsed = max(0.1, time.monotonic() - getattr(self, "batch_file_start_time", time.monotonic()))
+            current_file_total_est = file_elapsed + file_remaining
+            
+            completed_durations = getattr(self, "batch_completed_durations", [])
+            if completed_durations:
+                avg_dur = sum(completed_durations) / len(completed_durations)
+            else:
+                avg_dur = current_file_total_est
+                
+            remaining_files_after_this = max(0, batch_total - batch_curr)
+            overall_remaining = file_remaining + (remaining_files_after_this * avg_dur)
+            overall_eta_str = self._format_time_remaining(overall_remaining)
+            
+            label_text = f"File {batch_curr} of {batch_total} ({stage_desc}) — File ETA: {file_eta_str} | Overall ETA: {overall_eta_str}"
+            prog_format = f"File {batch_curr}/{batch_total} (%p%) — File: {file_eta_str} | Job: {overall_eta_str}"
+        elif is_pipeline:
             current_idx = getattr(self, "pipeline_current_stage_idx", 1)
             total_stages = getattr(self, "pipeline_total_stages", 1)
             label_text = f"Stage {current_idx} of {total_stages}: {stage_desc} — {eta_str} remaining"
@@ -629,7 +679,7 @@ class PlaybackPreferencesMixin:
         # Left category tree / list
         cat_list = QListWidget(dialog)
         cat_list.setFixedWidth(160)
-        categories = ["General", "Audio Hardware", "Updates & GitHub", "AI Models", "Playback & Timeline", "Detection"]
+        categories = ["General", "Audio Hardware", "Updates & GitHub", "AI Models", "Playback & Timeline", "Detection", "Batch Processing"]
         for cat in categories:
             cat_list.addItem(QListWidgetItem(cat))
         content_layout.addWidget(cat_list)
@@ -690,19 +740,20 @@ class PlaybackPreferencesMixin:
         bundle_folder_chk.setChecked(str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"})
         gen_form.addRow("", bundle_folder_chk)
 
+        copy_media_chk = QCheckBox("Copy source media file into project folder on save")
+        copy_media_chk.setToolTip("Copies the active audio/video file directly into the project folder so the media file is always kept with the project.")
+        copy_media_chk.setChecked(str(self.settings_store.value("copy_media_to_project_folder", "false")).lower() in {"1", "true", "yes"})
+        gen_form.addRow("", copy_media_chk)
+
         autosave_spin = QSpinBox()
         autosave_spin.setRange(0, 120)
         autosave_spin.setValue(self.auto_save_minutes)
         autosave_spin.setSuffix(" min (0 = off)")
         gen_form.addRow("Auto-save Interval:", autosave_spin)
 
-        batch_reset_btn = QPushButton("Reset Batch Add Files Location")
-        batch_reset_btn.setToolTip("Forget the last directory used by Batch Processing > Add Files and return to the normal default location.")
-        def _reset_batch_add_location():
-            self.settings_store.remove("batch_add_files_directory")
-            QMessageBox.information(dialog, "Batch Add Files Location", "The Batch Processing Add Files location has been reset to the default.")
-        batch_reset_btn.clicked.connect(_reset_batch_add_location)
-        gen_form.addRow("Batch Add Files Location:", batch_reset_btn)
+        restore_gen_btn = QPushButton("Restore All Settings to Defaults…")
+        restore_gen_btn.setToolTip("Reset all user preferences across all categories back to default settings.")
+        gen_form.addRow("Reset Preferences:", restore_gen_btn)
 
         gen_layout.addLayout(gen_form)
         gen_layout.addStretch()
@@ -819,8 +870,11 @@ class PlaybackPreferencesMixin:
             ("tiny", "Tiny"),
             ("base", "Base"),
             ("small", "Small"),
+            ("distil-medium.en", "Distil-Medium.en (4x Fast)"),
             ("medium", "Medium"),
-            ("large-v3", "Large (v3)")
+            ("distil-large-v3", "Distil-Large-v3 (Fast Large)"),
+            ("large-v3", "Large (v3)"),
+            ("parakeet-onnx", "Parakeet ONNX (Ultra-Fast)"),
         ]
         for m_id, label in whisper_models:
             installed = self.is_whisper_model_available(m_id)
@@ -831,7 +885,19 @@ class PlaybackPreferencesMixin:
         w_idx = pref_whisper_combo.findData(curr_whisper)
         if w_idx >= 0:
             pref_whisper_combo.setCurrentIndex(w_idx)
-        mod_form.addRow("Default Transcription Model:", pref_whisper_combo)
+        mod_form.addRow("Transcription Model:", pref_whisper_combo)
+
+        # Transcription Decoding Speed / Quality (beam_size)
+        pref_beam_combo = QComboBox()
+        pref_beam_combo.addItem("High-Speed Greedy Decoding (beam_size=1, up to 2x faster)", 1)
+        pref_beam_combo.addItem("Standard Quality Decoding (beam_size=5, default)", 5)
+        curr_beam = int(self.settings_store.value("whisper_beam_size", getattr(self, "whisper_beam_size", 5)) or 5)
+        beam_idx = pref_beam_combo.findData(curr_beam)
+        if beam_idx >= 0:
+            pref_beam_combo.setCurrentIndex(beam_idx)
+        else:
+            pref_beam_combo.setCurrentIndex(1)
+        mod_form.addRow("Transcription Speed / Quality:", pref_beam_combo)
 
         # Translation Model (OPUS-MT) selector
         pref_trans_combo = QComboBox()
@@ -919,24 +985,131 @@ class PlaybackPreferencesMixin:
         pad_spin.setSuffix(" sec")
         det_form.addRow("Lead-In Padding:", pad_spin)
 
-        sens_slider = QSlider(Qt.Orientation.Horizontal)
-        sens_slider.setRange(1, 10)
-        sens_slider.setSingleStep(1)
-        sens_slider.setPageStep(1)
-        sens_slider.setValue(self.speaker_sensitivity)
-        sens_value = QLabel(str(self.speaker_sensitivity))
-        sens_value.setMinimumWidth(28)
-        sens_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        sens_slider.valueChanged.connect(lambda v: sens_value.setText(str(v)))
-        sens_layout = QHBoxLayout()
-        sens_layout.addWidget(sens_slider, 1)
-        sens_layout.addWidget(sens_value)
-        det_form.addRow("Speaker Detection Sensitivity:", sens_layout)
-        sens_slider.setToolTip("1 = more conservative speaker separation; 10 = more sensitive speaker separation.")
+        expected_speakers_combo = QComboBox()
+        expected_speakers_combo.addItem("Auto-Detect", "auto")
+        expected_speakers_combo.addItem("1 Speaker (Solo Fast-Path)", "1")
+        expected_speakers_combo.addItem("2 Speakers (Interview)", "2")
+        expected_speakers_combo.addItem("3+ Speakers (Panel / Group)", "3+")
+        current_expected = str(getattr(self, "expected_speakers", "auto") or "auto")
+        idx = expected_speakers_combo.findData(current_expected)
+        expected_speakers_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        expected_speakers_combo.setToolTip(
+            "Default number of speakers to expect for new Speaker Detection jobs.\n"
+            "\"1 Speaker\" skips voice-embedding/clustering entirely for a large speedup on solo recordings."
+        )
+        det_form.addRow("Default Expected Speakers:", expected_speakers_combo)
+
+        ask_speakers_chk = QCheckBox("Ask for speaker estimate each time")
+        ask_speakers_chk.setChecked(str(self.settings_store.value("ask_expected_speakers", "true")).lower() in {"1", "true", "yes"})
+        ask_speakers_chk.setToolTip("When enabled, Detect Speakers asks for an estimated speaker count before each non-batch detection job. Batch jobs always use their selected setting without prompting.")
+        det_form.addRow("Speaker Estimate Prompt:", ask_speakers_chk)
 
         det_layout.addLayout(det_form)
         det_layout.addStretch()
         stack.addWidget(page_detect)
+
+        # 7. Batch Processing Page
+        page_batch = QWidget()
+        batch_layout = QVBoxLayout(page_batch)
+        batch_form = QFormLayout()
+
+        # Custom output folder
+        batch_dir_edit = QLineEdit(str(self.settings_store.value("batch_custom_output_dir", "") or ""))
+        batch_dir_btn = QPushButton("Browse…")
+        def _browse_batch_dir():
+            chosen = QFileDialog.getExistingDirectory(dialog, "Select Default Batch Output Directory", batch_dir_edit.text() or str(Path.home()))
+            if chosen:
+                batch_dir_edit.setText(chosen)
+        batch_dir_btn.clicked.connect(_browse_batch_dir)
+        b_dir_layout = QHBoxLayout()
+        b_dir_layout.addWidget(batch_dir_edit)
+        b_dir_layout.addWidget(batch_dir_btn)
+        batch_form.addRow("Default Output Folder:", b_dir_layout)
+
+        # Pipeline steps defaults
+        batch_transcribe_chk = QCheckBox("Transcribe audio with Whisper")
+        batch_transcribe_chk.setChecked(str(self.settings_store.value("batch_opt_proc_transcribe", "true")).lower() in {"1", "true", "yes"})
+        batch_form.addRow("Transcription:", batch_transcribe_chk)
+
+        batch_diarize_chk = QCheckBox("Detect Speakers")
+        batch_diarize_chk.setChecked(str(self.settings_store.value("batch_opt_proc_diarize", "true")).lower() in {"1", "true", "yes"})
+        batch_form.addRow("Detect Speakers:", batch_diarize_chk)
+
+        batch_stories_chk = QCheckBox("Auto-detect stories / segments")
+        batch_stories_chk.setChecked(str(self.settings_store.value("batch_opt_proc_stories", "true")).lower() in {"1", "true", "yes"})
+        batch_form.addRow("Stories:", batch_stories_chk)
+
+        batch_translate_chk = QCheckBox("Translate to Spanish")
+        batch_translate_chk.setChecked(str(self.settings_store.value("batch_opt_proc_translate", "false")).lower() in {"1", "true", "yes"})
+        batch_form.addRow("Translation:", batch_translate_chk)
+
+        # Save project options
+        batch_save_proj_chk = QCheckBox("Auto-save project (.rtvs) files")
+        batch_save_proj_chk.setChecked(str(self.settings_store.value("batch_opt_save_project", "true")).lower() in {"1", "true", "yes"})
+        batch_form.addRow("Projects (.rtvs):", batch_save_proj_chk)
+
+        batch_skip_exist_chk = QCheckBox("Skip re-processing if project already exists")
+        batch_skip_exist_chk.setChecked(str(self.settings_store.value("batch_opt_skip_existing", "true")).lower() in {"1", "true", "yes"})
+        batch_form.addRow("Skip Existing:", batch_skip_exist_chk)
+
+        batch_proj_only_chk = QCheckBox("Save project file only (skip exporting media/text)")
+        batch_proj_only_chk.setChecked(str(self.settings_store.value("batch_opt_save_project_only", "false")).lower() in {"1", "true", "yes"})
+        batch_form.addRow("Project Only:", batch_proj_only_chk)
+
+        # Export formats
+        fmt_layout = QHBoxLayout()
+        batch_txt_chk = QCheckBox("TXT")
+        batch_txt_chk.setChecked(str(self.settings_store.value("batch_opt_fmt_txt", "true")).lower() in {"1", "true", "yes"})
+        batch_docx_chk = QCheckBox("Word (.docx)")
+        batch_docx_chk.setChecked(str(self.settings_store.value("batch_opt_fmt_docx", "true")).lower() in {"1", "true", "yes"})
+        batch_srt_chk = QCheckBox("SRT")
+        batch_srt_chk.setChecked(str(self.settings_store.value("batch_opt_fmt_srt", "false")).lower() in {"1", "true", "yes"})
+        batch_vtt_chk = QCheckBox("VTT")
+        batch_vtt_chk.setChecked(str(self.settings_store.value("batch_opt_fmt_vtt", "false")).lower() in {"1", "true", "yes"})
+        fmt_layout.addWidget(batch_txt_chk)
+        fmt_layout.addWidget(batch_docx_chk)
+        fmt_layout.addWidget(batch_srt_chk)
+        fmt_layout.addWidget(batch_vtt_chk)
+        batch_form.addRow("Default Export Formats:", fmt_layout)
+
+        batch_spk_chk = QCheckBox("Include speaker names in exports")
+        batch_spk_chk.setChecked(str(self.settings_store.value("batch_opt_include_speakers", "true")).lower() in {"1", "true", "yes"})
+        batch_form.addRow("Speaker Labels:", batch_spk_chk)
+
+        batch_time_chk = QCheckBox("Include timestamps in exports")
+        batch_time_chk.setChecked(str(self.settings_store.value("batch_opt_include_times", "false")).lower() in {"1", "true", "yes"})
+        batch_form.addRow("Timestamps:", batch_time_chk)
+
+        # Reset buttons
+        batch_reset_btn = QPushButton("Reset Batch Add Files Location")
+        batch_reset_btn.setToolTip("Forget the last directory used by Batch Processing > Add Files and return to the normal default location.")
+        def _reset_batch_add_location():
+            self.settings_store.remove("batch_add_files_directory")
+            QMessageBox.information(dialog, "Batch Add Files Location", "The Batch Processing Add Files location has been reset to the default.")
+        batch_reset_btn.clicked.connect(_reset_batch_add_location)
+        batch_form.addRow("Add Files Location:", batch_reset_btn)
+
+        batch_options_reset_btn = QPushButton("Reset Batch Options to Factory Defaults…")
+        batch_options_reset_btn.setToolTip("Reset saved batch processing and export options back to factory defaults.")
+        def _reset_batch_export_defaults():
+            keys = [
+                "batch_opt_pipeline_mode", "batch_opt_proc_transcribe", "batch_opt_proc_diarize",
+                "batch_opt_proc_stories", "batch_opt_proc_translate", "batch_opt_save_project",
+                "batch_opt_skip_existing", "batch_opt_save_project_only", "batch_opt_scope",
+                "batch_opt_fmt_txt", "batch_opt_fmt_docx", "batch_opt_fmt_srt", "batch_opt_fmt_vtt",
+                "batch_opt_include_speakers", "batch_opt_include_times", "batch_custom_output_dir",
+                "batch_subfolders", "batch_auto_speakers", "batch_auto_detect_stories", "batch_auto_translate",
+            ]
+            for k in keys:
+                self.settings_store.remove(k)
+            self.settings_store.sync()
+            QMessageBox.information(dialog, "Batch Options", "Batch processing options have been reset to factory defaults.")
+        batch_options_reset_btn.clicked.connect(_reset_batch_export_defaults)
+        batch_form.addRow("Factory Defaults:", batch_options_reset_btn)
+
+        batch_layout.addLayout(batch_form)
+        batch_layout.addStretch()
+        stack.addWidget(page_batch)
 
         content_layout.addWidget(stack, 1)
         main_layout.addLayout(content_layout)
@@ -952,8 +1125,93 @@ class PlaybackPreferencesMixin:
             cat_list.setCurrentRow(0)
 
         # Dialog buttons
-        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dialog)
+        btn_box = QDialogButtonBox(dialog)
+        save_btn = btn_box.addButton("Save", QDialogButtonBox.ButtonRole.AcceptRole)
+        cancel_btn = btn_box.addButton("Cancel", QDialogButtonBox.ButtonRole.RejectRole)
+        restore_btn_box = btn_box.addButton("Restore Defaults", QDialogButtonBox.ButtonRole.ResetRole)
         main_layout.addWidget(btn_box)
+
+        def _confirm_restore_defaults():
+            reply = QMessageBox.question(
+                dialog,
+                "Restore Defaults",
+                "Are you sure you want to restore all settings to their defaults?\n\n"
+                "All preference categories will be reset to recommended factory defaults.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+            # Reset General
+            theme_combo.setCurrentText("Dark")
+            idx = startup_combo.findData("last")
+            if idx >= 0:
+                startup_combo.setCurrentIndex(idx)
+            proj_dir_edit.setText("")
+            save_with_media_chk.setChecked(False)
+            bundle_folder_chk.setChecked(True)
+            copy_media_chk.setChecked(False)
+            autosave_spin.setValue(5)
+
+            # Reset Audio Hardware
+            audio_dev_combo.setCurrentIndex(0)
+            vol_slider.setValue(100)
+
+            # Reset Updates
+            auto_update_chk.setChecked(True)
+            repo_edit.setText("The-Triton-Media-Group/Radio-TV-Story-Segmenter")
+
+            # Reset Models
+            from prs_shared import get_app_data_dir
+            model_dir_edit.setText(str(get_app_data_dir() / "models"))
+            whisper_idx = pref_whisper_combo.findData("small")
+            if whisper_idx >= 0:
+                pref_whisper_combo.setCurrentIndex(whisper_idx)
+            beam_idx = pref_beam_combo.findData(5)
+            if beam_idx >= 0:
+                pref_beam_combo.setCurrentIndex(beam_idx)
+            trans_idx = pref_trans_combo.findData("tiny")
+            if trans_idx >= 0:
+                pref_trans_combo.setCurrentIndex(trans_idx)
+
+            # Reset Playback
+            skip_spin.setValue(5)
+            wave_chk.setChecked(True)
+            thumb_chk.setChecked(True)
+            sel_idx = sel_mode_combo.findData("replace")
+            if sel_idx >= 0:
+                sel_mode_combo.setCurrentIndex(sel_idx)
+
+            # Reset Detection
+            gap_spin.setValue(3.0)
+            pad_spin.setValue(0.5)
+            auto_idx = expected_speakers_combo.findData("auto")
+            if auto_idx >= 0:
+                expected_speakers_combo.setCurrentIndex(auto_idx)
+            ask_speakers_chk.setChecked(True)
+
+            # Reset Batch
+            batch_dir_edit.setText("")
+            batch_transcribe_chk.setChecked(True)
+            batch_diarize_chk.setChecked(True)
+            batch_stories_chk.setChecked(True)
+            batch_translate_chk.setChecked(False)
+            batch_save_proj_chk.setChecked(True)
+            batch_skip_exist_chk.setChecked(True)
+            batch_proj_only_chk.setChecked(False)
+            batch_txt_chk.setChecked(True)
+            batch_docx_chk.setChecked(True)
+            batch_srt_chk.setChecked(False)
+            batch_vtt_chk.setChecked(False)
+            batch_spk_chk.setChecked(True)
+            batch_time_chk.setChecked(False)
+
+            _save_preferences()
+            QMessageBox.information(dialog, "Defaults Restored", "All settings have been restored to their defaults.")
+
+        restore_gen_btn.clicked.connect(_confirm_restore_defaults)
+        restore_btn_box.clicked.connect(_confirm_restore_defaults)
 
         def _save_preferences():
             # Save General
@@ -972,6 +1230,7 @@ class PlaybackPreferencesMixin:
             self.settings_store.setValue("default_project_directory", self.default_project_directory)
             self.settings_store.setValue("save_project_with_media", "true" if save_with_media_chk.isChecked() else "false")
             self.settings_store.setValue("create_project_subfolders", "true" if bundle_folder_chk.isChecked() else "false")
+            self.settings_store.setValue("copy_media_to_project_folder", "true" if copy_media_chk.isChecked() else "false")
 
             self.auto_save_minutes = autosave_spin.value()
             self.settings_store.setValue("auto_save_minutes", self.auto_save_minutes)
@@ -1002,6 +1261,11 @@ class PlaybackPreferencesMixin:
                 self.settings_store.setValue("whisper_model", self.whisper_model)
                 if hasattr(self, "refresh_whisper_model_chooser"):
                     self.refresh_whisper_model_chooser()
+
+            new_beam = pref_beam_combo.currentData()
+            if new_beam is not None:
+                self.whisper_beam_size = int(new_beam)
+                self.settings_store.setValue("whisper_beam_size", self.whisper_beam_size)
 
             new_trans = pref_trans_combo.currentData()
             if new_trans:
@@ -1035,10 +1299,27 @@ class PlaybackPreferencesMixin:
             # Save Detection
             self.silence_threshold = gap_spin.value()
             self.lead_in_padding = pad_spin.value()
-            self.speaker_sensitivity = sens_slider.value()
+            self.expected_speakers = str(expected_speakers_combo.currentData() or "auto")
             self.settings_store.setValue("silence_threshold", self.silence_threshold)
             self.settings_store.setValue("lead_in_padding", self.lead_in_padding)
-            self.settings_store.setValue("speaker_sensitivity", self.speaker_sensitivity)
+            self.settings_store.setValue("default_expected_speakers", self.expected_speakers)
+            self.settings_store.setValue("ask_expected_speakers", ask_speakers_chk.isChecked())
+
+            # Save Batch Processing
+            self.settings_store.setValue("batch_custom_output_dir", batch_dir_edit.text().strip())
+            self.settings_store.setValue("batch_opt_proc_transcribe", batch_transcribe_chk.isChecked())
+            self.settings_store.setValue("batch_opt_proc_diarize", batch_diarize_chk.isChecked())
+            self.settings_store.setValue("batch_opt_proc_stories", batch_stories_chk.isChecked())
+            self.settings_store.setValue("batch_opt_proc_translate", batch_translate_chk.isChecked())
+            self.settings_store.setValue("batch_opt_save_project", batch_save_proj_chk.isChecked())
+            self.settings_store.setValue("batch_opt_skip_existing", batch_skip_exist_chk.isChecked())
+            self.settings_store.setValue("batch_opt_save_project_only", batch_proj_only_chk.isChecked())
+            self.settings_store.setValue("batch_opt_fmt_txt", batch_txt_chk.isChecked())
+            self.settings_store.setValue("batch_opt_fmt_docx", batch_docx_chk.isChecked())
+            self.settings_store.setValue("batch_opt_fmt_srt", batch_srt_chk.isChecked())
+            self.settings_store.setValue("batch_opt_fmt_vtt", batch_vtt_chk.isChecked())
+            self.settings_store.setValue("batch_opt_include_speakers", batch_spk_chk.isChecked())
+            self.settings_store.setValue("batch_opt_include_times", batch_time_chk.isChecked())
 
             # Force these writes to disk now rather than relying on
             # QSettings' own flush timing, so a Preferences change is
@@ -1051,6 +1332,8 @@ class PlaybackPreferencesMixin:
             self.log_activity("[SETTINGS] Preferences updated.")
             dialog.accept()
 
+        save_btn.clicked.connect(_save_preferences)
+        cancel_btn.clicked.connect(dialog.reject)
         btn_box.accepted.connect(_save_preferences)
         btn_box.rejected.connect(dialog.reject)
 
@@ -1738,30 +2021,22 @@ class PlaybackPreferencesMixin:
             self.timeline.canvas.pixmap_dirty = True
             self.timeline.canvas.update()
 
-    def update_sensitivity_tooltip(self, val):
-        pct = int((val / 10.0) * 100)
-        if val <= 3:
-            desc = "More conservative separation; merges more short isolated speaker fragments."
-        elif val <= 7:
-            desc = "Balanced speaker separation."
-        else:
-            desc = "More sensitive separation; preserves shorter speaker changes."
-
-        tooltip_msg = f"Speaker Detection sensitivity: {pct}%\\n({desc})\\nAdjusts short-fragment cleanup after detection."
-        if hasattr(self, "sensitivity_slider"):
-            self.sensitivity_slider.setToolTip(tooltip_msg)
-
-    def on_sensitivity_changed(self, val):
-        new_value = int(val)
-        changed = new_value != self.speaker_sensitivity
-        self.speaker_sensitivity = new_value
-        self.update_sensitivity_tooltip(val)
+    def on_expected_speakers_changed(self, value):
+        """Kept as a public hook (mirrors the removed on_sensitivity_changed)
+        in case a future toolbar control adjusts the expected-speakers hint
+        directly, mid-project. No caller currently wires this up -- the
+        setting is otherwise only changed via Preferences or per-job batch
+        controls (media_batch.py).
+        """
+        new_value = str(value or "auto")
+        changed = new_value != getattr(self, "expected_speakers", "auto")
+        self.expected_speakers = new_value
         if changed and self.diarization is not None:
             self.processing_status["diarization"] = False
-            self.log_activity("[PROCESSING] Speaker Detection sensitivity changed; existing speaker detection is marked for reprocessing.", mark_dirty=False)
+            self.log_activity("[PROCESSING] Expected speakers changed; existing speaker detection is marked for reprocessing.", mark_dirty=False)
         self.mark_project_dirty()
-        self.log_activity(f"[SETTINGS] Speaker cleanup sensitivity set to {int(val) * 10}%.")
-        self.statusBar().showMessage(f"Speaker Detection sensitivity: {int(val) * 10}%.")
+        self.log_activity(f"[SETTINGS] Expected speakers set to '{new_value}'.")
+        self.statusBar().showMessage(f"Expected speakers: {new_value}.")
 
     def update_auto_save_timer(self):
         if self.auto_save_minutes > 0:

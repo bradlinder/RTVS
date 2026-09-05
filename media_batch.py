@@ -179,7 +179,14 @@ class MediaBatchMixin:
         if self.project_dirty and self.audio_file:
             self.save_project(force=True)
 
+        import time
         self.batch_active = True
+        self.batch_total_files = len(files)
+        self.batch_current_file_idx = 0
+        self.batch_start_time = time.monotonic()
+        self.batch_completed_durations = []
+        self.batch_file_start_time = None
+
         # Mute and stop media player during batch runs to prevent GPU/Audio engine contention
         if hasattr(self, "player") and self.player:
             self.player.stop()
@@ -220,8 +227,21 @@ class MediaBatchMixin:
             "include_timestamps": dialog.include_times.isChecked(),
             "translate_es": translate_pipeline,
             "translate_stories": translate_pipeline and scope in ("stories", "both"),
-            "doc_direction": dialog.doc_direction.currentData()
+            "expected_speakers": str(dialog.batch_expected_speakers_combo.currentData() or "auto"),
+            "story_gap": dialog.batch_gap_spin.value(),
+            "story_pad": dialog.batch_pad_spin.value(),
+            "translate_direction": str(dialog.batch_export_translate_direction_combo.currentData() or "auto"),
         }
+
+        # Apply the batch job's per-run Speaker Detection / Story Detection
+        # settings now, so start_diarization()/detect_stories() (which read
+        # these as instance attributes, same as the interactive UI) pick up
+        # the values chosen in this dialog rather than whatever was left
+        # over from Preferences or a previous project.
+        self.expected_speakers = self.batch_settings["expected_speakers"]
+        self.silence_threshold = self.batch_settings["story_gap"]
+        self.lead_in_padding = self.batch_settings["story_pad"]
+        self.translation_direction = self.batch_settings["translate_direction"]
 
         # Auto-route between media processing and document translation
         first_file = Path(files[0])
@@ -232,8 +252,15 @@ class MediaBatchMixin:
             self._batch_next_media()
 
     def _batch_next_media(self):
+        import time
+        if getattr(self, "batch_file_start_time", None):
+            self.batch_completed_durations.append(time.monotonic() - self.batch_file_start_time)
+            self.batch_file_start_time = None
+
         if not hasattr(self, "batch_queue") or not self.batch_queue:
             self.batch_active = False  # Reset active flag when queue is empty
+            self.batch_total_files = 0
+            self.batch_current_file_idx = 0
             self.progress.hide()
             self.cancel_button.hide()
             self.set_processing_stage(None)
@@ -243,7 +270,9 @@ class MediaBatchMixin:
 
         # Fetch next media file
         current_file = self.batch_queue.pop(0)
-        self.log_activity(f"[BATCH] Processing media file: {current_file}")
+        self.batch_current_file_idx += 1
+        self.batch_file_start_time = time.monotonic()
+        self.log_activity(f"[BATCH] Processing media file ({self.batch_current_file_idx} of {self.batch_total_files}): {current_file}")
 
         try:
             output_dir = Path(self.batch_settings.get("output", ""))
@@ -323,8 +352,15 @@ class MediaBatchMixin:
             self._batch_media_error(f"Failed to process {current_file}: {str(e)}")
 
     def _batch_next_document(self):
+        import time
+        if getattr(self, "batch_file_start_time", None):
+            self.batch_completed_durations.append(time.monotonic() - self.batch_file_start_time)
+            self.batch_file_start_time = None
+
         if not hasattr(self, "batch_document_queue") or not self.batch_document_queue:
             self.batch_active = False
+            self.batch_total_files = 0
+            self.batch_current_file_idx = 0
             self.progress.hide()
             self.cancel_button.hide()
             self.set_processing_stage(None)
@@ -333,7 +369,9 @@ class MediaBatchMixin:
             return
 
         current_doc = self.batch_document_queue.pop(0)
-        self.log_activity(f"[BATCH] Translating document: {current_doc}")
+        self.batch_current_file_idx += 1
+        self.batch_file_start_time = time.monotonic()
+        self.log_activity(f"[BATCH] Translating document ({self.batch_current_file_idx} of {self.batch_total_files}): {current_doc}")
         try:
             if hasattr(self, "translate_document_file"):
                 self.translate_document_file(current_doc)
@@ -382,6 +420,47 @@ class MediaBatchMixin:
         if saved_theme not in ("dark", "light", "high_contrast"):
             saved_theme = "dark"
         self.set_theme(saved_theme)
+
+        # Models & AI settings
+        self.whisper_model = str(self.settings_store.value("whisper_model", "small") or "small")
+        try:
+            self.whisper_beam_size = int(self.settings_store.value("whisper_beam_size", 5) or 5)
+        except Exception:
+            self.whisper_beam_size = 5
+        self.translation_model_variant = str(self.settings_store.value("translation_model_variant", "tiny") or "tiny")
+        if hasattr(self, "refresh_whisper_model_chooser"):
+            self.refresh_whisper_model_chooser()
+        if hasattr(self, "refresh_translation_model_chooser"):
+            self.refresh_translation_model_chooser()
+
+        # Playback & Timing
+        try:
+            self.skip_seconds = int(self.settings_store.value("skip_seconds", 5) or 5)
+        except Exception:
+            self.skip_seconds = 5
+        if hasattr(self, "timeline") and hasattr(self.timeline, "set_skip_seconds"):
+            self.timeline.set_skip_seconds(self.skip_seconds)
+
+        # Detection Thresholds
+        try:
+            self.silence_threshold = float(self.settings_store.value("silence_threshold", 3.0) or 3.0)
+            self.lead_in_padding = float(self.settings_store.value("lead_in_padding", 0.5) or 0.5)
+            self.expected_speakers = str(self.settings_store.value("default_expected_speakers", "auto") or "auto")
+        except Exception:
+            pass
+
+        # Auto-save
+        try:
+            self.auto_save_minutes = int(self.settings_store.value("auto_save_minutes", 5) or 5)
+        except Exception:
+            self.auto_save_minutes = 5
+        if hasattr(self, "update_auto_save_timer"):
+            self.update_auto_save_timer()
+
+        # Audio Hardware
+        if hasattr(self, "apply_audio_output_device"):
+            self.apply_audio_output_device()
+
         self.apply_glossary_to_whisper_context()
         if self.language == "es":
             self.set_language("es", persist=False)
@@ -401,7 +480,7 @@ class MediaBatchMixin:
             return
         try:
             p = Path(path).resolve()
-            if p.suffix.lower() == ".json":
+            if p.suffix.lower() in {".rtvs", ".json"}:
                 resolved = str(p)
                 self.settings_store.setValue("last_saved_project_path", resolved)
                 raw = self.settings_store.value("recent_projects", [])
@@ -426,9 +505,27 @@ class MediaBatchMixin:
             pass
 
     def _dialog_directory(self, fallback=None):
+        # Open Media / Open Document / Open Project share the most recently
+        # used folder, while retaining the configured project directory as a
+        # first-run fallback.
+        try:
+            remembered = str(self.settings_store.value("last_open_directory", "") or "")
+            if remembered and Path(remembered).is_dir():
+                return remembered
+        except Exception:
+            pass
         if self.default_project_directory:
             return self.default_project_directory
-        return str(Path(fallback).parent) if fallback else ""    
+        return str(Path(fallback).parent) if fallback else ""
+
+    def _remember_open_directory(self, path):
+        try:
+            directory = Path(path).resolve().parent if Path(path).suffix else Path(path).resolve()
+            if directory.is_dir():
+                self.settings_store.setValue("last_open_directory", str(directory))
+                self.settings_store.sync()
+        except Exception:
+            pass
 
     def _sync_startup_project_actions(self):
         """Synchronize the Project Settings startup radio/check actions."""
@@ -448,6 +545,25 @@ class MediaBatchMixin:
 
     def restore_last_opened(self):
         """Apply startup policy and offer recovery from a newer autosave snapshot."""
+        # If launched with a file argument (e.g. associated .rtvs project or media file), open it directly
+        for arg in sys.argv[1:]:
+            if not arg.startswith("-"):
+                try:
+                    arg_path = Path(arg).resolve()
+                    if arg_path.is_file():
+                        if arg_path.suffix.lower() in (".rtvs", ".json"):
+                            self.load_project_file(arg_path, prompt=False, preserve_media=False)
+                            self.log_activity(f"[STARTUP] Opened project from command line: {arg_path.name}", mark_dirty=False)
+                            return
+                        elif arg_path.suffix.lower() in (".txt", ".docx", ".pdf", ".html", ".htm", ".md"):
+                            self.open_document_path(arg_path)
+                            return
+                        else:
+                            self.load_media_file(arg_path)
+                            return
+                except Exception as exc:
+                    self.log_activity(f"[STARTUP] Could not open argument '{arg}': {exc}", mark_dirty=False)
+
         mode = getattr(self, "startup_project_mode", "last")
         raw_saved = str(self.settings_store.value("last_saved_project_path", "") or "")
         if raw_saved:
@@ -480,7 +596,7 @@ class MediaBatchMixin:
 
         raw = str(self.settings_store.value("last_saved_project_path", "") or "")
         path = Path(raw) if raw else None
-        valid_last = bool(path and path.exists() and path.is_file() and path.suffix.lower() == ".json")
+        valid_last = bool(path and path.exists() and path.is_file() and path.suffix.lower() in (".rtvs", ".json"))
 
         # If last_saved_project_path is missing or stale, fall back to the most recent entry from recent_projects
         if not valid_last:
@@ -493,7 +609,7 @@ class MediaBatchMixin:
             if isinstance(raw_recent, list):
                 for candidate in raw_recent:
                     cand_path = Path(str(candidate))
-                    if cand_path.exists() and cand_path.is_file() and cand_path.suffix.lower() == ".json":
+                    if cand_path.exists() and cand_path.is_file() and cand_path.suffix.lower() in (".rtvs", ".json"):
                         path = cand_path
                         valid_last = True
                         self.settings_store.setValue("last_saved_project_path", str(path))
@@ -692,6 +808,7 @@ class MediaBatchMixin:
             return
 
         path = Path(filename).resolve()
+        self._remember_open_directory(path)
 
         if self.audio_file or self.transcript or self.project_file:
             if not self.prepare_for_new_media():
@@ -749,6 +866,7 @@ class MediaBatchMixin:
             "Media Files (*.*);;All Files (*)",
         )
         if filename:
+            self._remember_open_directory(filename)
             self.load_media_file(filename, source="file dialog")
 
     def prepare_for_new_media(self):
@@ -800,7 +918,7 @@ class MediaBatchMixin:
             project_dir, trans_dir, media_dir, _ = self.prepare_export_directories(
                 base_dir, default_name=base_name, prompt_user=False
             )
-            target_path = str(project_dir / f"{base_name}.json")
+            target_path = str(project_dir / f"{base_name}.rtvs")
             self._write_project_file(target_path)
             self.log_activity(f"[BATCH] Auto-saved project file to {target_path}")
         except Exception as e:
@@ -845,6 +963,7 @@ class MediaBatchMixin:
             "include_timestamps": self.batch_settings.get("include_timestamps", False),
             "include_english": True,
             "include_spanish": self.batch_settings.get("translate_es", False),
+            "translation_direction": self.batch_settings.get("translate_direction", "auto"),
         }
 
         scope = self.batch_settings.get("scope", "full")
