@@ -2015,10 +2015,55 @@ class TimelineCanvas(QWidget):
         self.pixmap_dirty = True
         self.buffered_total_width = 0
 
+        # Background generation activity indicators
+        self.active_background_tasks = set()
+        self.background_status_text = ""
+        self.show_background_banner = False
+        self._background_delay_timer = QTimer(self)
+        self._background_delay_timer.setSingleShot(True)
+        self._background_delay_timer.setInterval(1500)  # Show if taking > 1.5s
+        self._background_delay_timer.timeout.connect(self._activate_background_banner)
+
         self.setMinimumHeight(120)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
         self.setAcceptDrops(True)
+
+    def set_background_generation_active(self, task_name: str, active: bool):
+        """Set generation state for 'waveform' or 'thumbnails'."""
+        if active:
+            self.active_background_tasks.add(task_name)
+            if not self._background_delay_timer.isActive() and not self.show_background_banner:
+                self._background_delay_timer.start()
+        else:
+            self.active_background_tasks.discard(task_name)
+            if not self.active_background_tasks:
+                self._background_delay_timer.stop()
+                self.show_background_banner = False
+                self.background_status_text = ""
+                self.update()
+                return
+
+        self._update_background_status_text()
+        if self.show_background_banner:
+            self.update()
+
+    def _activate_background_banner(self):
+        if self.active_background_tasks:
+            self.show_background_banner = True
+            self._update_background_status_text()
+            self.update()
+
+    def _update_background_status_text(self):
+        labels = []
+        if "waveform" in self.active_background_tasks:
+            labels.append("audio waveform")
+        if "thumbnails" in self.active_background_tasks:
+            labels.append("video thumbnails")
+        if labels:
+            self.background_status_text = f"Generating {' and '.join(labels)}..."
+        else:
+            self.background_status_text = ""
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -2683,6 +2728,30 @@ class TimelineCanvas(QWidget):
             painter.setPen(QPen(QColor("#ff5c5c"), 2))
             painter.drawLine(QPointF(cursor_x, 0), QPointF(cursor_x, height))
 
+        # Draw Background Task Status Banner (Waveform / Thumbnail Generation)
+        if self.show_background_banner and self.background_status_text:
+            painter.save()
+            font = self.font()
+            font.setPointSize(9)
+            font.setBold(True)
+            painter.setFont(font)
+
+            fm = painter.fontMetrics()
+            text_w = fm.horizontalAdvance(self.background_status_text)
+            badge_w = text_w + 24
+            badge_h = 24
+            badge_x = (width - badge_w) / 2.0
+            badge_y = self.RULER_HEIGHT + 8
+
+            badge_rect = QRectF(badge_x, badge_y, badge_w, badge_h)
+            painter.setPen(QPen(QColor("#58a6ff"), 1.5))
+            painter.setBrush(QColor(18, 20, 24, 230))
+            painter.drawRoundedRect(badge_rect, 4.0, 4.0)
+
+            painter.setPen(QColor("#f0f6fc"))
+            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, self.background_status_text)
+            painter.restore()
+
 
 class TimelineWidget(QWidget):
     mediaDropped = Signal(str)
@@ -2712,77 +2781,9 @@ class TimelineWidget(QWidget):
         self.is_internal_scrollbar_update = False
         self.update_scrollbar_range()
 
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls() and any(url.isLocalFile() for url in event.mimeData().urls()):
-            event.acceptProposedAction()
-            return
-        event.ignore()
-
-    def dropEvent(self, event):
-        for url in event.mimeData().urls():
-            if url.isLocalFile():
-                self.mediaDropped.emit(url.toLocalFile())
-                event.acceptProposedAction()
-                return
-        event.ignore()
-
-    def update_scrollbar_range(self):
-        self.is_internal_scrollbar_update = True
-        total = int(self.canvas.duration * 1000)
-        visible = int(self.canvas.visible_duration() * 1000)
-
-        self.scrollbar.setRange(0, max(0, total - visible))
-        self.scrollbar.setPageStep(visible)
-        self.scrollbar.setSingleStep(max(100, visible // 10))
-        self.is_internal_scrollbar_update = False
-        self.update_scrollbar_from_canvas(self.canvas.scroll_offset)
-
-    def update_scrollbar_from_canvas(self, offset):
-        if self.is_internal_scrollbar_update:
-            return
-
-        self.is_internal_scrollbar_update = True
-        self.scrollbar.setValue(int(offset * 1000))
-        self.is_internal_scrollbar_update = False
-
-    def update_canvas_from_scrollbar(self, val):
-        if self.is_internal_scrollbar_update:
-            return
-
-        self.is_internal_scrollbar_update = True
-        self.canvas.scroll_offset = val / 1000.0
-        self.canvas.clamp_scroll_offset()
-        self.canvas.update()
-        self.is_internal_scrollbar_update = False
-
-    def __getattr__(self, name):
-        return getattr(self.canvas, name)
-    mediaDropped = Signal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        self.canvas = TimelineCanvas()
-        self.scrollbar = QScrollBar(Qt.Orientation.Horizontal)
-
-        layout.addWidget(self.canvas, 1)
-        layout.addWidget(self.scrollbar)
-
-        self.canvas.scrollOffsetChanged.connect(self.update_scrollbar_from_canvas)
-        self.canvas.mediaDropped.connect(self.mediaDropped.emit)
-        self.canvas.zoomChanged.connect(self.update_scrollbar_range)
-        self.scrollbar.valueChanged.connect(self.update_canvas_from_scrollbar)
-        
-        self.selectionRangeChanged = self.canvas.selectionRangeChanged
-        self.storyCreatedFromSelection = self.canvas.storyCreatedFromSelection
-
-        self.is_internal_scrollbar_update = False
-        self.update_scrollbar_range()
+    def set_background_generation_active(self, task_name: str, active: bool):
+        if hasattr(self, "canvas") and hasattr(self.canvas, "set_background_generation_active"):
+            self.canvas.set_background_generation_active(task_name, active)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls() and any(url.isLocalFile() for url in event.mimeData().urls()):
