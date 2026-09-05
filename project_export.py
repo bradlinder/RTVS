@@ -2592,9 +2592,7 @@ class ProjectExportMixin:
                 event.ignore()
                 return
         except Exception as exc:
-            self.log_activity(f"[WARNING] Waveform cleanup failed: {exc}", mark_dirty=False)
-            event.ignore()
-            return
+            self.log_activity(f"[WARNING] Waveform cleanup encountered an issue: {exc}", mark_dirty=False)
 
         try:
             for thread in list(getattr(self, "translation_status_threads", [])):
