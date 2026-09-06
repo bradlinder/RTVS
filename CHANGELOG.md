@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.9.4
+
+- **Global Multi-Stage Elapsed Time**: The progress indicator now tracks and displays elapsed time across all operations and multi-stage pipelines (including combined transcription + speaker diarization) from start to finish, rather than only during diarization.
+- **Comprehensive "Restore All Settings to Defaults"**: The Restore All Defaults button in Preferences now resets all custom preferences across all areas of the application, including custom project directories, project bundling, export formats and content settings, custom export location overrides, audio output hardware and volume, AI model options, timeline preferences, detection parameters, and batch tool options.
+- **New "Restore Selected Settings" Feature**: Added a dedicated "Restore Selected Settings…" dialog accessible in Preferences. Users can review customizable setting categories with checkboxes (with Select All and Deselect All convenience controls) and selectively reset only specific areas to factory defaults after a safety confirmation prompt.
+- **Export Location Routing Refinement**: When using a custom export location, selected file types are saved directly to the chosen directory without creating unnecessary "Transcripts" or "Media" subfolders, keeping output clean while leaving the main project folder intact.
+
 ## v1.9.1
 
 - Renamed user-facing Speaker Diarization references to **Detect Speakers**.

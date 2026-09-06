@@ -1,8 +1,10 @@
 import html
 from bisect import bisect_right
 import copy
+import gzip
 import hashlib
 import json
+import math
 import re
 import struct
 import subprocess
@@ -44,6 +46,7 @@ from PySide6.QtGui import (
     QColor,
     QPainter,
     QPen,
+    QFont,
     QAction,
     QActionGroup,
     QUndoStack,
@@ -59,6 +62,13 @@ from PySide6.QtGui import (
     QCursor,
     QDesktopServices,
 )
+
+try:
+    import numpy as np
+    HAVE_NUMPY = True
+except ImportError:
+    np = None
+    HAVE_NUMPY = False
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -228,7 +238,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "1.9.1"
+PROJECT_VERSION = "1.9.4"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -429,16 +439,21 @@ def get_license_file_path(filename: str = "NOTICES.txt") -> Path | None:
 # Utilities
 # ============================================================
 
-def format_time(seconds):
+def format_time(seconds, include_millis=True):
     seconds = max(0, float(seconds))
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
     millis = int((seconds - int(seconds)) * 1000)
 
-    if hours:
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
-    return f"{minutes:02d}:{secs:02d}.{millis:03d}"
+    if include_millis:
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+        return f"{minutes:02d}:{secs:02d}.{millis:03d}"
+    else:
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        return f"{minutes:02d}:{secs:02d}"
 
 
 def parse_time(value):
@@ -722,12 +737,11 @@ class ProjectStateCommand(QUndoCommand):
     def __init__(self, main_window, before_state, after_state, description="Modify Project"):
         super().__init__(description)
         self.main_window = main_window
-        # These states are already plain JSON-safe data (dict/list/str/
-        # number/bool/None) produced by _capture_project_state(), so a
-        # native deepcopy gives the same isolation as the previous
-        # json.dumps/json.loads round-trip for a fraction of the CPU cost.
-        self.before_state = copy.deepcopy(before_state)
-        self.after_state = copy.deepcopy(after_state)
+        # before_state and after_state are already isolated snapshot dicts produced
+        # by _capture_project_state(). Storing shallow dict copies avoids expensive
+        # recursive deepcopy duplication and prevents GC hitches on long files (>60 min).
+        self.before_state = dict(before_state) if isinstance(before_state, dict) else before_state
+        self.after_state = dict(after_state) if isinstance(after_state, dict) else after_state
 
     def undo(self):
         self.main_window._restore_project_state_for_undo(self.before_state)
@@ -830,6 +844,7 @@ class InteractiveTranscriptEdit(QTextEdit):
 
         self.current_theme = "dark"
         self.active_highlight_anchor = None
+        self._playback_highlight_selection = None
         self.anchor_ranges = {}
         self.time_anchor_index = []
         self.time_anchor_starts = []
@@ -939,29 +954,27 @@ class InteractiveTranscriptEdit(QTextEdit):
         return []
 
     def update_extra_selections(self):
-        if not hasattr(self, "saved_selections"):
-            self.saved_selections = []
-        if not self.saved_selections:
-            self.setExtraSelections([])
-            return
-
-        fmt = QTextCharFormat()
-        if getattr(self, "current_theme", "dark") == "light":
-            fmt.setBackground(QColor(186, 215, 255, 170))
-            fmt.setForeground(QColor(15, 23, 42))
-        else:
-            fmt.setBackground(QColor(40, 105, 215, 170))
-            fmt.setForeground(QColor(255, 255, 255))
-
         extras = []
-        for sel in self.saved_selections:
-            extra = QTextEdit.ExtraSelection()
-            extra.format = fmt
-            cursor = QTextCursor(self.document())
-            cursor.setPosition(sel["start_char"])
-            cursor.setPosition(sel["end_char"], QTextCursor.MoveMode.KeepAnchor)
-            extra.cursor = cursor
-            extras.append(extra)
+        if hasattr(self, "saved_selections") and self.saved_selections:
+            fmt = QTextCharFormat()
+            if getattr(self, "current_theme", "dark") == "light":
+                fmt.setBackground(QColor(186, 215, 255, 170))
+                fmt.setForeground(QColor(15, 23, 42))
+            else:
+                fmt.setBackground(QColor(40, 105, 215, 170))
+                fmt.setForeground(QColor(255, 255, 255))
+
+            for sel in self.saved_selections:
+                extra = QTextEdit.ExtraSelection()
+                extra.format = fmt
+                cursor = QTextCursor(self.document())
+                cursor.setPosition(sel["start_char"])
+                cursor.setPosition(sel["end_char"], QTextCursor.MoveMode.KeepAnchor)
+                extra.cursor = cursor
+                extras.append(extra)
+
+        if getattr(self, "_playback_highlight_selection", None) is not None:
+            extras.append(self._playback_highlight_selection)
 
         self.setExtraSelections(extras)
 
@@ -1506,29 +1519,12 @@ class InteractiveTranscriptEdit(QTextEdit):
         self.time_anchor_starts = [item[0] for item in self.time_anchor_index]
 
     def clear_highlight(self):
-        if not self.active_highlight_anchor:
+        if not self.active_highlight_anchor and getattr(self, "_playback_highlight_selection", None) is None:
             return
 
-        positions = self.anchor_ranges.get(self.active_highlight_anchor)
-        if positions:
-            doc = self.document()
-            cursor = QTextCursor(doc)
-            cursor.setPosition(positions[0])
-            cursor.setPosition(positions[1], QTextCursor.KeepAnchor)
-            clean_fmt = QTextCharFormat()
-            clean_fmt.setAnchor(True)
-            clean_fmt.setAnchorHref(self.active_highlight_anchor)
-            # Restore regular theme text color
-            if self.current_theme == "light":
-                clean_color = "#111111"
-            elif self.current_theme == "high_contrast":
-                clean_color = "#ffffff"
-            else:
-                clean_color = "#ffffff"
-            clean_fmt.setForeground(QColor(clean_color))
-            cursor.setCharFormat(clean_fmt)
-
         self.active_highlight_anchor = None
+        self._playback_highlight_selection = None
+        self.update_extra_selections()
 
     def highlight_word_at_time(self, seconds, transcript_data):
         if self.is_editing_mode or not transcript_data:
@@ -1548,44 +1544,50 @@ class InteractiveTranscriptEdit(QTextEdit):
         if not target_anchor or target_anchor == self.active_highlight_anchor:
             return
 
-        self.clear_highlight()
-
         doc = self.document()
         positions = self.anchor_ranges.get(target_anchor)
         if not positions:
             self.rebuild_anchor_index()
             positions = self.anchor_ranges.get(target_anchor)
 
-        target_cursor = None
-        if positions:
-            target_cursor = QTextCursor(doc)
-            target_cursor.setPosition(positions[0])
-            target_cursor.setPosition(positions[1], QTextCursor.KeepAnchor)
-            
-            # Apply active highlight style (e.g., bright blue or accent color highlight)
-            highlight_fmt = QTextCharFormat()
-            highlight_fmt.setAnchor(True)
-            highlight_fmt.setAnchorHref(target_anchor)
-            if self.current_theme == "light":
-                highlight_color = "#0056b3"
-            elif self.current_theme == "high_contrast":
-                highlight_color = "#ffff00"
-            else:
-                highlight_color = "#58a6ff"
-            highlight_fmt.setForeground(QColor(highlight_color)) # Accent highlight color
-            target_cursor.setCharFormat(highlight_fmt)
+        if not positions:
+            self.clear_highlight()
+            return
 
-        if target_cursor:
-            self.active_highlight_anchor = target_anchor
+        target_cursor = QTextCursor(doc)
+        target_cursor.setPosition(positions[0])
+        target_cursor.setPosition(positions[1], QTextCursor.MoveMode.KeepAnchor)
 
-            cursor_rect = self.cursorRect(target_cursor)
-            viewport_rect = self.viewport().rect()
-            v_scroll = self.verticalScrollBar()
+        # Overlay Word Highlighting using QTextEdit.ExtraSelection
+        # Prevents document mutations and expensive text reflows during playback
+        highlight_fmt = QTextCharFormat()
+        if self.current_theme == "light":
+            highlight_fmt.setForeground(QColor("#0056b3"))
+            highlight_fmt.setBackground(QColor(186, 215, 255, 120))
+        elif self.current_theme == "high_contrast":
+            highlight_fmt.setForeground(QColor("#ffff00"))
+            highlight_fmt.setBackground(QColor(255, 255, 0, 80))
+        else:
+            highlight_fmt.setForeground(QColor("#58a6ff"))
+            highlight_fmt.setBackground(QColor(88, 166, 255, 75))
+        highlight_fmt.setFontWeight(QFont.Weight.Bold)
 
-            if cursor_rect.bottom() > viewport_rect.bottom():
-                v_scroll.setValue(v_scroll.value() + viewport_rect.height() // 3)
-            elif cursor_rect.top() < viewport_rect.top():
-                v_scroll.setValue(max(0, v_scroll.value() - viewport_rect.height() // 3))
+        extra = QTextEdit.ExtraSelection()
+        extra.format = highlight_fmt
+        extra.cursor = target_cursor
+
+        self.active_highlight_anchor = target_anchor
+        self._playback_highlight_selection = extra
+        self.update_extra_selections()
+
+        cursor_rect = self.cursorRect(target_cursor)
+        viewport_rect = self.viewport().rect()
+        v_scroll = self.verticalScrollBar()
+
+        if cursor_rect.bottom() > viewport_rect.bottom():
+            v_scroll.setValue(v_scroll.value() + viewport_rect.height() // 3)
+        elif cursor_rect.top() < viewport_rect.top():
+            v_scroll.setValue(max(0, v_scroll.value() - viewport_rect.height() // 3))
 
 # ============================================================
 # Document Reading Utilities
@@ -1798,6 +1800,48 @@ def get_waveform_peak_cache_path(audio_file):
     except Exception:
         return None
 
+class WaveformEnvelope(list):
+    """Subclass of list holding waveform peaks and precomputed multi-resolution pyramid levels."""
+    def __init__(self, iterable=None, levels=None):
+        super().__init__(iterable or [])
+        self.waveform_levels = levels or []
+
+
+def build_waveform_pyramid(peaks):
+    """Generate a multi-resolution downsampling pyramid for peaks using vectorized operations.
+    
+    Each level downsamples the previous level by 4x, allowing instantaneous O(1) viewport-scaled
+    waveform rendering on long audio files (>60 min) without UI thread lag.
+    """
+    if not peaks:
+        return []
+    if HAVE_NUMPY and np is not None:
+        try:
+            arr = np.asarray(peaks, dtype=np.float32)
+            levels = [arr]
+            curr = arr
+            while len(curr) > 4:
+                pad = (4 - (len(curr) % 4)) % 4
+                if pad:
+                    curr_padded = np.pad(curr, (0, pad), mode="edge")
+                else:
+                    curr_padded = curr
+                curr = np.max(curr_padded.reshape(-1, 4), axis=1)
+                levels.append(curr)
+            return levels
+        except Exception:
+            pass
+
+    # Pure Python fallback
+    levels = [list(peaks)]
+    curr = levels[0]
+    while len(curr) > 4:
+        next_level = [max(curr[i:i + 4]) for i in range(0, len(curr), 4)]
+        levels.append(next_level)
+        curr = next_level
+    return levels
+
+
 def read_waveform_peak_cache(audio_file, points_per_second=WAVEFORM_POINTS_PER_SECOND):
     """
     Read cached waveform peak envelope from binary cache.
@@ -1824,7 +1868,8 @@ def read_waveform_peak_cache(audio_file, points_per_second=WAVEFORM_POINTS_PER_S
             if len(raw_data) != count * 4:
                 return None
             peaks = list(struct.unpack(f"<{count}f", raw_data))
-            return peaks
+            levels = build_waveform_pyramid(peaks)
+            return WaveformEnvelope(peaks, levels=levels)
     except Exception:
         return None
 
@@ -1910,6 +1955,7 @@ class WaveformWorker(QObject):
             max_possible_val = 32768.0
             samples_in_peak = 0
             peak_value = 0
+            leftover_samples = np.empty(0, dtype=np.int16) if (HAVE_NUMPY and np is not None) else None
 
             while True:
                 if self._cancel_event.is_set():
@@ -1921,7 +1967,7 @@ class WaveformWorker(QObject):
                     self.finished.emit([], True)
                     return
 
-                raw = process.stdout.read(64 * 1024)
+                raw = process.stdout.read(128 * 1024)
                 if not raw:
                     break
 
@@ -1934,16 +1980,31 @@ class WaveformWorker(QObject):
                     self.finished.emit([], True)
                     return
 
-                sample_count = len(raw) // 2
-                if sample_count:
-                    samples = struct.unpack(f"<{sample_count}h", raw[:sample_count * 2])
-                    for sample in samples:
-                        peak_value = max(peak_value, abs(sample))
-                        samples_in_peak += 1
-                        if samples_in_peak == samples_per_peak:
-                            peaks.append(peak_value / max_possible_val)
-                            samples_in_peak = 0
-                            peak_value = 0
+                if HAVE_NUMPY and np is not None:
+                    chunk = np.frombuffer(raw, dtype=np.int16)
+                    if chunk.size > 0:
+                        if leftover_samples.size > 0:
+                            chunk = np.concatenate((leftover_samples, chunk))
+                        n_peaks = chunk.size // samples_per_peak
+                        if n_peaks > 0:
+                            usable = chunk[:n_peaks * samples_per_peak]
+                            reshaped = np.abs(usable).reshape(n_peaks, samples_per_peak)
+                            chunk_peaks = (np.max(reshaped, axis=1) / max_possible_val).astype(np.float32)
+                            peaks.extend(chunk_peaks.tolist())
+                            leftover_samples = chunk[n_peaks * samples_per_peak:]
+                        else:
+                            leftover_samples = chunk
+                else:
+                    sample_count = len(raw) // 2
+                    if sample_count:
+                        samples = struct.unpack(f"<{sample_count}h", raw[:sample_count * 2])
+                        for sample in samples:
+                            peak_value = max(peak_value, abs(sample))
+                            samples_in_peak += 1
+                            if samples_in_peak == samples_per_peak:
+                                peaks.append(peak_value / max_possible_val)
+                                samples_in_peak = 0
+                                peak_value = 0
 
             return_code = process.wait()
             if self._cancel_event.is_set():
@@ -1953,7 +2014,9 @@ class WaveformWorker(QObject):
                 self.finished.emit([], False)
                 return
 
-            if samples_in_peak:
+            if HAVE_NUMPY and np is not None and leftover_samples is not None and leftover_samples.size > 0:
+                peaks.append(float(np.max(np.abs(leftover_samples)) / max_possible_val))
+            elif samples_in_peak:
                 peaks.append(peak_value / max_possible_val)
 
             if peaks:
@@ -1962,7 +2025,9 @@ class WaveformWorker(QObject):
                 except Exception:
                     pass
 
-            self.finished.emit(peaks, False)
+            levels = build_waveform_pyramid(peaks)
+            envelope = WaveformEnvelope(peaks, levels=levels)
+            self.finished.emit(envelope, False)
         except Exception:
             if process is not None:
                 try:
@@ -1973,6 +2038,81 @@ class WaveformWorker(QObject):
             self.finished.emit([], self._cancel_event.is_set())
         finally:
             self._process = None
+
+
+# ============================================================
+# Transparent Gzip Compression & Optimized RTVS Serialization
+# ============================================================
+
+def sanitize_project_data_for_storage(data, parent_key: str = ""):
+    """Recursively optimize project data before serialization:
+    - Omit heavy binary/derived waveform peaks, thumbnails, and undo histories.
+    - Round audio timestamps, durations, and offsets to millisecond precision (round(t, 3)).
+    - Round confidence scores, logprobs, and temperatures to practical precision (round(p, 3)).
+    - Round other general floating-point values to 4 decimal places.
+    """
+    if isinstance(data, dict):
+        cleaned = {}
+        for k, v in data.items():
+            if k in ("waveform_peaks", "undo_stack", "history", "video_thumbnails", "thumbnail_cache"):
+                continue
+            cleaned[k] = sanitize_project_data_for_storage(v, parent_key=k)
+        return cleaned
+    elif isinstance(data, list):
+        return [sanitize_project_data_for_storage(item, parent_key=parent_key) for item in data]
+    elif isinstance(data, float):
+        if math.isnan(data) or math.isinf(data):
+            return 0.0
+        k_lower = parent_key.lower()
+        if any(ts_key in k_lower for ts_key in ("start", "end", "duration", "position", "time", "offset", "padding", "threshold")):
+            r = round(data, 3)
+        elif any(prob_key in k_lower for prob_key in ("prob", "confidence", "logprob", "temperature", "ratio", "score")):
+            r = round(data, 3)
+        else:
+            r = round(data, 4)
+        return 0.0 if r == -0.0 else r
+    else:
+        return data
+
+
+def serialize_rtvs_project(data: dict) -> bytes:
+    """Serialize project dictionary into a transparently gzip-compressed payload."""
+    clean_data = sanitize_project_data_for_storage(data)
+    json_bytes = json.dumps(clean_data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return gzip.compress(json_bytes, compresslevel=6)
+
+
+def deserialize_rtvs_project(raw_bytes: bytes) -> dict:
+    """Deserialize project payload, transparently handling both gzip-compressed (.rtvs)
+    and legacy uncompressed UTF-8 JSON files."""
+    if not raw_bytes:
+        return {}
+    if len(raw_bytes) >= 2 and raw_bytes[:2] == b"\x1f\x8b":
+        text = gzip.decompress(raw_bytes).decode("utf-8")
+    else:
+        text = raw_bytes.decode("utf-8", errors="replace")
+    return json.loads(text)
+
+
+def read_rtvs_project_file(file_path) -> dict:
+    """Transparently read an .rtvs or .json project file from disk (compressed or uncompressed)."""
+    p = Path(file_path)
+    with open(p, "rb") as f:
+        raw = f.read()
+    return deserialize_rtvs_project(raw)
+
+
+def write_rtvs_project_file(file_path, data: dict):
+    """Safely and atomically write a gzip-compressed .rtvs project file."""
+    p = Path(file_path).resolve()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = p.with_name(p.name + ".tmp")
+    blob = serialize_rtvs_project(data)
+    with open(temp_file, "wb") as f:
+        f.write(blob)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(temp_file, p)
 
 
 # ============================================================
@@ -2106,6 +2246,10 @@ class TimelineCanvas(QWidget):
         self.waveform_pixmap = None
         self.pixmap_dirty = True
         self.buffered_total_width = 0
+        self._last_rendered_width = 0
+        self._last_rendered_height = 0
+        self._last_rendered_scroll = None
+        self._last_rendered_zoom = None
 
         # Background generation activity indicators
         self.active_background_tasks = set()
@@ -2222,18 +2366,16 @@ class TimelineCanvas(QWidget):
         self.selected_story_indices = selected_indices if selected_indices is not None else []
         self.update()
 
-    def set_waveform_peaks(self, peaks):
+    def set_waveform_peaks(self, peaks, levels=None):
         self.waveform_peaks = peaks or []
-        self.waveform_levels = []
-        if self.waveform_peaks:
-            level = list(self.waveform_peaks)
-            self.waveform_levels.append(level)
-            while len(level) > 4:
-                next_level = []
-                for i in range(0, len(level), 4):
-                    next_level.append(max(level[i:i + 4]))
-                level = next_level
-                self.waveform_levels.append(level)
+        if levels is not None:
+            self.waveform_levels = levels
+        elif hasattr(peaks, "waveform_levels") and peaks.waveform_levels:
+            self.waveform_levels = peaks.waveform_levels
+        elif self.waveform_peaks:
+            self.waveform_levels = build_waveform_pyramid(self.waveform_peaks)
+        else:
+            self.waveform_levels = []
         self.pixmap_dirty = True
         self.update()
 
@@ -2603,10 +2745,10 @@ class TimelineCanvas(QWidget):
             self.pixmap_dirty = True
             self.update()
 
-    def render_waveform_buffer(self, total_pixel_width, height):
+    def render_waveform_buffer(self, width, height):
         dpi_scale = self.devicePixelRatioF()
-        phys_width = int(total_pixel_width * dpi_scale)
-        phys_height = int(height * dpi_scale)
+        phys_width = max(1, int(width * dpi_scale))
+        phys_height = max(1, int(height * dpi_scale))
 
         pixmap = QPixmap(phys_width, phys_height)
         pixmap.setDevicePixelRatio(dpi_scale)
@@ -2641,9 +2783,11 @@ class TimelineCanvas(QWidget):
         middle_y = waveform_y + (waveform_height / 2.0)
 
         if has_thumbs and thumbnail_height > 0:
+            thumb_w = max(90, int(width / max(8, len(self.video_thumbnails)) * 0.95))
             for timestamp, pix in self.video_thumbnails:
-                x = int((timestamp / max(0.001, self.duration)) * total_pixel_width)
-                thumb_w = max(90, int(total_pixel_width / max(8, len(self.video_thumbnails)) * 0.95))
+                x = self.time_to_x(timestamp, width)
+                if x + thumb_w < 0 or x - thumb_w > width:
+                    continue
                 scaled = pix.scaled(
                     thumb_w,
                     max(16, thumbnail_height - 2),
@@ -2658,28 +2802,39 @@ class TimelineCanvas(QWidget):
         if self.show_waveform and self.waveform_peaks and waveform_height > 0:
             painter.setPen(QPen(QColor("#5a81a8"), 1.0))
             levels = self.waveform_levels or [self.waveform_peaks]
+            total_pixel_width = max(width, int(width * self.zoom_level))
             level_index = 0
             while level_index + 1 < len(levels) and (len(levels[level_index]) / max(1, total_pixel_width)) > 2.0:
                 level_index += 1
             peaks = levels[level_index]
             total_peaks = len(peaks)
-            for x in range(total_pixel_width):
-                start_idx = int((x / max(1, total_pixel_width)) * total_peaks)
-                end_idx = int(((x + 1) / max(1, total_pixel_width)) * total_peaks)
+            dur = max(0.001, self.duration)
+            for x in range(width):
+                t0 = self.x_to_time(x, width)
+                t1 = self.x_to_time(x + 1, width)
+                start_idx = int((t0 / dur) * total_peaks)
+                end_idx = int((t1 / dur) * total_peaks)
                 end_idx = max(start_idx + 1, end_idx)
-                end_idx = min(total_peaks, end_idx)
-                if start_idx >= total_peaks:
+                start_idx = max(0, min(total_peaks, start_idx))
+                end_idx = max(0, min(total_peaks, end_idx))
+                if start_idx >= total_peaks or end_idx <= start_idx:
                     continue
 
-                amplitude = max(peaks[start_idx:end_idx]) * (waveform_height * 0.88)
-                if amplitude > 0.5:
-                    painter.drawLine(
-                        QPointF(x + 0.5, middle_y - amplitude / 2.0),
-                        QPointF(x + 0.5, middle_y + amplitude / 2.0)
-                    )
+                peak_slice = peaks[start_idx:end_idx]
+                if hasattr(peak_slice, "__len__") and len(peak_slice) > 0:
+                    try:
+                        max_val = float(np.max(peak_slice)) if (HAVE_NUMPY and np is not None and isinstance(peak_slice, np.ndarray)) else float(max(peak_slice))
+                    except Exception:
+                        max_val = float(max(peak_slice))
+                    amplitude = max_val * (waveform_height * 0.88)
+                    if amplitude > 0.5:
+                        painter.drawLine(
+                            QPointF(x + 0.5, middle_y - amplitude / 2.0),
+                            QPointF(x + 0.5, middle_y + amplitude / 2.0)
+                        )
         elif self.show_waveform and waveform_height > 0:
             painter.setPen(QPen(QColor("#2c323d"), 1))
-            painter.drawLine(QPointF(0, middle_y), QPointF(total_pixel_width, middle_y))
+            painter.drawLine(QPointF(0, middle_y), QPointF(width, middle_y))
 
         painter.end()
         return pixmap
@@ -2692,18 +2847,22 @@ class TimelineCanvas(QWidget):
         height = self.height()
         waveform_height = height - self.RULER_HEIGHT
 
-        total_pixel_width = max(width, int(width * self.zoom_level))
-
         if (self.pixmap_dirty or self.waveform_pixmap is None or 
-            self.buffered_total_width != total_pixel_width or 
-            self.waveform_pixmap.height() != height):
+            self._last_rendered_width != width or 
+            self._last_rendered_height != height or
+            self._last_rendered_scroll != self.scroll_offset or
+            self._last_rendered_zoom != self.zoom_level):
             
-            self.waveform_pixmap = self.render_waveform_buffer(total_pixel_width, height)
-            self.buffered_total_width = total_pixel_width
+            self.waveform_pixmap = self.render_waveform_buffer(width, height)
+            self._last_rendered_width = width
+            self._last_rendered_height = height
+            self._last_rendered_scroll = self.scroll_offset
+            self._last_rendered_zoom = self.zoom_level
+            self.buffered_total_width = width
             self.pixmap_dirty = False
 
-        scroll_x = (self.scroll_offset / self.duration) * total_pixel_width
-        painter.drawPixmap(int(-scroll_x), 0, self.waveform_pixmap)
+        if self.waveform_pixmap is not None:
+            painter.drawPixmap(0, 0, self.waveform_pixmap)
 
         ruler_rect = QRectF(0, 0, width, self.RULER_HEIGHT)
         painter.fillRect(ruler_rect, QColor("#111317"))
@@ -2845,6 +3004,70 @@ class TimelineCanvas(QWidget):
             painter.restore()
 
 
+class TimelineResizeHandle(QWidget):
+    """Visual drag-handle at the bottom of the timeline allowing vertical resizing."""
+    def __init__(self, target_widget, parent=None):
+        super().__init__(parent or target_widget)
+        self.target_widget = target_widget
+        self.setFixedHeight(7)
+        self.setCursor(Qt.CursorShape.SizeVerCursor)
+        self.setToolTip("Drag down/up to resize timeline height")
+        self._dragging = False
+        self._start_y = 0
+        self._start_h = 140
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        
+        # Background bar
+        is_dark = self.palette().window().color().value() < 128
+        bg_color = QColor("#161b22") if is_dark else QColor("#e1e4e8")
+        painter.fillRect(self.rect(), bg_color)
+
+        # Center grip pill
+        grip_color = QColor("#484f58") if is_dark else QColor("#8c959f")
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(grip_color)
+        cx = self.width() // 2
+        cy = self.height() // 2
+        painter.drawRoundedRect(QRectF(cx - 24, cy - 1.5, 48, 3), 1.5, 1.5)
+        painter.end()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = True
+            self._start_y = event.globalPosition().y() if hasattr(event, "globalPosition") else event.globalY()
+            self._start_h = self.target_widget.height()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._dragging:
+            cur_y = event.globalPosition().y() if hasattr(event, "globalPosition") else event.globalY()
+            delta = int(cur_y - self._start_y)
+            new_h = max(90, min(500, self._start_h + delta))
+            if new_h != self.target_widget.height():
+                self.target_widget.setFixedHeight(new_h)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._dragging and event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = False
+            try:
+                settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
+                settings.setValue("timeline_height", self.target_widget.height())
+                settings.sync()
+            except Exception:
+                pass
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
 class TimelineWidget(QWidget):
     mediaDropped = Signal(str)
 
@@ -2858,9 +3081,20 @@ class TimelineWidget(QWidget):
 
         self.canvas = TimelineCanvas()
         self.scrollbar = QScrollBar(Qt.Orientation.Horizontal)
+        self.resize_handle = TimelineResizeHandle(self)
 
         layout.addWidget(self.canvas, 1)
         layout.addWidget(self.scrollbar)
+        layout.addWidget(self.resize_handle)
+
+        settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
+        saved_h = settings.value("timeline_height", 140)
+        try:
+            saved_h = int(saved_h)
+        except (ValueError, TypeError):
+            saved_h = 140
+        saved_h = max(90, min(500, saved_h))
+        self.setFixedHeight(saved_h)
 
         self.canvas.scrollOffsetChanged.connect(self.update_scrollbar_from_canvas)
         self.canvas.mediaDropped.connect(self.mediaDropped.emit)

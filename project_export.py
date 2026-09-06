@@ -129,6 +129,47 @@ class UnifiedExportDialog(QDialog):
         content_layout.addLayout(lang_layout)
         local_layout.addWidget(content_group)
 
+        # Export Location
+        loc_group = QGroupBox("Export Location")
+        loc_group_layout = QVBoxLayout(loc_group)
+        loc_group_layout.setSpacing(6)
+
+        default_dir = ""
+        if getattr(self.main_window, "project_file", None):
+            default_dir = str(self.main_window.project_file.parent)
+        elif getattr(self.main_window, "audio_file", None):
+            default_dir = str(Path(self.main_window.audio_file).parent)
+        elif hasattr(self.main_window, "get_default_save_directory"):
+            default_dir = str(self.main_window.get_default_save_directory())
+        else:
+            default_dir = str(Path.home())
+
+        self.default_export_dir = default_dir
+
+        self.loc_radio_default = QRadioButton(f"Use default project folder ({default_dir})")
+        self.loc_radio_default.setChecked(True)
+        self.loc_radio_default.setToolTip("Export into the current project folder or default export location")
+
+        self.loc_radio_custom = QRadioButton("Select custom export location:")
+        self.loc_radio_custom.setToolTip("Override the default folder and choose a custom export location")
+
+        loc_custom_row = QHBoxLayout()
+        self.loc_custom_path_edit = QLineEdit()
+        self.loc_custom_path_edit.setPlaceholderText("Choose a folder...")
+        self.loc_custom_path_edit.setEnabled(False)
+        self.loc_browse_btn = QPushButton("Browse...")
+        self.loc_browse_btn.setEnabled(False)
+        self.loc_browse_btn.clicked.connect(self._browse_custom_export_location)
+        loc_custom_row.addWidget(self.loc_custom_path_edit, 1)
+        loc_custom_row.addWidget(self.loc_browse_btn)
+
+        self.loc_radio_default.toggled.connect(self._on_location_radio_toggled)
+
+        loc_group_layout.addWidget(self.loc_radio_default)
+        loc_group_layout.addWidget(self.loc_radio_custom)
+        loc_group_layout.addLayout(loc_custom_row)
+        local_layout.addWidget(loc_group)
+
         # Base Filename
         name_form = QFormLayout()
         default_name = safe_filename(
@@ -137,7 +178,7 @@ class UnifiedExportDialog(QDialog):
             else (self.main_window.audio_file.stem if getattr(self.main_window, "audio_file", None) else "export")
         )
         self.filename_edit = QLineEdit(default_name)
-        name_form.addRow("Base filename:", self.filename_edit)
+        name_form.addRow("File Name:", self.filename_edit)
         local_layout.addLayout(name_form)
         local_layout.addStretch()
 
@@ -413,6 +454,9 @@ class UnifiedExportDialog(QDialog):
 
         # Dialog Buttons
         btns = QHBoxLayout()
+        self.save_defaults_btn = QPushButton("Save Options as Default")
+        self.save_defaults_btn.setToolTip("Save the current export options as the default for future exports.")
+        btns.addWidget(self.save_defaults_btn)
         btns.addStretch()
         self.export_btn = QPushButton("Export")
         self.export_btn.setDefault(True)
@@ -421,9 +465,11 @@ class UnifiedExportDialog(QDialog):
         btns.addWidget(self.cancel_btn)
         layout.addLayout(btns)
 
+        self.save_defaults_btn.clicked.connect(lambda: self.save_options_to_settings(as_default=True))
         self.cancel_btn.clicked.connect(self.reject)
         self.export_btn.clicked.connect(self._handle_accept)
 
+        self._load_saved_options()
         self._on_dest_changed()
 
     def _open_wp_settings(self):
@@ -769,8 +815,103 @@ class UnifiedExportDialog(QDialog):
             self.wp_posts_list.setCurrentRow(0)
         self._load_post_editor_state(0)
 
+    def _on_location_radio_toggled(self):
+        use_custom = self.loc_radio_custom.isChecked()
+        self.loc_custom_path_edit.setEnabled(use_custom)
+        self.loc_browse_btn.setEnabled(use_custom)
+
+    def _browse_custom_export_location(self):
+        initial = self.loc_custom_path_edit.text().strip() or self.default_export_dir
+        folder = QFileDialog.getExistingDirectory(self, "Select Export Location", initial)
+        if folder:
+            self.loc_custom_path_edit.setText(folder)
+            self.loc_radio_custom.setChecked(True)
+
+    def _load_saved_options(self):
+        settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
+        
+        # Local formats
+        self.cb_txt.setChecked(str(settings.value("export_opt_fmt_txt", "true")).lower() in {"1", "true", "yes"})
+        self.cb_docx.setChecked(str(settings.value("export_opt_fmt_docx", "true")).lower() in {"1", "true", "yes"})
+        self.cb_srt.setChecked(str(settings.value("export_opt_fmt_srt", "false")).lower() in {"1", "true", "yes"})
+        self.cb_vtt.setChecked(str(settings.value("export_opt_fmt_vtt", "false")).lower() in {"1", "true", "yes"})
+        if self.cb_media.isEnabled():
+            self.cb_media.setChecked(str(settings.value("export_opt_fmt_media", "true")).lower() in {"1", "true", "yes"})
+        
+        # Content options
+        self.cb_speakers.setChecked(str(settings.value("export_opt_include_speakers", "true")).lower() in {"1", "true", "yes"})
+        self.cb_timestamps.setChecked(str(settings.value("export_opt_include_timestamps", "false")).lower() in {"1", "true", "yes"})
+        self.cb_en.setChecked(str(settings.value("export_opt_include_en", "true")).lower() in {"1", "true", "yes"})
+        if self.cb_es.isEnabled():
+            self.cb_es.setChecked(str(settings.value("export_opt_include_es", "true")).lower() in {"1", "true", "yes"})
+
+        # Export location override
+        use_custom_loc = str(settings.value("export_opt_custom_loc_enabled", "false")).lower() in {"1", "true", "yes"}
+        saved_custom_dir = str(settings.value("export_opt_custom_dir", "") or "").strip()
+        if saved_custom_dir and os.path.isdir(saved_custom_dir):
+            self.loc_custom_path_edit.setText(saved_custom_dir)
+            if use_custom_loc:
+                self.loc_radio_custom.setChecked(True)
+        self._on_location_radio_toggled()
+
+    def save_options_to_settings(self, as_default=False):
+        settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
+        settings.setValue("export_opt_fmt_txt", self.cb_txt.isChecked())
+        settings.setValue("export_opt_fmt_docx", self.cb_docx.isChecked())
+        settings.setValue("export_opt_fmt_srt", self.cb_srt.isChecked())
+        settings.setValue("export_opt_fmt_vtt", self.cb_vtt.isChecked())
+        settings.setValue("export_opt_fmt_media", self.cb_media.isChecked())
+
+        settings.setValue("export_opt_include_speakers", self.cb_speakers.isChecked())
+        settings.setValue("export_opt_include_timestamps", self.cb_timestamps.isChecked())
+        settings.setValue("export_opt_include_en", self.cb_en.isChecked())
+        settings.setValue("export_opt_include_es", self.cb_es.isChecked())
+
+        settings.setValue("export_opt_custom_loc_enabled", self.loc_radio_custom.isChecked())
+        custom_dir = self.loc_custom_path_edit.text().strip()
+        if custom_dir:
+            settings.setValue("export_opt_custom_dir", custom_dir)
+
+        settings.sync()
+        if as_default:
+            QMessageBox.information(self, "Export Options", "Current export options have been saved as defaults.")
+
+    def reset_options_to_defaults(self):
+        self.cb_txt.setChecked(True)
+        self.cb_docx.setChecked(True)
+        self.cb_srt.setChecked(False)
+        self.cb_vtt.setChecked(False)
+        if self.cb_media.isEnabled():
+            self.cb_media.setChecked(True)
+
+        self.cb_speakers.setChecked(True)
+        self.cb_timestamps.setChecked(False)
+        self.cb_en.setChecked(True)
+        if self.cb_es.isEnabled():
+            self.cb_es.setChecked(True)
+
+        self.loc_radio_default.setChecked(True)
+        self.loc_custom_path_edit.clear()
+        self._on_location_radio_toggled()
+
+        settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
+        for k in [
+            "export_opt_fmt_txt", "export_opt_fmt_docx", "export_opt_fmt_srt", "export_opt_fmt_vtt",
+            "export_opt_fmt_media", "export_opt_include_speakers", "export_opt_include_timestamps",
+            "export_opt_include_en", "export_opt_include_es", "export_opt_custom_loc_enabled", "export_opt_custom_dir",
+        ]:
+            settings.remove(k)
+        settings.sync()
+        QMessageBox.information(self, "Export Options", "Export options reset to factory defaults.")
+
     def _handle_accept(self):
         if self.radio_local.isChecked():
+            if self.loc_radio_custom.isChecked():
+                custom_path = self.loc_custom_path_edit.text().strip()
+                if not custom_path or not os.path.isdir(custom_path):
+                    QMessageBox.warning(self, "Export Location", "Please select a valid directory for the custom export location.")
+                    return
+
             formats = {
                 "txt": self.cb_txt.isChecked(),
                 "docx": self.cb_docx.isChecked(),
@@ -878,12 +1019,16 @@ class UnifiedExportDialog(QDialog):
                 "include_spanish": self.cb_es.isChecked(),
             }
             base = safe_filename(self.filename_edit.text().strip() or "export")
+            export_dir = None
+            if self.loc_radio_custom.isChecked() and self.loc_custom_path_edit.text().strip():
+                export_dir = self.loc_custom_path_edit.text().strip()
             return {
                 "destination": "local",
                 "scope": scope,
                 "formats": formats,
                 "options": options,
                 "base": base,
+                "export_dir": export_dir,
             }
         else:
             return {
@@ -999,7 +1144,6 @@ class ProjectExportMixin:
             "translations": self.translations,
             "translation_display_mode": self.translation_display_mode,
             "stories": [story.to_dict() for story in self.stories],
-            "waveform_peaks": getattr(self.timeline, "waveform_peaks", []),
             "settings": {
                 "auto_save_minutes": self.auto_save_minutes,
                 "skip_seconds": self.skip_seconds,
@@ -1047,25 +1191,19 @@ class ProjectExportMixin:
                 except Exception as exc:
                     self.log_activity(f"[WARNING] Could not copy media to project folder: {exc}", mark_dirty=False)
 
+        # Ensure dedicated waveform peak cache is saved alongside project
+        if self.audio_file and getattr(self.timeline, "waveform_peaks", None):
+            try:
+                write_waveform_peak_cache(self.audio_file, self.timeline.waveform_peaks)
+            except Exception:
+                pass
+
         data = self.project_data()
         errors = self.validate_project_data(data)
         if errors:
             raise ValueError("Validation failed: " + "; ".join(errors))
 
-        temp_path = destination.with_name(destination.name + ".tmp")
-        try:
-            with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(temp_path, destination)
-        except Exception:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            raise
-
+        write_rtvs_project_file(destination, data)
         self.project_dirty = False
         self._remember_saved_project(str(destination))
         self.update_window_title()
@@ -1085,7 +1223,7 @@ class ProjectExportMixin:
         create_bundle = str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"}
 
         # 1. Check if an active project is already open in an existing bundle folder
-        if self.project_file:
+        if target_base_dir is None and self.project_file:
             active_parent = self.project_file.parent
             has_transcripts = (active_parent / "Transcripts").is_dir()
             has_media = (active_parent / "Media").is_dir()
@@ -1314,6 +1452,13 @@ class ProjectExportMixin:
                     except Exception as exc:
                         self.log_activity(f"[WARNING] Could not copy media to project folder: {exc}", mark_dirty=False)
 
+            # Ensure dedicated waveform peak cache is saved alongside project
+            if self.audio_file and getattr(self.timeline, "waveform_peaks", None):
+                try:
+                    write_waveform_peak_cache(self.audio_file, self.timeline.waveform_peaks)
+                except Exception:
+                    pass
+
             data = self.project_data()
             errors = self.validate_project_data(data)
             if errors:
@@ -1322,16 +1467,11 @@ class ProjectExportMixin:
                 QMessageBox.critical(self, "Project Validation Error", message)
                 return False
 
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-
             if self.project_file.exists():
                 shutil.copy2(self.project_file, backup_file)
                 self.log_activity(f"[PROJECT] Previous project saved as recovery backup: {backup_file.name}", mark_dirty=False)
 
-            os.replace(temp_file, self.project_file)
+            write_rtvs_project_file(self.project_file, data)
             # A successful explicit save supersedes its recovery snapshot.
             try:
                 self.project_file.with_suffix(self.project_file.suffix + ".autosave").unlink(missing_ok=True)
@@ -1370,8 +1510,7 @@ class ProjectExportMixin:
             if not candidate.exists() or not candidate.is_file():
                 continue
             try:
-                with open(candidate, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                data = read_rtvs_project_file(candidate)
                 ref = data.get("audio_file")
                 if not ref:
                     continue
@@ -1438,8 +1577,7 @@ class ProjectExportMixin:
     def load_project_file(self, filename, prompt=True, preserve_media=False):
         project_path = Path(filename).resolve()
         try:
-            with open(project_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = read_rtvs_project_file(project_path)
         except Exception as exc:
             backup_path = project_path.with_name(project_path.name + ".backup")
             if backup_path.exists():
@@ -1451,8 +1589,7 @@ class ProjectExportMixin:
                 )
                 if answer == QMessageBox.StandardButton.Yes:
                     try:
-                        with open(backup_path, "r", encoding="utf-8") as f:
-                            data = json.load(f)
+                        data = read_rtvs_project_file(backup_path)
                         self.log_activity(f"[PROJECT] Recovered project from backup: {backup_path.name}", mark_dirty=False)
                     except Exception as backup_exc:
                         self.log_activity(f"[ERROR] Project recovery backup could not be read: {backup_exc}", mark_dirty=False)
@@ -1504,8 +1641,10 @@ class ProjectExportMixin:
             self.timeline.set_audio_filename(audio_path.name)
             self.timeline.set_waveform_peaks([])
 
-            # Restore pre-calculated waveform peaks if present in project data
-            cached_peaks = data.get("waveform_peaks")
+            # Restore pre-calculated waveform peaks from disk cache or legacy project file
+            cached_peaks = read_waveform_peak_cache(audio_path)
+            if not cached_peaks:
+                cached_peaks = data.get("waveform_peaks")
             if cached_peaks:
                 self.timeline.set_waveform_peaks(cached_peaks)
                 self.log_activity(f"[WAVEFORM] Loaded cached waveform ({len(cached_peaks):,} peaks).", mark_dirty=False)
@@ -1681,9 +1820,15 @@ class ProjectExportMixin:
             formats = result.get("formats", {})
             base = result.get("base", "")
             options = result.get("options", {})
+            export_dir = result.get("export_dir")
+            is_custom = bool(export_dir and os.path.isdir(export_dir))
 
-            # Check if project already lives in an existing folder containing Transcripts/Media (e.g. Bellevue/)
-            if self.project_file and ((self.project_file.parent / "Transcripts").is_dir() or (self.project_file.parent / "Media").is_dir()):
+            # Check if user explicitly chose a custom export directory
+            if is_custom:
+                project_dir = Path(export_dir)
+                chosen_name = base
+            # Otherwise check if project already lives in an existing folder containing Transcripts/Media (e.g. Bellevue/)
+            elif self.project_file and ((self.project_file.parent / "Transcripts").is_dir() or (self.project_file.parent / "Media").is_dir()):
                 project_dir, trans_dir, media_dir, chosen_name = self.prepare_export_directories()
             else:
                 parent_dir = QFileDialog.getExistingDirectory(self, "Choose Export Location", self._dialog_directory())
@@ -1696,19 +1841,23 @@ class ProjectExportMixin:
             if not project_dir:
                 return
 
-            # Keep project session file saved at root of the directory
-            if self.audio_file or self.transcript:
-                self._write_project_file(str(project_dir / f"{chosen_name}.rtvs"))
+            # Keep project session file saved in project folder, NOT in custom export directory
+            if not is_custom:
+                if self.audio_file or self.transcript:
+                    self._write_project_file(str(project_dir / f"{chosen_name}.rtvs"))
+            else:
+                if self.project_file and (self.audio_file or self.transcript):
+                    self._write_project_file(str(self.project_file))
 
             # Route exports directly to project_dir
             if scope == "full":
-                self.export_full_episode(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir))
+                self.export_full_episode(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir), is_custom_location=is_custom)
             elif scope == "selected_stories":
-                self.export_selected_stories(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir))
+                self.export_selected_stories(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir), is_custom_location=is_custom)
             elif scope == "all_stories":
-                self.export_all_stories(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir))
+                self.export_all_stories(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir), is_custom_location=is_custom)
             elif scope == "full_and_all_stories":
-                self.export_full_and_all_stories(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir))
+                self.export_full_and_all_stories(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir), is_custom_location=is_custom)
         else:
             self._handle_wordpress_export_result(result)
 
@@ -1717,10 +1866,10 @@ class ProjectExportMixin:
         self.export_cancelled = True
         self.log_activity("[EXPORT] Cancel requested by user.")
 
-    def _export_story_files(self, stories_with_indices, formats, base, options, directory, start_idx=0, total_batch=None):
+    def _export_story_files(self, stories_with_indices, formats, base, options, directory, start_idx=0, total_batch=None, is_custom_location=False):
         out = Path(directory)
         create_bundle = str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"}
-        if create_bundle:
+        if create_bundle and not is_custom_location:
             transcripts_out = out / "Transcripts"
             media_out = out / "Media"
             transcripts_out.mkdir(parents=True, exist_ok=True)
@@ -1808,7 +1957,8 @@ class ProjectExportMixin:
                     with open(txt_file, "w", encoding="utf-8") as f:
                         source_name = self.audio_file.name if self.audio_file else "Text-only project"
                         lang_label = " (Spanish)" if lang_code == "es" else (" (English)" if lang_code == "en" else "")
-                        f.write(f"{story_title}{lang_label}\n{source_name} ({format_time(story.start)} - {format_time(story.end)})\n" + "=" * 70 + "\n\n")
+                        f.write(f"{story_title}{lang_label}\n{source_name} ({format_time(story.start, False)} - {format_time(story.end, False)})\n" + "=" * 70 + "\n\n")
+                        last_speaker = None
                         for block in blocks:
                             speaker = (block.get("speaker") or "").strip() if options.get("include_speakers", True) else ""
                             p_text = block.get("text", "").strip()
@@ -1816,9 +1966,11 @@ class ProjectExportMixin:
                                 continue
                             prefix = ""
                             if options.get("include_timestamps") and block.get("start") is not None:
-                                prefix = f"[{format_time(block['start'])}] "
-                            if speaker:
+                                prefix = f"[{format_time(block['start'], False)}] "
+                            is_speaker_change = block.get("is_speaker_change", (speaker != last_speaker))
+                            if speaker and is_speaker_change and speaker != last_speaker:
                                 prefix += f"{speaker}: "
+                                last_speaker = speaker
                             f.write(f"{prefix}{p_text}\n\n")
 
                 # Export DOCX
@@ -1830,7 +1982,8 @@ class ProjectExportMixin:
                     lang_label = " (Spanish)" if lang_code == "es" else (" (English)" if lang_code == "en" else "")
                     document.add_heading(f"{story_title}{lang_label}", 0)
                     if self.audio_file:
-                        document.add_paragraph(f"Recording: {self.audio_file.name} ({format_time(story.start)} - {format_time(story.end)})")
+                        document.add_paragraph(f"Recording: {self.audio_file.name} ({format_time(story.start, False)} - {format_time(story.end, False)})")
+                    last_speaker = None
                     for block in blocks:
                         speaker = (block.get("speaker") or "").strip() if options.get("include_speakers", True) else ""
                         p_text = block.get("text", "").strip()
@@ -1838,11 +1991,13 @@ class ProjectExportMixin:
                             continue
                         p = document.add_paragraph()
                         if options.get("include_timestamps") and "start" in block and block["start"] is not None:
-                            r_time = p.add_run(f"[{format_time(block['start'])}] ")
+                            r_time = p.add_run(f"[{format_time(block['start'], False)}] ")
                             r_time.font.color.rgb = RGBColor(120, 120, 120)
-                        if speaker:
+                        is_speaker_change = block.get("is_speaker_change", (speaker != last_speaker))
+                        if speaker and is_speaker_change and speaker != last_speaker:
                             r_spk = p.add_run(f"{speaker}: ")
                             r_spk.bold = True
+                            last_speaker = speaker
                         p.add_run(p_text)
                         p.paragraph_format.space_after = Pt(6)
                     document.save(docx_file)
@@ -1860,7 +2015,7 @@ class ProjectExportMixin:
 
         return True
 
-    def export_selected_stories(self, custom_formats=None, custom_base=None, custom_options=None, directory=None):
+    def export_selected_stories(self, custom_formats=None, custom_base=None, custom_options=None, directory=None, is_custom_location=False):
         indices = getattr(self, "current_selected_story_indices", [])
         if not indices:
             QMessageBox.warning(self, "No Story Selected", "Please select one or more stories to export.")
@@ -1892,7 +2047,7 @@ class ProjectExportMixin:
             self.cancel_button.show()
 
         try:
-            success = self._export_story_files(stories_to_export, formats, base, options, directory)
+            success = self._export_story_files(stories_to_export, formats, base, options, directory, is_custom_location=is_custom_location)
             if success and not self.export_cancelled:
                 self.update_processing_progress(100, "Export complete.")
                 self.log_activity(f"[EXPORT] Exported {len(stories_to_export)} selected story/stories to {directory}")
@@ -1905,7 +2060,7 @@ class ProjectExportMixin:
             if hasattr(self, "cancel_button"):
                 self.cancel_button.hide()
 
-    def export_all_stories(self, custom_formats=None, custom_base=None, custom_options=None, directory=None):
+    def export_all_stories(self, custom_formats=None, custom_base=None, custom_options=None, directory=None, is_custom_location=False):
         if not getattr(self, "stories", []):
             QMessageBox.warning(self, "No Stories", "There are no story segments in this project to export.")
             return
@@ -1933,7 +2088,7 @@ class ProjectExportMixin:
             self.cancel_button.show()
 
         try:
-            success = self._export_story_files(stories_to_export, formats, base, options, directory)
+            success = self._export_story_files(stories_to_export, formats, base, options, directory, is_custom_location=is_custom_location)
             if success and not self.export_cancelled:
                 self.update_processing_progress(100, "Export complete.")
                 self.log_activity(f"[EXPORT] Exported all {len(stories_to_export)} stories to {directory}")
@@ -1946,7 +2101,7 @@ class ProjectExportMixin:
             if hasattr(self, "cancel_button"):
                 self.cancel_button.hide()
 
-    def export_full_and_all_stories(self, custom_formats=None, custom_base=None, custom_options=None, directory=None):
+    def export_full_and_all_stories(self, custom_formats=None, custom_base=None, custom_options=None, directory=None, is_custom_location=False):
         base = custom_base or (safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "export")))
         if directory is None:
             if self.project_file and ((self.project_file.parent / "Transcripts").is_dir() or (self.project_file.parent / "Media").is_dir()):
@@ -1981,6 +2136,7 @@ class ProjectExportMixin:
                 custom_options=options,
                 directory=directory,
                 show_completion=False,
+                is_custom_location=is_custom_location,
             )
 
             if ok and not self.export_cancelled and stories_to_export:
@@ -1992,6 +2148,7 @@ class ProjectExportMixin:
                     directory,
                     start_idx=1,
                     total_batch=total_items,
+                    is_custom_location=is_custom_location,
                 )
 
             if not self.export_cancelled:
@@ -2135,7 +2292,7 @@ class ProjectExportMixin:
                 f"Errors:\n{fail_summary}",
             )
 
-    def export_full_episode(self, custom_formats=None, custom_base=None, custom_options=None, directory=None, show_completion=True, progress_dialog=None, progress_value=0):
+    def export_full_episode(self, custom_formats=None, custom_base=None, custom_options=None, directory=None, show_completion=True, progress_dialog=None, progress_value=0, is_custom_location=False):
         if not self.transcript and not self.audio_file:
             QMessageBox.warning(self, "Nothing to Export", "There is no transcript or media available to export.")
             return False
@@ -2159,7 +2316,7 @@ class ProjectExportMixin:
 
         out = Path(directory)
         create_bundle = str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"}
-        if create_bundle:
+        if create_bundle and not is_custom_location:
             transcripts_out = out / "Transcripts"
             media_out = out / "Media"
             transcripts_out.mkdir(parents=True, exist_ok=True)
@@ -2254,6 +2411,7 @@ class ProjectExportMixin:
                             number = self.diarization.get("num_speakers", 0)
                             f.write(f"Speaker detection: {number} speaker(s) detected.\n\n")
 
+                        last_speaker = None
                         for block in blocks:
                             speaker = (block.get("speaker") or "").strip() if options.get("include_speakers", True) else ""
                             paragraph_text = block.get("text", "").strip()
@@ -2262,9 +2420,11 @@ class ProjectExportMixin:
 
                             prefix = ""
                             if options.get("include_timestamps") and block.get("start") is not None:
-                                prefix = f"[{format_time(block['start'])}] "
-                            if speaker:
+                                prefix = f"[{format_time(block['start'], False)}] "
+                            is_speaker_change = block.get("is_speaker_change", (speaker != last_speaker))
+                            if speaker and is_speaker_change and speaker != last_speaker:
                                 prefix += f"{speaker}: "
+                                last_speaker = speaker
 
                             f.write(f"{prefix}{paragraph_text}\n\n")
 
@@ -2280,6 +2440,7 @@ class ProjectExportMixin:
                         document.add_paragraph(f"Recording: {self.audio_file.name}")
 
                     if blocks:
+                        last_speaker = None
                         for block in blocks:
                             speaker = (block.get("speaker") or "").strip() if options.get("include_speakers", True) else ""
                             paragraph_text = block.get("text", "").strip()
@@ -2289,15 +2450,17 @@ class ProjectExportMixin:
                             p = document.add_paragraph()
                             time_prefix = ""
                             if options.get("include_timestamps") and "start" in block and block["start"] is not None:
-                                time_prefix = f"[{format_time(block['start'])}] "
+                                time_prefix = f"[{format_time(block['start'], False)}] "
 
                             if time_prefix:
                                 r_time = p.add_run(time_prefix)
                                 r_time.font.color.rgb = RGBColor(120, 120, 120)
 
-                            if speaker:
+                            is_speaker_change = block.get("is_speaker_change", (speaker != last_speaker))
+                            if speaker and is_speaker_change and speaker != last_speaker:
                                 r_spk = p.add_run(f"{speaker}: ")
                                 r_spk.bold = True
+                                last_speaker = speaker
 
                             p.add_run(paragraph_text)
                             p.paragraph_format.space_after = Pt(6)
@@ -2361,7 +2524,7 @@ class ProjectExportMixin:
         default = safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "export"))
         name = QLineEdit(default)
         form = QFormLayout()
-        form.addRow("Base filename:", name)
+        form.addRow("File Name:", name)
         layout.addLayout(form)
 
         buttons = QHBoxLayout()
@@ -2564,12 +2727,12 @@ class ProjectExportMixin:
         if not candidates:
             return text
 
-        # Strip speaker labels matched with any standard punctuation (: - —)
+        # Strip speaker labels matched with any standard punctuation (: - —) or brackets
         changed = True
         while changed:
             changed = False
             for name in candidates:
-                pattern = rf"^\s*{re.escape(name)}\s*[:\-\—]\s*"
+                pattern = rf"^\s*(?:\[{re.escape(name)}\]|\({re.escape(name)}\)|{re.escape(name)})\s*[:\-\—]?\s*"
                 new_text = re.sub(pattern, "", text, count=1, flags=re.IGNORECASE)
                 if new_text != text:
                     text = new_text.strip()
@@ -2578,79 +2741,128 @@ class ProjectExportMixin:
         return text
 
     def build_story_blocks(self, segments):
-        blocks = []
-        current_speaker = None
-        current_text = []
-        current_words = 0
-        current_start = None  # Track the start time of the current block
-        current_end = None
+        if not segments:
+            return []
 
-        def flush():
-            nonlocal current_speaker, current_text, current_words, current_start, current_end
-            if not current_text:
-                return
-            text = " ".join(current_text).strip()
-            if text:
-                blocks.append({
-                    "speaker": current_speaker, 
-                    "text": text,
-                    "start": current_start,
-                    "end": current_end
-                })
-            current_text = []
-            current_words = 0
-            current_start = None
-            current_end = None
-
+        word_tokens = []
         for seg_idx, segment in enumerate(segments):
+            start = segment.get("start", 0.0) if isinstance(segment, dict) else getattr(segment, "start", 0.0)
+            end = segment.get("end", start) if isinstance(segment, dict) else getattr(segment, "end", start)
             source_idx = segment.get("_source_index", seg_idx)
-            text = segment.get("text", "").strip()
-            if not text:
-                continue
+            spk_name = segment.get("speaker")
+            if spk_name is None:
+                spk_name = self.get_effective_speaker_name(source_idx, segment)
+            spk_name = (spk_name or "").strip()
 
-            speaker = (self.get_effective_speaker_name(source_idx, segment) or "").strip()
-            text = self.clean_export_text(text, speaker)
-            if not text:
-                continue
-            words = len(text.split())
+            words = segment.get("words", [])
+            if words:
+                for w in words:
+                    w_text = w.get("word", "").strip()
+                    if not w_text or bool(w.get("deleted", False)):
+                        continue
+                    word_tokens.append({
+                        "word": w_text,
+                        "start": w.get("start", start),
+                        "end": w.get("end", end),
+                        "seg_idx": source_idx,
+                        "speaker_name": spk_name,
+                    })
+            else:
+                seg_text = segment.get("text", "").strip()
+                cleaned_seg_text = self.clean_export_text(seg_text, spk_name)
+                for word in cleaned_seg_text.split():
+                    word_tokens.append({
+                        "word": word,
+                        "start": start,
+                        "end": end,
+                        "seg_idx": source_idx,
+                        "speaker_name": spk_name,
+                    })
 
-            speaker_changed = (current_text and speaker != current_speaker)
-            reached_word_threshold = (current_words >= MIN_WORDS_PER_PARAGRAPH)
-            last_was_sentence_end = current_text and is_sentence_end(current_text[-1])
+        if not word_tokens:
+            return []
 
-            if speaker_changed or (reached_word_threshold and last_was_sentence_end):
-                flush()
+        blocks = []
+        curr_para_words = []
+        curr_speaker_name = None
+        last_rendered_speaker_name = None
 
-            if not current_text:
-                current_speaker = speaker
-                current_start = segment.get("start")
-            current_end = segment.get("end", current_start)
+        def flush_para():
+            nonlocal curr_para_words, curr_speaker_name, last_rendered_speaker_name
+            if not curr_para_words:
+                return
+            p_text = " ".join(t["word"] for t in curr_para_words).strip()
+            p_text = self.clean_export_text(p_text, curr_speaker_name)
+            if p_text:
+                is_change = (curr_speaker_name != last_rendered_speaker_name)
+                blocks.append({
+                    "speaker": curr_speaker_name or "",
+                    "text": p_text,
+                    "start": curr_para_words[0]["start"],
+                    "end": curr_para_words[-1]["end"],
+                    "is_speaker_change": is_change,
+                })
+                last_rendered_speaker_name = curr_speaker_name
+            curr_para_words = []
 
-            current_text.append(text)
-            current_words += words
+        for token in word_tokens:
+            spk_name = token["speaker_name"]
 
-        flush()
+            if curr_speaker_name is None:
+                curr_speaker_name = spk_name
+
+            # Inherit current speaker over short unassigned gaps
+            if not spk_name and curr_speaker_name:
+                spk_name = curr_speaker_name
+
+            speaker_changed = (spk_name != curr_speaker_name)
+            word_count_exceeded = (len(curr_para_words) >= MIN_WORDS_PER_PARAGRAPH)
+            prev_word_ended_sentence = curr_para_words and is_sentence_end(curr_para_words[-1]["word"])
+
+            if curr_para_words and (speaker_changed or (word_count_exceeded and prev_word_ended_sentence)):
+                flush_para()
+                curr_para_words = [token]
+                curr_speaker_name = spk_name
+            else:
+                curr_para_words.append(token)
+
+        if curr_para_words:
+            flush_para()
+
         return blocks
 
     def story_text(self, segments):
         blocks = self.build_story_blocks(segments)
         output = []
+        last_speaker = None
         for block in blocks:
-            speaker = block["speaker"]
-            paragraph = block["text"]
-            output.append(f"{speaker}: {paragraph}" if speaker else paragraph)
+            speaker = (block.get("speaker") or "").strip()
+            paragraph = block.get("text", "").strip()
+            if not paragraph:
+                continue
+            is_speaker_change = block.get("is_speaker_change", (speaker != last_speaker))
+            if speaker and is_speaker_change and speaker != last_speaker:
+                output.append(f"{speaker}: {paragraph}")
+                last_speaker = speaker
+            else:
+                output.append(paragraph)
 
         return "\n\n".join(output)
 
     def add_story_to_docx(self, document, segments):
         blocks = self.build_story_blocks(segments)
+        last_speaker = None
         for block in blocks:
-            speaker = (block["speaker"] or "").strip()
-            paragraph = block["text"]
+            speaker = (block.get("speaker") or "").strip()
+            paragraph = block.get("text", "").strip()
+            if not paragraph:
+                continue
             doc_paragraph = document.add_paragraph()
-            if speaker:
+            is_speaker_change = block.get("is_speaker_change", (speaker != last_speaker))
+            if speaker and is_speaker_change and speaker != last_speaker:
                 speaker_run = doc_paragraph.add_run(f"{speaker}: ")
                 speaker_run.bold = True
+                last_speaker = speaker
             doc_paragraph.add_run(paragraph)
 
     def closeEvent(self, event):

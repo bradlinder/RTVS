@@ -7,6 +7,143 @@ maintaining the established MainWindow-facing API while responsibilities are iso
 from prs_shared import *
 
 
+class RestoreSelectedSettingsDialog(QDialog):
+    """Presents users with a list of customizable settings that can be restored to defaults."""
+
+    CATEGORIES = [
+        ("general_appearance", "Theme & Startup Mode", "Theme mode (Dark) and startup project behavior (Open last project)."),
+        ("general_project_dirs", "Default Project Directory & Bundling", "Default projects folder, project subfolders (Transcripts/Media), and media copy settings."),
+        ("general_autosave", "Auto-save Interval", "Automatic project save interval (5 minutes)."),
+        ("audio_hardware", "Audio Hardware & Volume", "Audio output device (System Default) and default volume (100%)."),
+        ("software_updates", "Software Updates & Repository", "Automatic update checks (Enabled) and official GitHub repository."),
+        ("ai_models", "AI Models & Storage Directory", "Whisper speech recognition model (small, beam size 5), translation model (tiny), and models storage folder."),
+        ("gpu_acceleration", "Hardware / GPU Acceleration", "GPU and DirectML hardware acceleration settings."),
+        ("playback_timeline", "Playback & Timeline Display", "Skip duration (5s), waveform visibility, thumbnail strip, and transcript selection mode."),
+        ("detection_diarization", "Story Detection & Diarization Defaults", "Silence threshold (3.0s), lead-in padding (0.5s), default expected speakers (auto), and speaker prompts."),
+        ("batch_processing", "Batch Processing Tool Options", "Batch tasks (transcribe, diarize, detect stories), output formats, and batch custom directory."),
+        ("export_options", "Export Window: Formats & Content Options", "Export formats (TXT, DOCX, Media enabled; SRT, VTT disabled) and content options (speakers, timestamps, languages)."),
+        ("export_directory", "Export Window: Custom Location", "Clear saved custom export location and restore default project folder export routing."),
+        ("wordpress_settings", "WordPress: Site Connection & Credentials", "Configured WordPress site URL, credentials, and cached categories/authors."),
+    ]
+
+    def __init__(self, parent=None, on_restore_selected=None):
+        super().__init__(parent)
+        self.setWindowTitle("Restore Default Settings")
+        self.resize(540, 560)
+        self.on_restore_selected = on_restore_selected
+        self.checkboxes = {}
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        title_lbl = QLabel("<b>Select Settings to Restore to Defaults</b>")
+        title_lbl.setStyleSheet("font-size: 14px;")
+        layout.addWidget(title_lbl)
+
+        desc_lbl = QLabel(
+            "Choose which customizable areas and preferences you would like to reset back to factory defaults. "
+            "Unchecked items will remain unchanged."
+        )
+        desc_lbl.setWordWrap(True)
+        layout.addWidget(desc_lbl)
+
+        # Select all / Deselect all toolbar
+        sel_btn_layout = QHBoxLayout()
+        select_all_btn = QPushButton("Select All")
+        deselect_all_btn = QPushButton("Deselect All")
+        select_all_btn.clicked.connect(self._select_all)
+        deselect_all_btn.clicked.connect(self._deselect_all)
+        sel_btn_layout.addWidget(select_all_btn)
+        sel_btn_layout.addWidget(deselect_all_btn)
+        sel_btn_layout.addStretch()
+        layout.addLayout(sel_btn_layout)
+
+        # Scroll area with customizable categories
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(10)
+        scroll_layout.setContentsMargins(8, 8, 8, 8)
+
+        for cat_id, label_text, desc_text in self.CATEGORIES:
+            item_box = QWidget()
+            item_layout = QVBoxLayout(item_box)
+            item_layout.setContentsMargins(4, 4, 4, 4)
+            item_layout.setSpacing(2)
+
+            cb = QCheckBox(label_text)
+            cb.setStyleSheet("font-weight: bold;")
+            cb.setChecked(True)
+            self.checkboxes[cat_id] = cb
+            item_layout.addWidget(cb)
+
+            sub_lbl = QLabel(desc_text)
+            sub_lbl.setStyleSheet("color: #888888; margin-left: 20px; font-size: 11px;")
+            sub_lbl.setWordWrap(True)
+            item_layout.addWidget(sub_lbl)
+
+            scroll_layout.addWidget(item_box)
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll, 1)
+
+        # Action Buttons
+        btn_layout = QHBoxLayout()
+        reset_btn = QPushButton("Reset to Defaults")
+        reset_btn.setDefault(True)
+        reset_btn.setStyleSheet("font-weight: bold;")
+        cancel_btn = QPushButton("Cancel")
+
+        reset_btn.clicked.connect(self._handle_reset)
+        cancel_btn.clicked.connect(self.reject)
+
+        btn_layout.addStretch()
+        btn_layout.addWidget(reset_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+    def _select_all(self):
+        for cb in self.checkboxes.values():
+            cb.setChecked(True)
+
+    def _deselect_all(self):
+        for cb in self.checkboxes.values():
+            cb.setChecked(False)
+
+    def _handle_reset(self):
+        selected_ids = [cat_id for cat_id, cb in self.checkboxes.items() if cb.isChecked()]
+        if not selected_ids:
+            QMessageBox.information(
+                self,
+                "No Settings Selected",
+                "Please select at least one customizable setting category to restore to defaults."
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Reset to Defaults",
+            f"Are you sure you want to restore the {len(selected_ids)} selected setting category/categories to defaults?\n\n"
+            "This will reset the chosen settings to their initial factory values.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        if callable(self.on_restore_selected):
+            self.on_restore_selected(selected_ids)
+
+        QMessageBox.information(
+            self,
+            "Defaults Restored",
+            f"The {len(selected_ids)} selected setting category/categories have been successfully restored to defaults."
+        )
+        self.accept()
+
 class PlaybackPreferencesMixin:
     def _install_diagnostic_logging(self):
         """Install startup-safe diagnostics that never depend on the GUI widgets."""
@@ -279,6 +416,17 @@ class PlaybackPreferencesMixin:
         elif self.find_dialog and self.find_dialog.isVisible():
             self.find_dialog.find_next()
 
+    def _format_elapsed_time(self, seconds: float) -> str:
+        if seconds < 0 or seconds != seconds:
+            return "0:00"
+        tot_secs = int(seconds)
+        hours = tot_secs // 3600
+        mins = (tot_secs % 3600) // 60
+        secs = tot_secs % 60
+        if hours > 0:
+            return f"{hours}:{mins:02d}:{secs:02d}"
+        return f"{mins}:{secs:02d}"
+
     def _format_time_remaining(self, seconds: float) -> str:
         if seconds < 0 or seconds != seconds:
             return "calculating..."
@@ -368,10 +516,22 @@ class PlaybackPreferencesMixin:
                 self.pipeline_total_stages = 1
                 self.pipeline_current_stage_idx = 1
                 self.pipeline_all_stages = [stage_key]
+                self.pipeline_start_monotonic = self.stage_start_monotonic
             else:
                 total = getattr(self, "pipeline_total_stages", 1)
                 queue_len = len(getattr(self, "pipeline_queue", []))
                 self.pipeline_current_stage_idx = max(1, total - queue_len)
+                if not getattr(self, "pipeline_start_monotonic", None):
+                    self.pipeline_start_monotonic = self.stage_start_monotonic
+
+            if not hasattr(self, "_progress_tick_timer"):
+                from PySide6.QtCore import QTimer
+                self._progress_tick_timer = QTimer(self)
+                self._progress_tick_timer.setInterval(1000)
+                self._progress_tick_timer.timeout.connect(self._on_progress_timer_tick)
+
+            if not self._progress_tick_timer.isActive():
+                self._progress_tick_timer.start()
 
             self.update_processing_progress(0, "")
         else:
@@ -380,11 +540,20 @@ class PlaybackPreferencesMixin:
             self.current_processing_stage_detail = ""
             self.stage_start_monotonic = None
             self.last_reported_stage_percent = 0
+            if not getattr(self, "pipeline_active", False):
+                self.pipeline_start_monotonic = None
+            if hasattr(self, "_progress_tick_timer") and self._progress_tick_timer.isActive():
+                self._progress_tick_timer.stop()
             self.processing_stage_label.clear()
             self.processing_stage_label.hide()
             if hasattr(self, "progress"):
                 self.progress.hide()
                 self.progress.setFormat("%p%")
+
+    def _on_progress_timer_tick(self):
+        if getattr(self, "current_processing_stage_name", ""):
+            pct = getattr(self, "last_reported_stage_percent", 0)
+            self.update_processing_progress(pct)
 
     def update_processing_progress(self, percent: float, message: str = ""):
         percent = max(0, min(100, int(percent)))
@@ -400,16 +569,19 @@ class PlaybackPreferencesMixin:
         stage_desc = f"{stage_name}"
         if stage_detail:
             stage_desc += f" ({stage_detail})"
-            
+
+        import time
         if is_batch:
-            import time
+            batch_file_start = getattr(self, "batch_file_start_time", None) or getattr(self, "stage_start_monotonic", None) or time.monotonic()
+            file_elapsed = max(0.0, time.monotonic() - batch_file_start)
+            elapsed_str = self._format_elapsed_time(file_elapsed)
+
             batch_curr = max(1, getattr(self, "batch_current_file_idx", 1))
             batch_total = max(1, getattr(self, "batch_total_files", 1))
             
             file_remaining = total_rem
             file_eta_str = self._format_time_remaining(file_remaining)
             
-            file_elapsed = max(0.1, time.monotonic() - getattr(self, "batch_file_start_time", time.monotonic()))
             current_file_total_est = file_elapsed + file_remaining
             
             completed_durations = getattr(self, "batch_completed_durations", [])
@@ -422,16 +594,24 @@ class PlaybackPreferencesMixin:
             overall_remaining = file_remaining + (remaining_files_after_this * avg_dur)
             overall_eta_str = self._format_time_remaining(overall_remaining)
             
-            label_text = f"File {batch_curr} of {batch_total} ({stage_desc}) — File ETA: {file_eta_str} | Overall ETA: {overall_eta_str}"
-            prog_format = f"File {batch_curr}/{batch_total} (%p%) — File: {file_eta_str} | Job: {overall_eta_str}"
+            label_text = f"File {batch_curr} of {batch_total} ({stage_desc}) — Elapsed: {elapsed_str} | File ETA: {file_eta_str} | Overall ETA: {overall_eta_str}"
+            prog_format = f"File {batch_curr}/{batch_total} (%p%) — Elapsed: {elapsed_str} | File: {file_eta_str} | Job: {overall_eta_str}"
         elif is_pipeline:
+            pipe_start = getattr(self, "pipeline_start_monotonic", None) or getattr(self, "stage_start_monotonic", None) or time.monotonic()
+            pipe_elapsed = max(0.0, time.monotonic() - pipe_start)
+            elapsed_str = self._format_elapsed_time(pipe_elapsed)
+
             current_idx = getattr(self, "pipeline_current_stage_idx", 1)
             total_stages = getattr(self, "pipeline_total_stages", 1)
-            label_text = f"Stage {current_idx} of {total_stages}: {stage_desc} — {eta_str} remaining"
-            prog_format = f"%p% (Stage {current_idx}/{total_stages}) — {eta_str} remaining"
+            label_text = f"Stage {current_idx} of {total_stages}: {stage_desc} — Elapsed: {elapsed_str} | Remaining: {eta_str}"
+            prog_format = f"Stage {current_idx}/{total_stages} (%p%) — Elapsed: {elapsed_str} | Remaining: {eta_str}"
         else:
-            label_text = f"{stage_desc} — {eta_str} remaining"
-            prog_format = f"%p% — {eta_str} remaining"
+            stage_start = getattr(self, "stage_start_monotonic", None) or getattr(self, "pipeline_start_monotonic", None) or time.monotonic()
+            stage_elapsed = max(0.0, time.monotonic() - stage_start)
+            elapsed_str = self._format_elapsed_time(stage_elapsed)
+
+            label_text = f"{stage_desc} — Elapsed: {elapsed_str} | Remaining: {eta_str}"
+            prog_format = f"%p% — Elapsed: {elapsed_str} | Remaining: {eta_str}"
             
         if hasattr(self, "processing_stage_label"):
             self.processing_stage_label.setText(label_text)
@@ -458,18 +638,23 @@ class PlaybackPreferencesMixin:
         else:
             self.processing_stage_label.setToolTip("")
 
-    def _capture_project_state(self):
-        """Capture all editable project data for the application undo stack.
+    @staticmethod
+    def _clone_transcript_state(transcript):
+        if transcript is None:
+            return None
+        clone = {k: v for k, v in transcript.items() if k != "segments"}
+        if "segments" in transcript:
+            clone["segments"] = [
+                {**seg, "words": list(seg.get("words", []))} if isinstance(seg, dict) else seg
+                for seg in transcript["segments"]
+            ]
+        return clone
 
-        transcript/diarization/translations are deep-copied with
-        copy.deepcopy() rather than a json.dumps/json.loads round-trip --
-        same isolation guarantee for the plain dict/list/str/number data
-        this app actually stores here, without paying for two full text
-        serializations on every edit.
-        """
+    def _capture_project_state(self):
+        """Capture all editable project data for the application undo stack."""
         return {
             "stories": [s.to_dict() for s in self.stories],
-            "transcript": copy.deepcopy(self.transcript) if self.transcript is not None else None,
+            "transcript": self._clone_transcript_state(self.transcript),
             "diarization": copy.deepcopy(self.diarization) if self.diarization is not None else None,
             "speaker_names": dict(self.speaker_names),
             "segment_speaker_overrides": {str(k): v for k, v in self.segment_speaker_overrides.items()},
@@ -485,7 +670,7 @@ class PlaybackPreferencesMixin:
         self.is_restoring_undo = True
         try:
             self.stories = [Story.from_dict(item) for item in state.get("stories", [])]
-            self.transcript = copy.deepcopy(state.get("transcript")) if state.get("transcript") is not None else None
+            self.transcript = self._clone_transcript_state(state.get("transcript"))
             self.diarization = copy.deepcopy(state.get("diarization")) if state.get("diarization") is not None else None
             self.speaker_names = {str(k): str(v) for k, v in state.get("speaker_names", {}).items()}
             self.segment_speaker_overrides = {int(k): str(v) for k, v in state.get("segment_speaker_overrides", {}).items()}
@@ -653,6 +838,296 @@ class PlaybackPreferencesMixin:
         except Exception:
             pass
 
+
+    def apply_settings_reset(self, selected_ids, live_widgets=None):
+        """Apply factory default settings to the requested categories and update live widgets if present."""
+        if not selected_ids:
+            return
+        selected_set = set(selected_ids)
+        lw = live_widgets or {}
+
+        # 1. General Appearance
+        if "general_appearance" in selected_set:
+            self.settings_store.setValue("theme_mode", "dark")
+            self.settings_store.setValue("startup_project_mode", "last")
+            if hasattr(self, "set_theme"):
+                try:
+                    self.set_theme("dark")
+                except Exception:
+                    pass
+            if hasattr(self, "set_startup_project_mode"):
+                try:
+                    self.set_startup_project_mode("last")
+                except Exception:
+                    pass
+            else:
+                self.startup_project_mode = "last"
+            if "theme_combo" in lw and lw["theme_combo"]:
+                idx = lw["theme_combo"].findText("dark")
+                if idx >= 0:
+                    lw["theme_combo"].setCurrentIndex(idx)
+            if "startup_combo" in lw and lw["startup_combo"]:
+                idx = lw["startup_combo"].findData("last")
+                if idx >= 0:
+                    lw["startup_combo"].setCurrentIndex(idx)
+
+        # 2. General Project Directories & Bundling
+        if "general_project_dirs" in selected_set:
+            self.settings_store.setValue("default_project_directory", "")
+            self.settings_store.setValue("save_project_with_media", "false")
+            self.settings_store.setValue("create_project_subfolders", "true")
+            self.settings_store.setValue("copy_media_to_project_folder", "false")
+            self.settings_store.setValue("last_directory", "")
+            self.settings_store.setValue("last_open_directory", "")
+            self.settings_store.setValue("last_saved_project_path", "")
+            self.default_project_directory = ""
+            if "proj_dir_edit" in lw and lw["proj_dir_edit"]:
+                lw["proj_dir_edit"].setText("")
+            if "save_with_media_chk" in lw and lw["save_with_media_chk"]:
+                lw["save_with_media_chk"].setChecked(False)
+            if "bundle_folder_chk" in lw and lw["bundle_folder_chk"]:
+                lw["bundle_folder_chk"].setChecked(True)
+            if "copy_media_chk" in lw and lw["copy_media_chk"]:
+                lw["copy_media_chk"].setChecked(False)
+
+        # 3. General Auto-save
+        if "general_autosave" in selected_set:
+            self.settings_store.setValue("auto_save_minutes", 5)
+            self.auto_save_minutes = 5
+            if hasattr(self, "update_auto_save_timer"):
+                try:
+                    self.update_auto_save_timer()
+                except Exception:
+                    pass
+            if "autosave_spin" in lw and lw["autosave_spin"]:
+                lw["autosave_spin"].setValue(5)
+
+        # 4. Audio Hardware
+        if "audio_hardware" in selected_set:
+            self.settings_store.setValue("audio_output_device", "System Default")
+            self.settings_store.setValue("audio_output_volume", 100)
+            if hasattr(self, "apply_audio_output_device"):
+                try:
+                    self.apply_audio_output_device("System Default", 1.0)
+                except Exception:
+                    pass
+            if "audio_dev_combo" in lw and lw["audio_dev_combo"]:
+                lw["audio_dev_combo"].setCurrentIndex(0)
+            if "vol_slider" in lw and lw["vol_slider"]:
+                lw["vol_slider"].setValue(100)
+
+        # 5. Software Updates
+        if "software_updates" in selected_set:
+            self.settings_store.setValue("auto_check_updates", "true")
+            self.settings_store.setValue("github_repo", "The-Triton-Media-Group/Radio-TV-Story-Segmenter")
+            if "auto_update_chk" in lw and lw["auto_update_chk"]:
+                lw["auto_update_chk"].setChecked(True)
+            if "repo_edit" in lw and lw["repo_edit"]:
+                lw["repo_edit"].setText("The-Triton-Media-Group/Radio-TV-Story-Segmenter")
+
+        # 6. AI Models & Storage
+        if "ai_models" in selected_set:
+            try:
+                from prs_shared import get_app_data_dir
+                from processing import set_models_storage_dir
+                def_model_dir = str(get_app_data_dir() / "models")
+                set_models_storage_dir(def_model_dir)
+            except Exception:
+                def_model_dir = ""
+            self.settings_store.setValue("whisper_model", "small")
+            self.settings_store.setValue("whisper_beam_size", 5)
+            self.settings_store.setValue("translation_model_variant", "tiny")
+            self.whisper_model = "small"
+            self.whisper_beam_size = 5
+            self.translation_model_variant = "tiny"
+            if hasattr(self, "refresh_whisper_model_chooser"):
+                try:
+                    self.refresh_whisper_model_chooser()
+                except Exception:
+                    pass
+            if hasattr(self, "refresh_translation_model_chooser"):
+                try:
+                    self.refresh_translation_model_chooser()
+                except Exception:
+                    pass
+            if "model_dir_edit" in lw and lw["model_dir_edit"] and def_model_dir:
+                lw["model_dir_edit"].setText(def_model_dir)
+            if "pref_whisper_combo" in lw and lw["pref_whisper_combo"]:
+                idx = lw["pref_whisper_combo"].findData("small")
+                if idx >= 0:
+                    lw["pref_whisper_combo"].setCurrentIndex(idx)
+            if "pref_beam_combo" in lw and lw["pref_beam_combo"]:
+                idx = lw["pref_beam_combo"].findData(5)
+                if idx >= 0:
+                    lw["pref_beam_combo"].setCurrentIndex(idx)
+            if "pref_trans_combo" in lw and lw["pref_trans_combo"]:
+                idx = lw["pref_trans_combo"].findData("tiny")
+                if idx >= 0:
+                    lw["pref_trans_combo"].setCurrentIndex(idx)
+
+        # 7. Hardware / GPU Acceleration
+        if "gpu_acceleration" in selected_set:
+            if hasattr(self, "gpu_acceleration_settings_key"):
+                try:
+                    self.settings_store.setValue(self.gpu_acceleration_settings_key(), "false")
+                except Exception:
+                    pass
+            self.settings_store.setValue("gpu_acceleration_enabled", "false")
+
+        # 8. Playback & Timeline
+        if "playback_timeline" in selected_set:
+            self.settings_store.setValue("skip_seconds", 5)
+            self.settings_store.setValue("timeline_show_waveform", "true")
+            self.settings_store.setValue("timeline_show_thumbnails", "true")
+            self.settings_store.setValue("timeline_thumbnail_position", "above")
+            self.settings_store.setValue("transcript_selection_mode", "replace")
+            self.settings_store.setValue("show_speaker_labels", True)
+            self.settings_store.setValue("show_timestamps", True)
+            self.skip_seconds = 5
+            self.timeline_show_waveform = True
+            self.timeline_show_thumbnails = True
+            self.transcript_selection_mode = "replace"
+            if hasattr(self, "timeline"):
+                try:
+                    self.timeline.set_skip_seconds(5)
+                    self.timeline.set_timeline_views(True, True)
+                except Exception:
+                    pass
+            if hasattr(self, "transcript_view") and hasattr(self.transcript_view, "set_selection_mode"):
+                try:
+                    self.transcript_view.set_selection_mode("replace")
+                except Exception:
+                    pass
+            if "skip_spin" in lw and lw["skip_spin"]:
+                lw["skip_spin"].setValue(5)
+            if "wave_chk" in lw and lw["wave_chk"]:
+                lw["wave_chk"].setChecked(True)
+            if "thumb_chk" in lw and lw["thumb_chk"]:
+                lw["thumb_chk"].setChecked(True)
+            if "sel_mode_combo" in lw and lw["sel_mode_combo"]:
+                idx = lw["sel_mode_combo"].findData("replace")
+                if idx >= 0:
+                    lw["sel_mode_combo"].setCurrentIndex(idx)
+
+        # 9. Story Detection & Diarization
+        if "detection_diarization" in selected_set:
+            self.settings_store.setValue("silence_threshold", 3.0)
+            self.settings_store.setValue("lead_in_padding", 0.5)
+            self.settings_store.setValue("default_expected_speakers", "auto")
+            self.settings_store.setValue("ask_expected_speakers", True)
+            self.silence_threshold = 3.0
+            self.lead_in_padding = 0.5
+            self.expected_speakers = "auto"
+            if "gap_spin" in lw and lw["gap_spin"]:
+                lw["gap_spin"].setValue(3.0)
+            if "pad_spin" in lw and lw["pad_spin"]:
+                lw["pad_spin"].setValue(0.5)
+            if "expected_speakers_combo" in lw and lw["expected_speakers_combo"]:
+                idx = lw["expected_speakers_combo"].findData("auto")
+                if idx >= 0:
+                    lw["expected_speakers_combo"].setCurrentIndex(idx)
+            if "ask_speakers_chk" in lw and lw["ask_speakers_chk"]:
+                lw["ask_speakers_chk"].setChecked(True)
+
+        # 10. Batch Processing Tool Options
+        if "batch_processing" in selected_set:
+            self.settings_store.setValue("batch_custom_output_dir", "")
+            self.settings_store.setValue("batch_opt_proc_transcribe", True)
+            self.settings_store.setValue("batch_opt_proc_diarize", True)
+            self.settings_store.setValue("batch_opt_proc_stories", True)
+            self.settings_store.setValue("batch_opt_proc_translate", False)
+            self.settings_store.setValue("batch_opt_save_project", True)
+            self.settings_store.setValue("batch_opt_skip_existing", True)
+            self.settings_store.setValue("batch_opt_save_project_only", False)
+            self.settings_store.setValue("batch_opt_fmt_txt", True)
+            self.settings_store.setValue("batch_opt_fmt_docx", True)
+            self.settings_store.setValue("batch_opt_fmt_srt", False)
+            self.settings_store.setValue("batch_opt_fmt_vtt", False)
+            self.settings_store.setValue("batch_opt_include_speakers", True)
+            self.settings_store.setValue("batch_opt_include_times", False)
+            if "batch_dir_edit" in lw and lw["batch_dir_edit"]:
+                lw["batch_dir_edit"].setText("")
+            if "batch_transcribe_chk" in lw and lw["batch_transcribe_chk"]:
+                lw["batch_transcribe_chk"].setChecked(True)
+            if "batch_diarize_chk" in lw and lw["batch_diarize_chk"]:
+                lw["batch_diarize_chk"].setChecked(True)
+            if "batch_stories_chk" in lw and lw["batch_stories_chk"]:
+                lw["batch_stories_chk"].setChecked(True)
+            if "batch_translate_chk" in lw and lw["batch_translate_chk"]:
+                lw["batch_translate_chk"].setChecked(False)
+            if "batch_save_proj_chk" in lw and lw["batch_save_proj_chk"]:
+                lw["batch_save_proj_chk"].setChecked(True)
+            if "batch_skip_exist_chk" in lw and lw["batch_skip_exist_chk"]:
+                lw["batch_skip_exist_chk"].setChecked(True)
+            if "batch_proj_only_chk" in lw and lw["batch_proj_only_chk"]:
+                lw["batch_proj_only_chk"].setChecked(False)
+            if "batch_txt_chk" in lw and lw["batch_txt_chk"]:
+                lw["batch_txt_chk"].setChecked(True)
+            if "batch_docx_chk" in lw and lw["batch_docx_chk"]:
+                lw["batch_docx_chk"].setChecked(True)
+            if "batch_srt_chk" in lw and lw["batch_srt_chk"]:
+                lw["batch_srt_chk"].setChecked(False)
+            if "batch_vtt_chk" in lw and lw["batch_vtt_chk"]:
+                lw["batch_vtt_chk"].setChecked(False)
+            if "batch_spk_chk" in lw and lw["batch_spk_chk"]:
+                lw["batch_spk_chk"].setChecked(True)
+            if "batch_time_chk" in lw and lw["batch_time_chk"]:
+                lw["batch_time_chk"].setChecked(False)
+
+        # 11. Export Window Options & Formats
+        if "export_options" in selected_set:
+            try:
+                from PySide6.QtCore import QSettings
+                exp_settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
+                for k in [
+                    "export_opt_fmt_txt", "export_opt_fmt_docx", "export_opt_fmt_srt", "export_opt_fmt_vtt",
+                    "export_opt_fmt_media", "export_opt_include_speakers", "export_opt_include_timestamps",
+                    "export_opt_include_en", "export_opt_include_es"
+                ]:
+                    exp_settings.remove(k)
+                exp_settings.sync()
+            except Exception:
+                pass
+
+        # 12. Export Window Custom Location
+        if "export_directory" in selected_set:
+            try:
+                from PySide6.QtCore import QSettings
+                exp_settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
+                exp_settings.remove("export_opt_custom_loc_enabled")
+                exp_settings.remove("export_opt_custom_dir")
+                exp_settings.sync()
+            except Exception:
+                pass
+
+        # 13. WordPress Connection & Credentials
+        if "wordpress_settings" in selected_set:
+            try:
+                from PySide6.QtCore import QSettings
+                wp_settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
+                wp_user = str(wp_settings.value("wp_username", "") or "").strip()
+                wp_settings.remove("wp_site_url")
+                wp_settings.remove("wp_username")
+                wp_settings.remove("wp_cached_categories")
+                wp_settings.remove("wp_cached_authors")
+                if wp_user:
+                    wp_settings.remove(f"wp_pass_{wp_user}")
+                    try:
+                        import keyring
+                        keyring.delete_password("RadioTVStorySegmenter", f"wp_{wp_user}")
+                    except Exception:
+                        pass
+                wp_settings.sync()
+            except Exception:
+                pass
+
+        try:
+            self.settings_store.sync()
+        except Exception:
+            pass
+
+        self.log_activity(f"[SETTINGS] Restored default settings for {len(selected_ids)} category/categories.")
+
     def open_preferences_dialog(self, initial_category="General"):
         """Open the multi-category Preferences dialog."""
         if not isinstance(initial_category, str):
@@ -751,9 +1226,9 @@ class PlaybackPreferencesMixin:
         autosave_spin.setSuffix(" min (0 = off)")
         gen_form.addRow("Auto-save Interval:", autosave_spin)
 
-        restore_gen_btn = QPushButton("Restore All Settings to Defaults…")
-        restore_gen_btn.setToolTip("Reset all user preferences across all categories back to default settings.")
-        gen_form.addRow("Reset Preferences:", restore_gen_btn)
+        restore_sel_gen_btn = QPushButton("Restore Default Settings…")
+        restore_sel_gen_btn.setToolTip("Select specific settings and categories to restore to defaults.")
+        gen_form.addRow("Reset Preferences:", restore_sel_gen_btn)
 
         gen_layout.addLayout(gen_form)
         gen_layout.addStretch()
@@ -1124,96 +1599,75 @@ class PlaybackPreferencesMixin:
         else:
             cat_list.setCurrentRow(0)
 
-        # Dialog buttons
+        # Dialog bottom bar
+        live_widgets = {
+            "theme_combo": theme_combo,
+            "startup_combo": startup_combo,
+            "proj_dir_edit": proj_dir_edit,
+            "save_with_media_chk": save_with_media_chk,
+            "bundle_folder_chk": bundle_folder_chk,
+            "copy_media_chk": copy_media_chk,
+            "autosave_spin": autosave_spin,
+            "audio_dev_combo": audio_dev_combo,
+            "vol_slider": vol_slider,
+            "auto_update_chk": auto_update_chk,
+            "repo_edit": repo_edit,
+            "model_dir_edit": model_dir_edit,
+            "pref_whisper_combo": pref_whisper_combo,
+            "pref_beam_combo": pref_beam_combo,
+            "pref_trans_combo": pref_trans_combo,
+            "skip_spin": skip_spin,
+            "wave_chk": wave_chk,
+            "thumb_chk": thumb_chk,
+            "sel_mode_combo": sel_mode_combo,
+            "gap_spin": gap_spin,
+            "pad_spin": pad_spin,
+            "expected_speakers_combo": expected_speakers_combo,
+            "ask_speakers_chk": ask_speakers_chk,
+            "batch_dir_edit": batch_dir_edit,
+            "batch_transcribe_chk": batch_transcribe_chk,
+            "batch_diarize_chk": batch_diarize_chk,
+            "batch_stories_chk": batch_stories_chk,
+            "batch_translate_chk": batch_translate_chk,
+            "batch_save_proj_chk": batch_save_proj_chk,
+            "batch_skip_exist_chk": batch_skip_exist_chk,
+            "batch_proj_only_chk": batch_proj_only_chk,
+            "batch_txt_chk": batch_txt_chk,
+            "batch_docx_chk": batch_docx_chk,
+            "batch_srt_chk": batch_srt_chk,
+            "batch_vtt_chk": batch_vtt_chk,
+            "batch_spk_chk": batch_spk_chk,
+            "batch_time_chk": batch_time_chk,
+        }
+
+        bottom_bar = QHBoxLayout()
+        restore_sel_btn = QPushButton("Restore Default Settings…")
+        restore_sel_btn.setToolTip("Select specific settings and categories to restore to defaults.")
+
+        bottom_bar.addWidget(restore_sel_btn)
+        bottom_bar.addStretch()
+
         btn_box = QDialogButtonBox(dialog)
         save_btn = btn_box.addButton("Save", QDialogButtonBox.ButtonRole.AcceptRole)
         cancel_btn = btn_box.addButton("Cancel", QDialogButtonBox.ButtonRole.RejectRole)
-        restore_btn_box = btn_box.addButton("Restore Defaults", QDialogButtonBox.ButtonRole.ResetRole)
-        main_layout.addWidget(btn_box)
+        bottom_bar.addWidget(btn_box)
 
-        def _confirm_restore_defaults():
-            reply = QMessageBox.question(
-                dialog,
-                "Restore Defaults",
-                "Are you sure you want to restore all settings to their defaults?\n\n"
-                "All preference categories will be reset to recommended factory defaults.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
+        main_layout.addLayout(bottom_bar)
+
+        def _open_restore_selected_dialog():
+            sel_dlg = RestoreSelectedSettingsDialog(
+                parent=dialog,
+                on_restore_selected=lambda chosen_ids: (
+                    self.apply_settings_reset(chosen_ids, live_widgets=live_widgets),
+                    _save_preferences(close_dialog=False)
+                )
             )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
+            sel_dlg.exec()
 
-            # Reset General
-            theme_combo.setCurrentText("Dark")
-            idx = startup_combo.findData("last")
-            if idx >= 0:
-                startup_combo.setCurrentIndex(idx)
-            proj_dir_edit.setText("")
-            save_with_media_chk.setChecked(False)
-            bundle_folder_chk.setChecked(True)
-            copy_media_chk.setChecked(False)
-            autosave_spin.setValue(5)
+        restore_sel_gen_btn.clicked.connect(_open_restore_selected_dialog)
+        restore_sel_btn.clicked.connect(_open_restore_selected_dialog)
 
-            # Reset Audio Hardware
-            audio_dev_combo.setCurrentIndex(0)
-            vol_slider.setValue(100)
-
-            # Reset Updates
-            auto_update_chk.setChecked(True)
-            repo_edit.setText("The-Triton-Media-Group/Radio-TV-Story-Segmenter")
-
-            # Reset Models
-            from prs_shared import get_app_data_dir
-            model_dir_edit.setText(str(get_app_data_dir() / "models"))
-            whisper_idx = pref_whisper_combo.findData("small")
-            if whisper_idx >= 0:
-                pref_whisper_combo.setCurrentIndex(whisper_idx)
-            beam_idx = pref_beam_combo.findData(5)
-            if beam_idx >= 0:
-                pref_beam_combo.setCurrentIndex(beam_idx)
-            trans_idx = pref_trans_combo.findData("tiny")
-            if trans_idx >= 0:
-                pref_trans_combo.setCurrentIndex(trans_idx)
-
-            # Reset Playback
-            skip_spin.setValue(5)
-            wave_chk.setChecked(True)
-            thumb_chk.setChecked(True)
-            sel_idx = sel_mode_combo.findData("replace")
-            if sel_idx >= 0:
-                sel_mode_combo.setCurrentIndex(sel_idx)
-
-            # Reset Detection
-            gap_spin.setValue(3.0)
-            pad_spin.setValue(0.5)
-            auto_idx = expected_speakers_combo.findData("auto")
-            if auto_idx >= 0:
-                expected_speakers_combo.setCurrentIndex(auto_idx)
-            ask_speakers_chk.setChecked(True)
-
-            # Reset Batch
-            batch_dir_edit.setText("")
-            batch_transcribe_chk.setChecked(True)
-            batch_diarize_chk.setChecked(True)
-            batch_stories_chk.setChecked(True)
-            batch_translate_chk.setChecked(False)
-            batch_save_proj_chk.setChecked(True)
-            batch_skip_exist_chk.setChecked(True)
-            batch_proj_only_chk.setChecked(False)
-            batch_txt_chk.setChecked(True)
-            batch_docx_chk.setChecked(True)
-            batch_srt_chk.setChecked(False)
-            batch_vtt_chk.setChecked(False)
-            batch_spk_chk.setChecked(True)
-            batch_time_chk.setChecked(False)
-
-            _save_preferences()
-            QMessageBox.information(dialog, "Defaults Restored", "All settings have been restored to their defaults.")
-
-        restore_gen_btn.clicked.connect(_confirm_restore_defaults)
-        restore_btn_box.clicked.connect(_confirm_restore_defaults)
-
-        def _save_preferences():
+        def _save_preferences(*args, close_dialog=True):
             # Save General
             new_theme = theme_combo.currentText()
             self.settings_store.setValue("theme_mode", new_theme)
@@ -1330,11 +1784,12 @@ class PlaybackPreferencesMixin:
                 pass
 
             self.log_activity("[SETTINGS] Preferences updated.")
-            dialog.accept()
+            if close_dialog:
+                dialog.accept()
 
-        save_btn.clicked.connect(_save_preferences)
+        save_btn.clicked.connect(lambda: _save_preferences(close_dialog=True))
         cancel_btn.clicked.connect(dialog.reject)
-        btn_box.accepted.connect(_save_preferences)
+        btn_box.accepted.connect(lambda: _save_preferences(close_dialog=True))
         btn_box.rejected.connect(dialog.reject)
 
         dialog.exec()

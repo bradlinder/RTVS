@@ -48,6 +48,7 @@ class ProcessingMixin:
             self.batch_document_queue = []
             self.pipeline_queue = []
             self.pipeline_active = False
+            self.pipeline_start_monotonic = None
             self.pipeline_rerun_confirmed = False
             if self.transcription_process is not None:
                 self.cleanup_transcription_process()
@@ -89,6 +90,7 @@ class ProcessingMixin:
                 return
 
         self.pipeline_active = False
+        self.pipeline_start_monotonic = None
         self.pipeline_queue = []
         self.pipeline_rerun_confirmed = False
 
@@ -407,6 +409,8 @@ class ProcessingMixin:
             self.pipeline_all_stages = list(selected)
             self.pipeline_current_stage_idx = 0
             self.pipeline_active = True
+            import time
+            self.pipeline_start_monotonic = time.monotonic()
             self.pending_diarization = False
             self.pending_auto_detect_stories = False
             self.pipeline_speaker_detection_requested = False
@@ -487,6 +491,7 @@ class ProcessingMixin:
             self.pipeline_rerun_confirmed = False
             if self.batch_active:
                 self.pipeline_active = False
+                self.pipeline_start_monotonic = None
                 self.set_processing_stage(None)
                 self.set_tools_actions_enabled(True)
                 self.update_processing_stage_summary()
@@ -495,6 +500,7 @@ class ProcessingMixin:
                 QTimer.singleShot(0, self._batch_next_media)
                 return
             self.pipeline_active = False
+            self.pipeline_start_monotonic = None
             self.set_processing_stage(None)
             self.set_tools_actions_enabled(True)
             self.update_processing_stage_summary()
@@ -570,6 +576,8 @@ class ProcessingMixin:
         self.pipeline_all_stages = list(stages)
         self.pipeline_current_stage_idx = 0
         self.pipeline_active = True
+        import time
+        self.pipeline_start_monotonic = time.monotonic()
         self.pending_diarization = False
         self.pending_auto_detect_stories = False
         self.pipeline_speaker_detection_requested = False

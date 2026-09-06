@@ -567,15 +567,18 @@ class WordPressExportMixin:
             return self.build_story_blocks(selected) if selected else []
 
         def append_blocks(blocks):
+            last_speaker = None
             for block in blocks:
                 text = str(block.get("text", "") or "").strip()
                 if not text:
                     continue
                 speaker = str(block.get("speaker", "") or "").strip()
-                if speaker:
+                is_speaker_change = block.get("is_speaker_change", (speaker != last_speaker))
+                if speaker and is_speaker_change and speaker != last_speaker:
                     content_parts.append(
                         f'<p><strong>{html.escape(speaker)}</strong>: {html.escape(text)}</p>'
                     )
+                    last_speaker = speaker
                 else:
                     content_parts.append(f'<p>{html.escape(text)}</p>')
 

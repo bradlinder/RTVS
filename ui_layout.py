@@ -122,7 +122,6 @@ class UiLayoutMixin:
 
         # Timeline and Waveform Canvas Widget
         self.timeline = TimelineWidget(self)
-        self.timeline.setMinimumHeight(140)
         top_layout.addWidget(self.timeline)
 
         main_layout.addWidget(top_panel)
@@ -503,33 +502,30 @@ class UiLayoutMixin:
         self.diarize_action.triggered.connect(self.start_diarization)
         tools_menu.addAction(self.diarize_action)
 
-        self.auto_detect_action = QAction("&Auto-Detect Stories...", self)
+        self.auto_detect_action = QAction("&Detect Stories...", self)
         self.auto_detect_action.setShortcut(platform_seq("Ctrl+Shift+A"))
         self.auto_detect_action.setEnabled(False)
         self.auto_detect_action.triggered.connect(self.start_auto_detect_stories)
         tools_menu.addAction(self.auto_detect_action)
 
-        tools_menu.addSeparator()
-
-        self.transcribe_diarize_action = QAction("Transcribe && Detect &Speakers...", self)
-        self.transcribe_diarize_action.setShortcut(platform_seq("Ctrl+Shift+T"))
-        self.transcribe_diarize_action.setEnabled(False)
-        self.transcribe_diarize_action.triggered.connect(self.start_transcribe_and_diarize)
-        tools_menu.addAction(self.transcribe_diarize_action)
-
-        self.transcribe_diarize_detect_action = QAction("&Run Processing...", self)
-        self.transcribe_diarize_detect_action.setShortcut(platform_seq("Ctrl+R"))
-        self.transcribe_diarize_detect_action.setEnabled(False)
-        self.transcribe_diarize_detect_action.triggered.connect(self.start_full_auto_pipeline)
-        tools_menu.addAction(self.transcribe_diarize_detect_action)
-
-        tools_menu.addSeparator()
-
-        self.translate_action = QAction("Translate &Transcript (OPUS-MT)...", self)
+        self.translate_action = QAction("&Translate...", self)
         self.translate_action.setShortcut(platform_seq("Ctrl+Shift+L"))
         self.translate_action.setEnabled(False)
         self.translate_action.triggered.connect(lambda: self.start_translation("en", "es"))
         tools_menu.addAction(self.translate_action)
+
+        tools_menu.addSeparator()
+
+        # Retained as an instance attribute so set_tools_actions_enabled() calls do not fail
+        self.transcribe_diarize_action = QAction("Transcribe && Detect &Speakers...", self)
+        self.transcribe_diarize_action.setEnabled(False)
+        self.transcribe_diarize_action.triggered.connect(self.start_transcribe_and_diarize)
+
+        self.transcribe_diarize_detect_action = QAction("&Multi-Stage Processing...", self)
+        self.transcribe_diarize_detect_action.setShortcut(platform_seq("Ctrl+R"))
+        self.transcribe_diarize_detect_action.setEnabled(False)
+        self.transcribe_diarize_detect_action.triggered.connect(self.start_full_auto_pipeline)
+        tools_menu.addAction(self.transcribe_diarize_detect_action)
 
         tools_menu.addSeparator()
 
@@ -694,7 +690,7 @@ class UiLayoutMixin:
         if hasattr(self, "diarize_action"):
             self.diarize_action.setText("Detect Speakers (Complete)" if has_diarization else "Detect Speakers...")
         if hasattr(self, "auto_detect_action"):
-            self.auto_detect_action.setText("Auto-Detect Stories (Complete)" if has_stories else "Auto-Detect Stories...")
+            self.auto_detect_action.setText("Detect Stories (Complete)" if has_stories else "Detect Stories...")
 
     def open_project_dialog(self):
         """Prompt user to open a project file (*.rtvs)."""
