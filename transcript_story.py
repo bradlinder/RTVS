@@ -170,7 +170,7 @@ class TranscriptStoryMixin:
                         f'<p style="margin-bottom: 14px;">'
                         f'{timestamp_html}{speaker_html}'
                         f'<span style="color:{word_color};">{body_content}</span><br/>'
-                        f'<span style="color:{spanish_tag_color}; font-weight:bold; font-size:12px;">ES: </span>'
+                        f'<span style="color:{spanish_tag_color}; font-weight:bold; font-size:0.86em;">ES: </span>'
                         f'<span style="color:{spanish_color};"><i>{esc_es_text}</i></span>'
                         f'</p>'
                     )

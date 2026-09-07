@@ -1,4 +1,4 @@
-# Radio & TV Segmenter 1.9.9
+# Radio & TV Segmenter 2.1.0-beta
 
 Cross-platform story segmenter and transcriber for Windows, macOS, and Linux (Debian/Ubuntu).
 
@@ -54,13 +54,13 @@ Or run the automated 1-click build script:
 ./build_linux.sh
 ```
 
-The resulting package `dist/RadioTVSegmenter-1.9.9-Linux-amd64.deb` can be installed on any Debian or Ubuntu system using:
+The resulting package `dist/RadioTVSegmenter-2.1.0-beta-Linux-amd64.deb` can be installed on any Debian or Ubuntu system using:
 
 ```text
-sudo apt install ./dist/RadioTVSegmenter-1.9.9-Linux-amd64.deb
+sudo apt install ./dist/RadioTVSegmenter-2.1.0-beta-Linux-amd64.deb
 ```
 
-A standalone compressed tarball (`dist/RadioTVSegmenter-1.9.9-Linux-x86_64.tar.gz`) is also generated for non-Debian distributions.
+A standalone compressed tarball (`dist/RadioTVSegmenter-2.1.0-beta-Linux-x86_64.tar.gz`) is also generated for non-Debian distributions.
 
 ## Optional GPU support
 

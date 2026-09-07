@@ -30,6 +30,8 @@ sentencepiece>=0.2,<1
 
 keyring>=24.0.0
 pywin32-ctypes>=0.2.2; sys_platform == 'win32'
+pyqtdarktheme>=2.1.0
+pywinstyles>=1.8; sys_platform == 'win32'
 
 cryptography>=42,<46
 psutil>=5.9,<7

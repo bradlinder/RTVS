@@ -2075,21 +2075,35 @@ class PlaybackPreferencesMixin:
                 view.setStyleSheet(translation_style)
 
         if mode == "dark":
-            dark_palette = QPalette()
-            dark_palette.setColor(QPalette.Window, QColor("#121418"))
-            dark_palette.setColor(QPalette.WindowText, QColor("#f0f0f0"))
-            dark_palette.setColor(QPalette.Base, QColor("#1e222b"))
-            dark_palette.setColor(QPalette.AlternateBase, QColor("#2a2e39"))
-            dark_palette.setColor(QPalette.ToolTipBase, QColor("#2a2e39"))
-            dark_palette.setColor(QPalette.ToolTipText, QColor("#ffffff"))
-            dark_palette.setColor(QPalette.Text, QColor("#ffffff"))
-            dark_palette.setColor(QPalette.Button, QColor("#2a2e39"))
-            dark_palette.setColor(QPalette.ButtonText, QColor("#ffffff"))
-            dark_palette.setColor(QPalette.BrightText, QColor("#ff4d4d"))
-            dark_palette.setColor(QPalette.Highlight, QColor("#315c85"))
-            dark_palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
-            app.setPalette(dark_palette)
-            app.setStyleSheet("""
+            used_qdarktheme = False
+            try:
+                import qdarktheme
+                from theme_qss import TARGETED_QSS
+                qdarktheme.setup_theme("dark", corner_shape="rounded", additional_qss=TARGETED_QSS)
+                used_qdarktheme = True
+            except Exception:
+                used_qdarktheme = False
+
+            if not used_qdarktheme:
+                try:
+                    from theme_qss import TARGETED_QSS
+                except Exception:
+                    TARGETED_QSS = ""
+                dark_palette = QPalette()
+                dark_palette.setColor(QPalette.Window, QColor("#121418"))
+                dark_palette.setColor(QPalette.WindowText, QColor("#f0f0f0"))
+                dark_palette.setColor(QPalette.Base, QColor("#1e222b"))
+                dark_palette.setColor(QPalette.AlternateBase, QColor("#2a2e39"))
+                dark_palette.setColor(QPalette.ToolTipBase, QColor("#2a2e39"))
+                dark_palette.setColor(QPalette.ToolTipText, QColor("#ffffff"))
+                dark_palette.setColor(QPalette.Text, QColor("#ffffff"))
+                dark_palette.setColor(QPalette.Button, QColor("#2a2e39"))
+                dark_palette.setColor(QPalette.ButtonText, QColor("#ffffff"))
+                dark_palette.setColor(QPalette.BrightText, QColor("#ff4d4d"))
+                dark_palette.setColor(QPalette.Highlight, QColor("#315c85"))
+                dark_palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+                app.setPalette(dark_palette)
+                app.setStyleSheet("""
                 QMainWindow { background-color: #121418; color: #f0f0f0; }
                 #app_surface { background-color: #121418; }
                 #app_brand { font-size: 16px; font-weight: 700; color: #f0f0f0; }
@@ -2248,7 +2262,7 @@ class PlaybackPreferencesMixin:
                 #resizable_text_grip:hover {
                     background-color: #58a6ff;
                 }
-            """)
+            """ + "\n" + TARGETED_QSS)
         elif mode == "light":
             light_palette = QPalette()
             light_palette.setColor(QPalette.Window, QColor("#f4f5f7"))
@@ -2595,9 +2609,18 @@ class PlaybackPreferencesMixin:
             except Exception:
                 pass
 
-        if hasattr(self, "timeline") and hasattr(self.timeline, "canvas"):
-            self.timeline.canvas.pixmap_dirty = True
-            self.timeline.canvas.update()
+        # The timeline's waveform/ruler/selection/story-block colors are
+        # drawn directly with QPainter (theme_tokens.ThemeTokens), not QSS,
+        # so they don't pick up the palette/stylesheet changes above on
+        # their own -- swap in the matching token preset and repaint.
+        from theme_tokens import theme_tokens_for_mode
+        self.tokens = theme_tokens_for_mode(mode)
+        if hasattr(self, "timeline"):
+            self.timeline.tokens = self.tokens
+            if hasattr(self.timeline, "canvas"):
+                self.timeline.canvas.tokens = self.tokens
+                self.timeline.canvas.pixmap_dirty = True
+                self.timeline.canvas.update()
 
     def on_expected_speakers_changed(self, value):
         """Kept as a public hook (mirrors the removed on_sensitivity_changed)

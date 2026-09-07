@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter — v1.9.9
+"""Radio & TV Segmenter — v2.1.0-beta
 
 This is the thin application composition root. UI/processing responsibilities
 are implemented in focused mixins so future changes can target smaller files
@@ -31,6 +31,8 @@ from transcript_story import TranscriptStoryMixin
 from project_export import ProjectExportMixin
 from wordpress_export import WordPressExportMixin
 from gpu_acceleration import GpuAccelerationMixin
+from theme_tokens import ThemeTokens
+from theme_qss import TARGETED_QSS
 
 
 class MainWindow(
@@ -55,6 +57,15 @@ class MainWindow(
     def __init__(self):
         super().__init__()
         
+        self.tokens = ThemeTokens()
+
+        if sys.platform == "win32":
+            try:
+                import pywinstyles
+                pywinstyles.apply_style(self, "mica")
+            except Exception as e:
+                pass
+
         self.runtime_mgr = RuntimeManager()
         self.audio_file = None
         self.project_file = None
@@ -164,6 +175,10 @@ class MainWindow(
         self.timeline_show_thumbnails = str(self.settings_store.value("timeline_show_thumbnails", "true")).lower() in {"1", "true", "yes"}
         self.timeline_thumbnail_position = "above"
         self.transcript_selection_mode = str(self.settings_store.value("transcript_selection_mode", "replace") or "replace")
+        try:
+            self.transcript_font_scale = max(0.80, min(1.80, float(self.settings_store.value("transcript_font_scale", 1.0))))
+        except (TypeError, ValueError):
+            self.transcript_font_scale = 1.0
 
         self.audio_output = QAudioOutput()
         self.audio_output.setVolume(1.0)
@@ -238,6 +253,15 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName(f"{APP_DISPLAY_NAME} v{PROJECT_VERSION}")
     app.setApplicationDisplayName(APP_DISPLAY_NAME)
+
+    try:
+        import qdarktheme
+        qdarktheme.setup_theme("dark", corner_shape="rounded", additional_qss=TARGETED_QSS)
+    except ImportError:
+        print("[THEME] Note: 'pyqtdarktheme' is not installed in this environment. Run 'pip install pyqtdarktheme pywinstyles' to enable modern dark theme styling.")
+    except Exception as e:
+        print(f"[THEME] Warning: Could not initialize qdarktheme: {e}")
+
     icon = get_app_icon()
     if not icon.isNull():
         app.setWindowIcon(icon)

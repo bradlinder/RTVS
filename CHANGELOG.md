@@ -1,3 +1,10 @@
+## v2.1.0-beta
+
+- **Visual Theme Refresh**: Refined the dark visual system with layered charcoal/slate surfaces, restrained cyan interaction accents, cleaner borders, rounded controls, minimalist scrollbars, modern menus, and cohesive focus/selection states.
+- **Waveform Presentation**: Refined waveform/ruler styling and moved the audio filename into a subtle metadata badge in the ruler margin.
+- **Transcript Typography**: Added persistent transcript font-size controls with increase, decrease, and reset actions. Supports `Ctrl/Cmd + +`, `Ctrl/Cmd + -`, and `Ctrl/Cmd + 0`.
+- **Transcript Readability**: Improved typography, active-selection treatment, speaker/timestamp presentation, and transcript visual hierarchy without changing the existing transcript layout.
+
 # Changelog
 
 ## v1.9.9

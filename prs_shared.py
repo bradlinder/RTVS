@@ -19,6 +19,8 @@ import traceback
 import tempfile
 from pathlib import Path
 
+from theme_tokens import ThemeTokens
+
 from docx import Document
 from docx.shared import Pt, RGBColor
 
@@ -237,7 +239,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "1.9.9"
+PROJECT_VERSION = "2.1.0-beta"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -789,40 +791,45 @@ class StoryListWidget(QListWidget):
 # Interactive Transcript Edit Widget
 # ============================================================
 
-def transcript_text_view_stylesheet(mode):
-    """Shared look for every transcript-style text view (the main editable
-    transcript, and the read-only translation / bilingual views), so they
-    always match -- same font size, same line height, same theme colors --
-    instead of drifting when only one of them gets updated.
+def transcript_text_view_stylesheet(mode, font_size=14):
+    """Shared visual treatment for transcript-style views.
+
+    ``font_size`` is deliberately supplied at runtime so the user's transcript
+    zoom preference changes only transcript text, not the surrounding UI.
     """
+    font_size = max(11, min(25, float(font_size)))
     if mode == "light":
-        return """
-            QTextEdit, QTextBrowser {
+        return f"""
+            QTextEdit, QTextBrowser {{
                 background-color: #ffffff;
                 color: #111111;
                 border: 1px solid #c5c5cb;
-                font-size: 15px;
+                font-size: {font_size:.1f}px;
                 line-height: 1.7;
-            }
+            }}
         """
     elif mode == "high_contrast":
-        return """
-            QTextEdit, QTextBrowser {
+        return f"""
+            QTextEdit, QTextBrowser {{
                 background-color: #000000;
                 color: #ffffff;
                 border: 2px solid #ffff00;
-                font-size: 15px;
+                font-size: {font_size:.1f}px;
                 line-height: 1.7;
-            }
+            }}
         """
-    return """
-        QTextEdit, QTextBrowser {
-            background-color: #161b22;
-            color: #ffffff;
-            border: 1px solid #30363d;
-            font-size: 15px;
-            line-height: 1.7;
-        }
+    return f"""
+        QTextEdit, QTextBrowser {{
+            background-color: #121417;
+            color: #f0f3f6;
+            border: 1px solid #282c35;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: {font_size:.1f}px;
+            line-height: 1.6;
+            selection-background-color: #38bdf8;
+            selection-color: #ffffff;
+        }}
     """
 
 
@@ -842,6 +849,7 @@ class InteractiveTranscriptEdit(QTextEdit):
         self.customContextMenuRequested.connect(self.show_context_menu)
 
         self.current_theme = "dark"
+        self.font_scale = 1.0
         self.active_highlight_anchor = None
         self._playback_highlight_selection = None
         self.anchor_ranges = {}
@@ -1041,7 +1049,19 @@ class InteractiveTranscriptEdit(QTextEdit):
 
     def apply_theme_style(self, mode):
         self.current_theme = mode
-        self.setStyleSheet(transcript_text_view_stylesheet(mode))
+        self.setStyleSheet(transcript_text_view_stylesheet(mode, 14 * self.font_scale))
+        self.update_extra_selections()
+
+    def set_font_scale(self, scale):
+        """Set transcript font scale without affecting the rest of the UI."""
+        self.font_scale = max(0.80, min(1.80, float(scale)))
+        # Update the widget font as well as its stylesheet so QTextDocument's
+        # inherited HTML text follows the scale consistently.
+        font = QFont(self.font())
+        font.setPointSizeF(14.0 * self.font_scale * 72.0 / 96.0)
+        self.setFont(font)
+        self.document().setDefaultFont(font)
+        self.setStyleSheet(transcript_text_view_stylesheet(self.current_theme, 14 * self.font_scale))
         self.update_extra_selections()
 
     def set_editing_mode(self, enabled):
@@ -2276,8 +2296,9 @@ class TimelineCanvas(QWidget):
     CURSOR_GRAB_THRESHOLD = 12
     DRAG_PIXEL_THRESHOLD = 5
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, tokens=None):
         super().__init__(parent)
+        self.tokens = tokens if tokens is not None else ThemeTokens()
 
         self.duration = 1
         self.position = 0
@@ -2829,7 +2850,7 @@ class TimelineCanvas(QWidget):
 
         pixmap = QPixmap(phys_width, phys_height)
         pixmap.setDevicePixelRatio(dpi_scale)
-        pixmap.fill(QColor("#181b20"))
+        pixmap.fill(self.tokens.color(self.tokens.bg_surface))
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -2873,11 +2894,11 @@ class TimelineCanvas(QWidget):
                 )
                 draw_y = thumbnail_y + (thumbnail_height - scaled.height()) // 2
                 painter.drawPixmap(x - scaled.width() // 2, draw_y, scaled)
-                painter.setPen(QPen(QColor("#4a4f58"), 1))
+                painter.setPen(self.tokens.pen(self.tokens.border_subtle, 1))
                 painter.drawRect(x - scaled.width() // 2, draw_y, scaled.width(), scaled.height())
 
         if self.show_waveform and self.waveform_peaks and waveform_height > 0:
-            painter.setPen(QPen(QColor("#5a81a8"), 1.0))
+            painter.setPen(self.tokens.pen(self.tokens.waveform_stroke, 1.0))
             levels = self.waveform_levels or [self.waveform_peaks]
             total_pixel_width = max(width, int(width * self.zoom_level))
             level_index = 0
@@ -2910,7 +2931,7 @@ class TimelineCanvas(QWidget):
                             QPointF(x + 0.5, middle_y + amplitude / 2.0)
                         )
         elif self.show_waveform and waveform_height > 0:
-            painter.setPen(QPen(QColor("#2c323d"), 1))
+            painter.setPen(self.tokens.pen(self.tokens.waveform_baseline, 1))
             painter.drawLine(QPointF(0, middle_y), QPointF(width, middle_y))
 
         painter.end()
@@ -2942,8 +2963,8 @@ class TimelineCanvas(QWidget):
             painter.drawPixmap(0, 0, self.waveform_pixmap)
 
         ruler_rect = QRectF(0, 0, width, self.RULER_HEIGHT)
-        painter.fillRect(ruler_rect, QColor("#111317"))
-        painter.setPen(QPen(QColor("#2c323d"), 1))
+        painter.fillRect(ruler_rect, self.tokens.ruler_background_color())
+        painter.setPen(self.tokens.ruler_divider_pen())
         painter.drawLine(QPointF(0, self.RULER_HEIGHT), QPointF(width, self.RULER_HEIGHT))
 
         visible_dur = self.visible_duration()
@@ -2958,7 +2979,7 @@ class TimelineCanvas(QWidget):
                 break
 
         painter.setFont(self.font())
-        painter.setPen(QPen(QColor("#8a95a5"), 1))
+        painter.setPen(self.tokens.ruler_tick_pen())
 
         start_tick = (self.scroll_offset // chosen_interval) * chosen_interval
         t = start_tick
@@ -2981,7 +3002,7 @@ class TimelineCanvas(QWidget):
 
         audio_name = getattr(self, "audio_file_name", None)
         if audio_name:
-            painter.setPen(QPen(QColor("#f2cc60"), 1))
+            painter.setPen(self.tokens.pen(self.tokens.audio_label_text, 1.0))
             filename_rect = QRectF(8, self.RULER_HEIGHT + 4, 300, 18)
             painter.drawText(filename_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"Audio: {audio_name}")
 
@@ -2992,8 +3013,8 @@ class TimelineCanvas(QWidget):
             left = max(0, min(width, sx))
             right = max(0, min(width, ex))
             if right > left:
-                painter.fillRect(QRectF(left, self.RULER_HEIGHT, right-left, waveform_height), QColor(88, 166, 255, 70))
-                painter.setPen(QPen(QColor("#58a6ff"), 2))
+                painter.fillRect(QRectF(left, self.RULER_HEIGHT, right-left, waveform_height), self.tokens.selection_rect_brush(is_transcript=True))
+                painter.setPen(self.tokens.selection_rect_pen())
                 painter.drawLine(QPointF(left, self.RULER_HEIGHT), QPointF(left, height))
                 painter.drawLine(QPointF(right, self.RULER_HEIGHT), QPointF(right, height))
 
@@ -3004,18 +3025,11 @@ class TimelineCanvas(QWidget):
             left = max(0.0, min(float(width), min(sx, ex)))
             right = max(0.0, min(float(width), max(sx, ex)))
             if right > left:
-                painter.fillRect(QRectF(left, self.RULER_HEIGHT, right - left, waveform_height), QColor(88, 166, 255, 55))
-                painter.setPen(QPen(QColor("#58a6ff"), 2))
+                painter.fillRect(QRectF(left, self.RULER_HEIGHT, right - left, waveform_height), self.tokens.selection_rect_brush(is_transcript=False))
+                painter.setPen(self.tokens.selection_rect_pen())
                 painter.drawRect(QRectF(left, self.RULER_HEIGHT, right - left, waveform_height))
-                painter.fillRect(QRectF(left - 3, self.RULER_HEIGHT, 6, waveform_height), QColor("#58a6ff"))
-                painter.fillRect(QRectF(right - 3, self.RULER_HEIGHT, 6, waveform_height), QColor("#58a6ff"))
-
-        colors = [
-            QColor("#315c85"),
-            QColor("#386b59"),
-            QColor("#795d31"),
-            QColor("#674f7c"),
-        ]
+                painter.fillRect(QRectF(left - 3, self.RULER_HEIGHT, 6, waveform_height), self.tokens.selection_handle_brush())
+                painter.fillRect(QRectF(right - 3, self.RULER_HEIGHT, 6, waveform_height), self.tokens.selection_handle_brush())
 
         for index, story in enumerate(self.stories):
             start_x = self.time_to_x(story.start, width)
@@ -3024,27 +3038,16 @@ class TimelineCanvas(QWidget):
             if end_x < 0 or start_x > width:
                 continue
 
-            color = colors[index % len(colors)]
-            fill_color = QColor(color)
-
-            if index in self.selected_story_indices:
-                fill_color.setAlpha(130)
-                pen_width = 3
-                line_color = QColor("#ffffff")
-            else:
-                fill_color.setAlpha(60)
-                pen_width = 2
-                line_color = color.darker(150)
-
+            is_selected = index in self.selected_story_indices
             rect_start = max(0, start_x)
             rect_end = min(width, end_x)
 
             painter.fillRect(
                 QRectF(rect_start, self.RULER_HEIGHT, max(1, rect_end - rect_start), waveform_height),
-                fill_color,
+                self.tokens.story_segment_brush(index, is_selected=is_selected),
             )
 
-            painter.setPen(QPen(line_color, pen_width))
+            painter.setPen(self.tokens.story_segment_pen(index, is_selected=is_selected))
             if 0 <= start_x <= width:
                 painter.drawLine(QPointF(start_x, self.RULER_HEIGHT), QPointF(start_x, height))
             if 0 <= end_x <= width:
@@ -3053,7 +3056,7 @@ class TimelineCanvas(QWidget):
         # Draw Playhead Line
         cursor_x = self.time_to_x(self.position, width)
         if 0 <= cursor_x <= width:
-            painter.setPen(QPen(QColor("#ff5c5c"), 2))
+            painter.setPen(self.tokens.playhead_pen(2.0))
             painter.drawLine(QPointF(cursor_x, 0), QPointF(cursor_x, height))
 
         # Draw Background Task Status Banner (Waveform / Thumbnail Generation)
@@ -3072,11 +3075,11 @@ class TimelineCanvas(QWidget):
             badge_y = self.RULER_HEIGHT + 8
 
             badge_rect = QRectF(badge_x, badge_y, badge_w, badge_h)
-            painter.setPen(QPen(QColor("#58a6ff"), 1.5))
-            painter.setBrush(QColor(18, 20, 24, 230))
+            painter.setPen(self.tokens.pen(self.tokens.status_banner_border, 1.5))
+            painter.setBrush(self.tokens.brush(self.tokens.status_banner_bg, 230))
             painter.drawRoundedRect(badge_rect, 4.0, 4.0)
 
-            painter.setPen(QColor("#f0f6fc"))
+            painter.setPen(self.tokens.color(self.tokens.status_banner_text))
             painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, self.background_status_text)
             painter.restore()
 
@@ -3148,15 +3151,16 @@ class TimelineResizeHandle(QWidget):
 class TimelineWidget(QWidget):
     mediaDropped = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, tokens=None):
         super().__init__(parent)
+        self.tokens = tokens if tokens is not None else getattr(parent, "tokens", ThemeTokens())
         self.setAcceptDrops(True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.canvas = TimelineCanvas()
+        self.canvas = TimelineCanvas(self, tokens=self.tokens)
         self.scrollbar = QScrollBar(Qt.Orientation.Horizontal)
         self.resize_handle = TimelineResizeHandle(self)
 

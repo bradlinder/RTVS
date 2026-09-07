@@ -12,14 +12,13 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, QTimer, QSize
-from PySide6.QtGui import QAction, QIcon, QKeySequence, QTextCursor
+from PySide6.QtGui import QAction, QIcon, QKeySequence, QTextCursor, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QFileDialog,
     QFormLayout,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -71,11 +70,13 @@ class UiLayoutMixin:
         controls_row.setSpacing(8)
 
         self.play_button = QPushButton("Play", self)
+        self.play_button.setObjectName("play_button")
         self.play_button.setMinimumWidth(80)
         self.play_button.clicked.connect(self.toggle_play)
         controls_row.addWidget(self.play_button)
 
         self.time_label = QLabel("00:00:00 / 00:00:00", self)
+        self.time_label.setObjectName("time_label")
         self.time_label.setMinimumWidth(160)
         controls_row.addWidget(self.time_label)
 
@@ -90,6 +91,7 @@ class UiLayoutMixin:
         controls_row.addWidget(self.save_state_label)
 
         self.quick_save_button = QPushButton("Save Project", self)
+        self.quick_save_button.setObjectName("quick_save_button")
         self.quick_save_button.clicked.connect(self.save_project)
         controls_row.addWidget(self.quick_save_button)
 
@@ -100,16 +102,19 @@ class UiLayoutMixin:
         progress_row.setSpacing(8)
 
         self.processing_stage_label = QLabel("", self)
+        self.processing_stage_label.setObjectName("processing_stage_label")
         self.processing_stage_label.setStyleSheet("font-weight: bold; color: #4a90e2;")
         progress_row.addWidget(self.processing_stage_label)
 
         self.progress_bar = QProgressBar(self)
+        self.progress_bar.setObjectName("progress_bar")
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress = self.progress_bar  # Alias used in media_batch and processing
         progress_row.addWidget(self.progress_bar, 1)
 
         self.cancel_button = QPushButton("Cancel", self)
+        self.cancel_button.setObjectName("cancel_button")
         self.cancel_button.clicked.connect(self.cancel_current_process)
         self.cancel_btn = self.cancel_button
         progress_row.addWidget(self.cancel_button)
@@ -143,11 +148,13 @@ class UiLayoutMixin:
         search_bar.setSpacing(6)
 
         self.transcript_search_input = QLineEdit(self)
+        self.transcript_search_input.setObjectName("transcript_search_input")
         self.transcript_search_input.setPlaceholderText("Search transcript...")
         self.transcript_search_input.returnPressed.connect(self.trigger_find_next)
         search_bar.addWidget(self.transcript_search_input, 1)
 
         self.find_next_btn = QPushButton("Find Next", self)
+        self.find_next_btn.setObjectName("find_next_btn")
         self.find_next_btn.clicked.connect(self.trigger_find_next)
         search_bar.addWidget(self.find_next_btn)
 
@@ -157,6 +164,7 @@ class UiLayoutMixin:
         search_bar.addWidget(self.transcript_language_selector)
 
         self.translate_button = QPushButton("Translate...", self)
+        self.translate_button.setObjectName("translate_button")
         self.translate_button.clicked.connect(lambda: self.start_translation("en", "es"))
         search_bar.addWidget(self.translate_button)
 
@@ -167,9 +175,31 @@ class UiLayoutMixin:
         self.transcript_mode_toggle_btn.clicked.connect(self.toggle_transcript_editing_mode)
         search_bar.addWidget(self.transcript_mode_toggle_btn)
 
+        # Compact transcript font controls. The font size is independent of the
+        # rest of the application and is persisted between sessions.
+        self.transcript_font_down_btn = QPushButton("A−", self)
+        self.transcript_font_down_btn.setObjectName("transcript_font_down_btn")
+        self.transcript_font_down_btn.setToolTip("Decrease transcript font size")
+        self.transcript_font_down_btn.clicked.connect(lambda: self.adjust_transcript_font_size(-1))
+        search_bar.addWidget(self.transcript_font_down_btn)
+
+        self.transcript_font_reset_btn = QPushButton("A", self)
+        self.transcript_font_reset_btn.setObjectName("transcript_font_reset_btn")
+        self.transcript_font_reset_btn.setToolTip("Reset transcript font size")
+        self.transcript_font_reset_btn.clicked.connect(self.reset_transcript_font_size)
+        search_bar.addWidget(self.transcript_font_reset_btn)
+
+        self.transcript_font_up_btn = QPushButton("A+", self)
+        self.transcript_font_up_btn.setObjectName("transcript_font_up_btn")
+        self.transcript_font_up_btn.setToolTip("Increase transcript font size")
+        self.transcript_font_up_btn.clicked.connect(lambda: self.adjust_transcript_font_size(1))
+        search_bar.addWidget(self.transcript_font_up_btn)
+
         left_layout.addLayout(search_bar)
 
         self.transcript_view = InteractiveTranscriptEdit(self)
+        self.transcript_view.setObjectName("transcript_view")
+        self.transcript_view.set_font_scale(getattr(self, "transcript_font_scale", 1.0))
         left_layout.addWidget(self.transcript_view, 1)
 
         splitter.addWidget(left_widget)
@@ -181,13 +211,20 @@ class UiLayoutMixin:
         right_layout.setSpacing(6)
 
         # Stories Box
-        self.stories_panel = QGroupBox("Stories & Segments", self)
+        self.stories_panel = QWidget(self)
+        self.stories_panel.setObjectName("stories_panel")
         stories_box = self.stories_panel
         stories_box_layout = QVBoxLayout(stories_box)
+        stories_box_layout.setContentsMargins(8, 8, 8, 8)
+        stories_box_layout.setSpacing(6)
+        stories_header = QLabel("Stories & Segments", stories_box)
+        stories_header.setObjectName("stories_section_header")
+        stories_box_layout.addWidget(stories_header)
         stories_box_layout.setContentsMargins(6, 8, 6, 6)
         stories_box_layout.setSpacing(4)
 
         self.story_list = StoryListWidget(self)
+        self.story_list.setObjectName("story_list")
         self.story_list.setSelectionMode(StoryListWidget.SelectionMode.ExtendedSelection)
         stories_box_layout.addWidget(self.story_list, 1)
 
@@ -222,20 +259,24 @@ class UiLayoutMixin:
         story_btns_row.setSpacing(4)
 
         self.add_story_btn = QPushButton("Add Story", self)
+        self.add_story_btn.setObjectName("add_story_btn")
         self.add_story_btn.setToolTip("Add story from active timeline selection or highlighted transcript text")
         self.add_story_btn.clicked.connect(self.add_story_from_active_selection)
         story_btns_row.addWidget(self.add_story_btn)
 
         self.select_all_stories_btn = QPushButton("Select All", self)
+        self.select_all_stories_btn.setObjectName("select_all_stories_btn")
         self.select_all_stories_btn.setToolTip("Select all stories in the list")
         self.select_all_stories_btn.clicked.connect(self.select_all_stories)
         story_btns_row.addWidget(self.select_all_stories_btn)
 
         self.delete_story_btn = QPushButton("Delete", self)
+        self.delete_story_btn.setObjectName("delete_story_btn")
         self.delete_story_btn.clicked.connect(self.delete_selected_story)
         story_btns_row.addWidget(self.delete_story_btn)
 
         self.export_stories_btn = QPushButton("Export...", self)
+        self.export_stories_btn.setObjectName("export_stories_btn")
         self.export_stories_btn.setToolTip("Export full episode, selected stories, or draft to WordPress")
         self.export_stories_btn.clicked.connect(self.open_unified_export_dialog)
         story_btns_row.addWidget(self.export_stories_btn)
@@ -244,9 +285,15 @@ class UiLayoutMixin:
         right_layout.addWidget(stories_box, 2)
 
         # Activity / History Box
-        self.activity_panel = QGroupBox("Activity History & Recovery", self)
+        self.activity_panel = QWidget(self)
+        self.activity_panel.setObjectName("activity_panel")
         activity_box = self.activity_panel
         activity_box_layout = QVBoxLayout(activity_box)
+        activity_box_layout.setContentsMargins(8, 8, 8, 8)
+        activity_box_layout.setSpacing(6)
+        activity_header = QLabel("Activity History & Recovery", activity_box)
+        activity_header.setObjectName("activity_section_header")
+        activity_box_layout.addWidget(activity_header)
         activity_box_layout.setContentsMargins(6, 8, 6, 6)
         activity_box_layout.setSpacing(4)
 
@@ -256,10 +303,12 @@ class UiLayoutMixin:
 
         act_btns_row = QHBoxLayout()
         clear_act_btn = QPushButton("Clear Log", self)
+        clear_act_btn.setObjectName("clear_activity_btn")
         clear_act_btn.clicked.connect(self.clear_activity_log)
         act_btns_row.addWidget(clear_act_btn)
 
         export_act_btn = QPushButton("Export Log...", self)
+        export_act_btn.setObjectName("export_activity_btn")
         export_act_btn.clicked.connect(self.export_activity_log)
         act_btns_row.addWidget(export_act_btn)
 
@@ -293,6 +342,14 @@ class UiLayoutMixin:
         self.transcript_view.textChanged.connect(self.on_transcript_text_changed)
         self.transcript_view.cursorPositionChanged.connect(self.on_transcript_selection_changed)
         self.transcript_view.editingModeChanged.connect(self._on_transcript_editing_mode_changed)
+
+        # Transcript zoom shortcuts. Use platform_seq so Ctrl becomes Command on macOS.
+        self.shortcut_transcript_font_up = QShortcut(platform_seq("Ctrl++"), self)
+        self.shortcut_transcript_font_up.activated.connect(lambda: self.adjust_transcript_font_size(1))
+        self.shortcut_transcript_font_down = QShortcut(platform_seq("Ctrl+-"), self)
+        self.shortcut_transcript_font_down.activated.connect(lambda: self.adjust_transcript_font_size(-1))
+        self.shortcut_transcript_font_reset = QShortcut(platform_seq("Ctrl+0"), self)
+        self.shortcut_transcript_font_reset.activated.connect(self.reset_transcript_font_size)
 
         # Connect Story List signals
         self.story_list.itemSelectionChanged.connect(self.story_selection_changed)
@@ -739,6 +796,28 @@ class UiLayoutMixin:
             # Re-render so word-level clickable anchors and highlights are freshly constructed
             self.render_transcript()
 
+    def _apply_transcript_font_scale(self, scale, persist=True):
+        """Apply a transcript-only font scale and optionally persist it."""
+        scale = max(0.80, min(1.80, float(scale)))
+        # Snap to 5% increments for predictable keyboard/button behavior.
+        scale = round(scale / 0.05) * 0.05
+        self.transcript_font_scale = scale
+        if hasattr(self, "transcript_view"):
+            self.transcript_view.set_font_scale(scale)
+        if persist and hasattr(self, "settings_store"):
+            self.settings_store.setValue("transcript_font_scale", scale)
+            self.settings_store.sync()
+        if hasattr(self, "statusBar"):
+            self.statusBar().showMessage(f"Transcript font size: {round(scale * 100)}%", 1500)
+
+    def adjust_transcript_font_size(self, direction):
+        """Increase or decrease transcript font size by one 5% step."""
+        self._apply_transcript_font_scale(self.transcript_font_scale + (0.05 * (1 if direction > 0 else -1)))
+
+    def reset_transcript_font_size(self):
+        """Restore the default transcript font size."""
+        self._apply_transcript_font_scale(1.0)
+
     def show_shortcuts_dialog(self):
         """Display a searchable or structured reference table of all active shortcuts."""
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox
@@ -792,6 +871,8 @@ class UiLayoutMixin:
             <tr><td><b>Seek to Start / End</b></td><td><kbd>Home</kbd> / <kbd>End</kbd></td></tr>
             <tr><td><b>Zoom In / Out on Timeline</b></td><td><kbd>+</kbd> / <kbd>-</kbd> or <kbd>Mouse Wheel</kbd></td></tr>
             <tr><td><b>Pan Timeline View</b></td><td><kbd>Shift + Wheel</kbd> or <kbd>Middle-Click Drag</kbd></td></tr>
+            <tr><td><b>Increase / Decrease Transcript Text</b></td><td><kbd>{cmd}++</kbd> / <kbd>{cmd}+-</kbd></td></tr>
+            <tr><td><b>Reset Transcript Text Size</b></td><td><kbd>{cmd}+0</kbd></td></tr>
         </table>
 
         <h3>File & Project</h3>
