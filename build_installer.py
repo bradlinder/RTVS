@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the installable Radio & TV Segmenter 1.8 application with PyInstaller.
+"""Build the installable Radio & TV Segmenter 1.9.8 application with PyInstaller.
 
 Run this script on the target operating system (Windows installers must be
 built on Windows, macOS ones on macOS -- PyInstaller does not cross-compile).
@@ -39,7 +39,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "1.9.7_d"
+    PROJECT_VERSION = "1.9.8"
 
 # Only the PySide6 submodules this app actually imports (verified against
 # every `from PySide6.X import ...` in the source tree). The previous build

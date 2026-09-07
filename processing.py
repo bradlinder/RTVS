@@ -999,16 +999,12 @@ class ProcessingMixin:
                 seg = message.get("segment")
                 if seg:
                     self._handle_live_streaming_segment(seg)
-            elif kind == "streaming_segment":
-              seg = message.get("segment")
-              if seg:
-                  self._handle_live_streaming_segment(seg)
-              elif kind == "progress":
-                  percent = int(message.get("percent", 0))
-                  status = str(message.get("message", "Transcription in progress..."))
-                  self.transcription_progress(status, percent)
-                  self.log_activity(f"[TRANSCRIPTION] {status}")
-              elif kind == "finished":
+            elif kind == "progress":
+                percent = int(message.get("percent", 0))
+                status = str(message.get("message", "Transcription in progress..."))
+                self.transcription_progress(status, percent)
+                self.log_activity(f"[TRANSCRIPTION] {status}")
+            elif kind == "finished":
                 if not self.transcription_helper_ready:
                     self.transcription_helper_ready = True
 
@@ -1488,33 +1484,33 @@ class ProcessingMixin:
                 )
 
             elif kind == "progress":
-              percent = int(message.get("percent", 0))
-              status = str(message.get("message", "Speaker Detection in progress..."))
-              status_lower = status.lower()
+                percent = int(message.get("percent", 0))
+                status = str(message.get("message", "Speaker Detection in progress..."))
+                status_lower = status.lower()
 
-              # Map stage index reliably using status keywords instead of brittle percentage drops
-              if any(k in status_lower for k in ["vad", "speech", "detect", "init", "load", "audio"]):
-                  stage_idx = 0
-              elif any(k in status_lower for k in ["embed", "vector", "extract", "feature", "compute"]):
-                  stage_idx = 1
-              elif any(k in status_lower for k in ["cluster", "group", "assemble", "final", "segment"]):
-                  stage_idx = 2
-              else:
-                  stage_idx = getattr(self, "_diar_stage_idx", 0)
+                # Map stage index reliably using status keywords instead of brittle percentage drops
+                if any(k in status_lower for k in ["vad", "speech", "detect", "init", "load", "audio"]):
+                    stage_idx = 0
+                elif any(k in status_lower for k in ["embed", "vector", "extract", "feature", "compute"]):
+                    stage_idx = 1
+                elif any(k in status_lower for k in ["cluster", "group", "assemble", "final", "segment"]):
+                    stage_idx = 2
+                else:
+                    stage_idx = getattr(self, "_diar_stage_idx", 0)
 
-              self._diar_stage_idx = stage_idx
-              total_stages = 3
-              effective_stage = min(stage_idx, total_stages - 1)
-              calculated_percent = int(((effective_stage * 100.0) + float(percent)) / float(total_stages))
+                self._diar_stage_idx = stage_idx
+                total_stages = 3
+                effective_stage = min(stage_idx, total_stages - 1)
+                calculated_percent = int(((effective_stage * 100.0) + float(percent)) / float(total_stages))
 
-              last_overall = getattr(self, "_diar_last_overall_percent", 0)
-              overall_percent = max(last_overall, calculated_percent)
-              overall_percent = max(0, min(99, overall_percent))
-              self._diar_last_overall_percent = overall_percent
+                last_overall = getattr(self, "_diar_last_overall_percent", 0)
+                overall_percent = max(last_overall, calculated_percent)
+                overall_percent = max(0, min(99, overall_percent))
+                self._diar_last_overall_percent = overall_percent
 
-              stable_msg = "Speaker Detection"
-              self.update_processing_progress(overall_percent, stable_msg)
-              self.log_activity(f"[SPEAKER DETECT] {status}")
+                stable_msg = "Speaker Detection"
+                self.update_processing_progress(overall_percent, stable_msg)
+                self.log_activity(f"[SPEAKER DETECT] {status}")
 
             elif kind == "finished":
                 if not self.diarization_helper_ready:

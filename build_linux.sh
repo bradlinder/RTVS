@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")"
 
 echo "====================================================================="
-echo " Radio & TV Segmenter v1.7 - Automated 1-Click Build (Linux)"
+echo " Radio & TV Segmenter v1.9.8 - Automated 1-Click Build (Linux)"
 echo "====================================================================="
 echo ""
 
@@ -41,7 +41,7 @@ python3 build_installer.py
 
 # 5. Build Debian package & distributable tarball
 echo "[5/5] Packaging Linux distributions (.deb & .tar.gz)..."
-VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "1.7")
+VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "1.9.8")
 
 if [ -f "installer/Linux/build_deb.sh" ] && command -v dpkg-deb >/dev/null 2>&1; then
     bash installer/Linux/build_deb.sh

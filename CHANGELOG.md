@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.9.8
+
+- **Resilient Multi-Stage Speaker Detection Progress**: Replaced brittle percentage-drop heuristics with keyword-based stage mapping across VAD, embedding extraction, and speaker clustering stages. Added monotonic percentage scaling with an upper safety ceiling (99%) to eliminate progress jumps and stalling during diarization.
+- **Unified VAD Story Detection Pipeline**: Standardized story auto-detection on the Silero VAD audio pipeline with adaptive silence thresholding, 80% silence scaling margin, minimum story duration filters (5s), and music/sound token sanitization (`MUSIC_TOKEN_RE`).
+- **Sequential Story Indexing**: Fixed story title generation to use contiguous sequential numbering (`Story 1`, `Story 2`, ...) even when transient sub-5-second audio blips are filtered out.
+- **Unified Application Version 1.9.8**: Synchronized version 1.9.8 across the application constants, local PyInstaller/Inno Setup/Debian/macOS builders, GitHub Actions release workflows, documentation, and update verification manifests.
+
 ## v1.9.6
 
 - **Moved WordPress settings into Preferences**: Site URL, Username, App Password, and Test Connection now live under Preferences > WordPress. The standalone "WordPress Export Settings..." menu item has been removed; the contextual "WordPress Settings..." button inside the Export dialog is unchanged and uses the same underlying settings.

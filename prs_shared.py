@@ -237,7 +237,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "1.9.7_d"
+PROJECT_VERSION = "1.9.8"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -1791,7 +1791,7 @@ class StoryAutoDetectWorker(QObject):
                         detected_stories.append(Story(
                             start=round(st, 2),
                             end=round(et, 2),
-                            title=f"Story {idx + 1}"
+                            title=f"Story {len(detected_stories) + 1}"
                         ))
 
             if not detected_stories and total_dur > 0:
@@ -3434,30 +3434,98 @@ class TranslationWorker(QObject):
             except Exception: pass
             raise
 
+    def _get_optimal_cpu_threads(self) -> int:
+        """Compute optimal thread count for translation on CPU (capped to 4-8)."""
+        import os
+        try:
+            import psutil
+            count = psutil.cpu_count(logical=False) or os.cpu_count() or 4
+        except Exception:
+            count = os.cpu_count() or 4
+        return max(1, min(8, count))
+
+    def _ensure_ctranslate2_model(self, model_dir: Path) -> Path:
+        """Ensure an INT8-quantized CTranslate2 model exists in model_dir / 'ct2_int8'.
+        
+        Converts the Hugging Face OPUS-MT PyTorch/Safetensors model if not already cached.
+        """
+        ct2_dir = model_dir / "ct2_int8"
+        marker = ct2_dir / ".complete"
+        if ct2_dir.is_dir() and marker.is_file() and (ct2_dir / "model.bin").is_file():
+            return ct2_dir
+
+        # Convert HF model to CTranslate2 INT8 model
+        self.progress.emit(7, "Optimizing translation engine for fast CPU execution…")
+        import ctranslate2
+        from ctranslate2.converters import TransformersConverter
+
+        staging_ct2 = model_dir / "ct2_int8.converting"
+        if staging_ct2.exists():
+            import shutil
+            shutil.rmtree(staging_ct2, ignore_errors=True)
+        staging_ct2.mkdir(parents=True, exist_ok=True)
+
+        converter = TransformersConverter(str(model_dir))
+        converter.convert(
+            str(staging_ct2),
+            quantization="int8",
+            force=True,
+        )
+
+        marker_file = staging_ct2 / ".complete"
+        marker_file.write_text("ct2_int8_complete", encoding="utf-8")
+
+        if ct2_dir.exists():
+            import shutil
+            shutil.rmtree(ct2_dir, ignore_errors=True)
+        staging_ct2.rename(ct2_dir)
+        return ct2_dir
+
     def _load_local_translation(self):
         if not self.model_is_installed(self.from_code, self.to_code, self.model_variant):
             return None
+
+        model_dir = Path(self.model_dir(self.from_code, self.to_code, self.model_variant))
+        self.model_dir_path = model_dir
+
+        # Try fast CTranslate2 engine first
         try:
-            import torch
-            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-        except Exception as exc:
-            raise RuntimeError(
-                f"OPUS-MT {self.model_variant} requires the local translation prerequisites. "
-                "Install them with: pip install -r requirements_translation.txt"
-            ) from exc
+            import ctranslate2
+            from transformers import AutoTokenizer
 
-        model_dir = self.model_dir(self.from_code, self.to_code, self.model_variant)
-        tokenizer = AutoTokenizer.from_pretrained(str(model_dir), local_files_only=True, use_fast=False)
-        model = AutoModelForSeq2SeqLM.from_pretrained(str(model_dir), local_files_only=True)
-        model.eval()
-        # Translation remains CPU-only in this version. Hardware acceleration is
-        # deliberately not advertised until a backend is fully integrated and tested.
-        device = "cpu"
-        model = model.to(device)
-        self.translation_device = device
-        return tokenizer, model, torch
+            ct2_dir = self._ensure_ctranslate2_model(model_dir)
+            tokenizer = AutoTokenizer.from_pretrained(str(model_dir), local_files_only=True, use_fast=False)
 
-    def _translate_batches(self, tokenizer, model, torch):
+            num_threads = self._get_optimal_cpu_threads()
+            translator = ctranslate2.Translator(
+                str(ct2_dir),
+                device="cpu",
+                compute_type="int8",
+                inter_threads=1,
+                intra_threads=num_threads,
+            )
+            self.translation_device = "cpu"
+            return "ctranslate2", tokenizer, translator, None
+        except Exception as ct2_exc:
+            # Fallback to PyTorch/Transformers pipeline if CTranslate2 fails or is unavailable
+            try:
+                import torch
+                from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+            except Exception as exc:
+                raise RuntimeError(
+                    f"OPUS-MT {self.model_variant} requires translation prerequisites (ctranslate2 / transformers). "
+                    f"Details: {ct2_exc} / {exc}"
+                ) from exc
+
+            tokenizer = AutoTokenizer.from_pretrained(str(model_dir), local_files_only=True, use_fast=False)
+            model = AutoModelForSeq2SeqLM.from_pretrained(str(model_dir), local_files_only=True)
+            model.eval()
+            device = "cpu"
+            model = model.to(device)
+            self.translation_device = device
+            return "transformers", tokenizer, model, torch
+
+    def _translate_batches(self, engine_type, tokenizer, model_or_translator, torch_mod):
         results = list(self.resume_results)
         start_index = len(results)
         total = max(1, len(self.segments))
@@ -3465,71 +3533,135 @@ class TranslationWorker(QObject):
             results = []
             start_index = 0
 
-        batch_size = 8
+        # Process in macro-chunks to maintain sequential progress and allow cancellation
+        batch_size = 32 if engine_type == "ctranslate2" else 8
+
         for batch_start in range(start_index, len(self.segments), batch_size):
             if self._cancelled:
                 self.cancelled.emit(results, f"{self.from_code}-{self.to_code}")
                 return None
-                
+
             batch = self.segments[batch_start:batch_start + batch_size]
             texts = [str(seg.get("text", "")).strip() for seg in batch]
-            
+
             self.progress.emit(
                 10 + int((batch_start / total) * 85),
                 f"Translating segments {batch_start + 1}–{min(batch_start + len(batch), len(self.segments))} of {total}…",
             )
-            
+
             nonempty_indices = [i for i, text in enumerate(texts) if text]
             translated_by_index = {i: "" for i in range(len(batch))}
-            
+
             if nonempty_indices:
                 nonempty_texts = [texts[i] for i in nonempty_indices]
-                
-                # Tokenize each source transcript segment cleanly
-                encoded = tokenizer(
-                    nonempty_texts,
-                    return_tensors="pt",
-                    padding=True,
-                    truncation=True,
-                    max_length=512, 
-                )
-                
-                if getattr(self, "translation_device", "cpu") != "cpu":
+
+                if engine_type == "ctranslate2":
                     try:
-                        encoded = {k: v.to(self.translation_device) for k, v in encoded.items()}
+                        # Prepare input tokens using the HF tokenizer associated with the converted model
+                        # MarianTokenizer encodes text into token IDs ending with </s> (EOS)
+                        # convert_ids_to_tokens converts token IDs into strings matching the model vocabulary
+                        source_tokens = [
+                            tokenizer.convert_ids_to_tokens(
+                                tokenizer.encode(text, truncation=True, max_length=512)
+                            )
+                            for text in nonempty_texts
+                        ]
+
+                        translations = model_or_translator.translate_batch(
+                            source_tokens,
+                            beam_size=2,
+                            patience=1.0,
+                            max_batch_size=32,
+                            batch_type="examples",
+                            repetition_penalty=1.2,
+                            no_repeat_ngram_size=3,
+                            max_decoding_length=256,
+                            replace_unknowns=True,
+                        )
+
+                        for idx, res in zip(nonempty_indices, translations):
+                            hyp_tokens = res.hypotheses[0] if res.hypotheses else []
+                            token_ids = tokenizer.convert_tokens_to_ids(hyp_tokens)
+                            try:
+                                decoded_text = tokenizer.decode(token_ids, skip_special_tokens=True)
+                            except Exception:
+                                decoded_text = tokenizer.convert_tokens_to_string(hyp_tokens)
+                            translated_by_index[idx] = decoded_text.strip()
                     except Exception:
-                        self.translation_device = "cpu"
+                        # Fallback to robust transformers pipeline if ctranslate2 execution fails
+                        model_dir = getattr(self, "model_dir_path", None)
+                        if model_dir is None:
+                            model_dir = Path(self.model_dir(self.from_code, self.to_code, self.model_variant))
+                            self.model_dir_path = model_dir
+                        import torch
+                        from transformers import AutoModelForSeq2SeqLM
+                        if not hasattr(self, "_fallback_hf_model"):
+                            self._fallback_hf_model = AutoModelForSeq2SeqLM.from_pretrained(str(model_dir), local_files_only=True).eval()
+                        hf_model = self._fallback_hf_model
 
-                # =============================================================
-                # TRANSLATION CODE PATCH
-                # =============================================================
-                with torch.inference_mode():
-                    generated = model.generate(
-                        **encoded,
-                        num_beams=2,
-                        max_new_tokens=256,
-                        early_stopping=True,
+                        encoded = tokenizer(
+                            nonempty_texts,
+                            return_tensors="pt",
+                            padding=True,
+                            truncation=True,
+                            max_length=512,
+                        )
+                        with torch.inference_mode():
+                            generated = hf_model.generate(
+                                **encoded,
+                                num_beams=2,
+                                max_new_tokens=256,
+                                repetition_penalty=1.2,
+                                no_repeat_ngram_size=3,
+                                early_stopping=True,
+                            )
+                        decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)
+                        for idx, text in zip(nonempty_indices, decoded):
+                            translated_by_index[idx] = text.strip()
+                else:
+                    # PyTorch/Transformers fallback
+                    encoded = tokenizer(
+                        nonempty_texts,
+                        return_tensors="pt",
+                        padding=True,
+                        truncation=True,
+                        max_length=512,
                     )
-                # =============================================================
-                    
-                decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)
-                for idx, text in zip(nonempty_indices, decoded):
-                    translated_by_index[idx] = text.strip()
 
-            # Reconstruct 1:1 segment mappings so timestamps, speakers, and sentence structures match perfectly
+                    if getattr(self, "translation_device", "cpu") != "cpu":
+                        try:
+                            encoded = {k: v.to(self.translation_device) for k, v in encoded.items()}
+                        except Exception:
+                            self.translation_device = "cpu"
+
+                    with torch_mod.inference_mode():
+                        generated = model_or_translator.generate(
+                            **encoded,
+                            num_beams=2,
+                            max_new_tokens=256,
+                            repetition_penalty=1.2,
+                            no_repeat_ngram_size=3,
+                            early_stopping=True,
+                        )
+
+                    decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)
+                    for idx, text in zip(nonempty_indices, decoded):
+                        translated_by_index[idx] = text.strip()
+
+            # Reconstruct 1:1 segment mappings preserving all original metadata and timestamps
             for i, segment in enumerate(batch):
                 translated = translated_by_index[i]
-                results.append({
-                    "text": translated if translated else segment.get("text", ""),
-                    "start": float(segment.get("start", 0)),
-                    "end": float(segment.get("end", 0)),
-                })
-                
+                new_seg = copy.deepcopy(segment) if isinstance(segment, dict) else {}
+                new_seg["text"] = translated if translated else segment.get("text", "")
+                new_seg["start"] = float(segment.get("start", 0))
+                new_seg["end"] = float(segment.get("end", 0))
+                results.append(new_seg)
+
             completed = batch_start + len(batch)
             pct = 10 + int((completed / total) * 85)
             self.progress.emit(pct, f"Translated {completed} of {total} segments…")
             self.checkpoint.emit(results, f"{self.from_code}-{self.to_code}", completed)
-            
+
         return results
 
     def run(self):
@@ -3559,11 +3691,11 @@ class TranslationWorker(QObject):
                 return
 
             self.progress.emit(5, "Loading OPUS-MT model into memory…")
-            tokenizer, model, torch = self._load_local_translation()
+            engine_type, tokenizer, model_or_translator, torch_mod = self._load_local_translation()
             if self._cancelled:
                 self.cancelled.emit(self.resume_results, f"{self.from_code}-{self.to_code}")
                 return
-            results = self._translate_batches(tokenizer, model, torch)
+            results = self._translate_batches(engine_type, tokenizer, model_or_translator, torch_mod)
             if results is not None and not self._cancelled:
                 self.progress.emit(100, "Translation complete.")
                 self.finished.emit(results, f"{self.from_code}-{self.to_code}")
