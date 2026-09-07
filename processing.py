@@ -999,17 +999,16 @@ class ProcessingMixin:
                 seg = message.get("segment")
                 if seg:
                     self._handle_live_streaming_segment(seg)
-            elif kind == "progress":
-                percent = int(message.get("percent", 0))
-                status = str(message.get("message", "Transcription in progress..."))
-                self.transcription_progress(status, percent)
-                self.log_activity(f"[TRANSCRIPTION] {status}")
-            elif kind == "progress":
-                percent = int(message.get("percent", 0))
-                status = str(message.get("message", "Transcription in progress..."))
-                self.transcription_progress(status, percent)
-                self.log_activity(f"[TRANSCRIPTION] {status}")
-            elif kind == "finished":
+            elif kind == "streaming_segment":
+              seg = message.get("segment")
+              if seg:
+                  self._handle_live_streaming_segment(seg)
+              elif kind == "progress":
+                  percent = int(message.get("percent", 0))
+                  status = str(message.get("message", "Transcription in progress..."))
+                  self.transcription_progress(status, percent)
+                  self.log_activity(f"[TRANSCRIPTION] {status}")
+              elif kind == "finished":
                 if not self.transcription_helper_ready:
                     self.transcription_helper_ready = True
 
@@ -1259,6 +1258,9 @@ class ProcessingMixin:
 
     def start_diarization(self):
         self.log_activity("[SPEAKER DETECT] Speaker Detection startup requested.")
+        self._diar_stage_idx = 0
+        self._diar_last_raw_pct = 0.0
+        self._diar_last_overall_percent = 0
 
         if not self.audio_file:
             self.log_activity("[SPEAKER DETECT] Aborted: no audio file is loaded.")
@@ -1389,10 +1391,28 @@ class ProcessingMixin:
 
         self.diarization_process = process
 
+        worker_cmd = [
+            "--diarize", str(self.audio_file), "--expected-speakers", str(expected_speakers)
+        ]
+        if transcript_segments:
+            try:
+                import tempfile
+                import json
+                tf = tempfile.NamedTemporaryFile(
+                    prefix="diarize_transcript_", suffix=".json", delete=False, mode="w", encoding="utf-8"
+                )
+                json.dump({"segments": transcript_segments}, tf)
+                tf.close()
+                self.diarization_transcript_file = tf.name
+                worker_cmd.extend(["--transcript-file", str(tf.name)])
+                self.log_activity(
+                    f"[SPEAKER DETECT] Fast transcript-guided diarization enabled ({len(transcript_segments)} segments)."
+                )
+            except Exception as exc:
+                self.log_activity(f"[SPEAKER DETECT] Could not write temporary transcript file: {exc}")
+
         try:
-            worker_executable, worker_args, env_overrides = self._worker_command([
-                "--diarize", str(self.audio_file), "--expected-speakers", str(expected_speakers)
-            ])
+            worker_executable, worker_args, env_overrides = self._worker_command(worker_cmd)
         except FileNotFoundError as exc:
             self.cleanup_diarization_process()
             self.diarization_error(str(exc))
@@ -1468,13 +1488,33 @@ class ProcessingMixin:
                 )
 
             elif kind == "progress":
-                percent = int(message.get("percent", 0))
-                status = str(message.get("message", "Speaker Detection in progress..."))
-                self.progress.setValue(percent)
-                self.statusBar().showMessage(status)
-                if hasattr(self, "processing_stage_label") and self.processing_stage_label is not None:
-                    self.processing_stage_label.setText(status)
-                self.log_activity(f"[SPEAKER DETECT] {status}")
+              percent = int(message.get("percent", 0))
+              status = str(message.get("message", "Speaker Detection in progress..."))
+              status_lower = status.lower()
+
+              # Map stage index reliably using status keywords instead of brittle percentage drops
+              if any(k in status_lower for k in ["vad", "speech", "detect", "init", "load", "audio"]):
+                  stage_idx = 0
+              elif any(k in status_lower for k in ["embed", "vector", "extract", "feature", "compute"]):
+                  stage_idx = 1
+              elif any(k in status_lower for k in ["cluster", "group", "assemble", "final", "segment"]):
+                  stage_idx = 2
+              else:
+                  stage_idx = getattr(self, "_diar_stage_idx", 0)
+
+              self._diar_stage_idx = stage_idx
+              total_stages = 3
+              effective_stage = min(stage_idx, total_stages - 1)
+              calculated_percent = int(((effective_stage * 100.0) + float(percent)) / float(total_stages))
+
+              last_overall = getattr(self, "_diar_last_overall_percent", 0)
+              overall_percent = max(last_overall, calculated_percent)
+              overall_percent = max(0, min(99, overall_percent))
+              self._diar_last_overall_percent = overall_percent
+
+              stable_msg = "Speaker Detection"
+              self.update_processing_progress(overall_percent, stable_msg)
+              self.log_activity(f"[SPEAKER DETECT] {status}")
 
             elif kind == "finished":
                 if not self.diarization_helper_ready:
@@ -1547,6 +1587,9 @@ class ProcessingMixin:
         self.diarization_output_buffer = ""
         self.diarization_helper_ready = False
         self.diarization_result_received = False
+        self._diar_stage_idx = 0
+        self._diar_last_raw_pct = 0.0
+        self._diar_last_overall_percent = 0
 
         if process is not None:
             
@@ -1563,10 +1606,22 @@ class ProcessingMixin:
             except Exception:
                 pass
 
+        transcript_tmp = getattr(self, "diarization_transcript_file", None)
+        if transcript_tmp:
+            self.diarization_transcript_file = None
+            try:
+                if os.path.exists(transcript_tmp):
+                    os.unlink(transcript_tmp)
+            except OSError:
+                pass
+
     def diarization_progress(self, message, percent):
         self.update_processing_progress(percent, message)
 
     def diarization_finished(self, result):
+        self._diar_stage_idx = 0
+        self._diar_last_raw_pct = 0.0
+        self._diar_last_overall_percent = 0
         self.progress.hide()
         self.cancel_button.hide()
         self.set_tools_actions_enabled(True)
@@ -1597,6 +1652,9 @@ class ProcessingMixin:
         self.statusBar().showMessage(f"Speaker detection complete: {number} speaker(s) detected.")
 
     def diarization_error(self, message):
+        self._diar_stage_idx = 0
+        self._diar_last_raw_pct = 0.0
+        self._diar_last_overall_percent = 0
         self.pending_diarization = False
         self.pipeline_speaker_detection_requested = False
         self.pipeline_active = False
@@ -1681,14 +1739,14 @@ class ProcessingMixin:
         self.update_processing_progress(percent, message)
 
     def auto_detect_finished(self, new_stories):
-        # 1. Hide progress bar and stop background tick timer unconditionally
+        # 1. Complete progress and stop the 1-second ETA timer unconditionally
         self.progress.setValue(100)
         self.progress.hide()
         self.cancel_button.hide()
         self.set_processing_stage(None)
         self.set_tools_actions_enabled(True)
 
-        # 2. Commit stories to UI and state
+        # 2. Commit stories to project state and update UI lists
         old_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
         self.commit_story_change(old_stories, new_stories, "Detect Stories")
 
@@ -1700,7 +1758,7 @@ class ProcessingMixin:
         self.statusBar().showMessage(msg)
         self.save_project()
 
-        # 3. Advance automated multi-stage pipeline if active
+        # 3. Advance automated multi-stage pipelines if active
         if self.pipeline_active and self.pipeline_queue:
             QTimer.singleShot(0, self._run_next_selected_processing)
         elif self.batch_active and self.pipeline_active:
