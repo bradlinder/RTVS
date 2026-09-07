@@ -1,5 +1,9 @@
 #define MyAppName "Radio & TV Segmenter"
-#define MyAppVersion "2.1-stable"
+
+#ifndef MyAppVersion
+#define MyAppVersion "2.1.0-beta"
+#endif
+
 #define MyAppPublisher "Radio & TV Segmenter"
 #define MyAppURL "https://github.com/bradlinder/RTVS"
 #define MyAppExeName "RadioTVSegmenter.exe"
@@ -13,10 +17,11 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\Radio & TV Segmenter
+UsePreviousAppDir=no
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist\installer
-OutputBaseFilename=RadioTVSegmenter-{#MyAppVersion}-Windows
+OutputBaseFilename=RadioTVSegmenter-{#MyAppVersion}-Windows-Setup
 SetupIconFile=..\..\resources\icon.ico
 Compression=lzma2/max
 SolidCompression=yes
@@ -29,8 +34,14 @@ Uninstallable=yes
 LicenseFile=..\..\NOTICES.txt
 ChangesAssociations=yes
 
+[InstallDelete]
+; Clean up legacy shortcuts created by previous releases (with "Story" in the name)
+Type: files; Name: "{autodesktop}\Radio & TV Story Segmenter.lnk"
+Type: files; Name: "{group}\Radio & TV Story Segmenter.lnk"
+
 [Files]
 Source: "..\..\dist\RadioTVSegmenter\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\..\NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\resources\icon.ico"

@@ -941,11 +941,11 @@ class PlaybackPreferencesMixin:
         # 5. Software Updates
         if "software_updates" in selected_set:
             self.settings_store.setValue("auto_check_updates", "true")
-            self.settings_store.setValue("github_repo", "The-Triton-Media-Group/Radio-TV-Story-Segmenter")
+            self.settings_store.setValue("github_repo", "bradlinder/RTVS")
             if "auto_update_chk" in lw and lw["auto_update_chk"]:
                 lw["auto_update_chk"].setChecked(True)
             if "repo_edit" in lw and lw["repo_edit"]:
-                lw["repo_edit"].setText("The-Triton-Media-Group/Radio-TV-Story-Segmenter")
+                lw["repo_edit"].setText("bradlinder/RTVS")
 
         # 6. AI Models & Storage
         if "ai_models" in selected_set:

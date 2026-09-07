@@ -119,12 +119,15 @@ except Exception:
         QSize = None
 
 
-def parse_version_tuple(version_str: str) -> tuple[int, ...]:
-    """Parse a version string (e.g. 'v1.5', '1.6.0', 'v2.0-beta') into comparable integer tuples."""
+def parse_version_tuple(version_str: str) -> tuple[tuple[int, ...], int]:
+    """Parse a version string into a numeric tuple and a stability weight.
+    Releases with no suffix (or '-stable') get weight 1; '-beta'/'-rc' get weight 0.
+    """
     if not version_str:
-        return (0, 0, 0)
+        return ((0, 0, 0), 0)
     cleaned = re.sub(r"^[vV]", "", version_str.strip())
-    # Extract digit sequences separated by dots
+    is_prerelease = bool(re.search(r"[-_.]?(beta|alpha|rc|dev|preview)", cleaned, re.IGNORECASE))
+    
     parts = []
     for chunk in cleaned.split("."):
         m = re.match(r"^(\d+)", chunk)
@@ -134,15 +137,17 @@ def parse_version_tuple(version_str: str) -> tuple[int, ...]:
             break
     while len(parts) < 3:
         parts.append(0)
-    return tuple(parts)
+    return (tuple(parts[:3]), 0 if is_prerelease else 1)
 
 
 def is_version_newer(remote_version_str: str, current_version_str: str = PROJECT_VERSION) -> bool:
     """Return True if remote_version_str is strictly newer than current_version_str."""
     try:
-        remote_t = parse_version_tuple(remote_version_str)
-        curr_t = parse_version_tuple(current_version_str)
-        return remote_t > curr_t
+        remote_nums, remote_weight = parse_version_tuple(remote_version_str)
+        curr_nums, curr_weight = parse_version_tuple(current_version_str)
+        if remote_nums != curr_nums:
+            return remote_nums > curr_nums
+        return remote_weight > curr_weight
     except Exception:
         return False
 
@@ -284,8 +289,9 @@ def select_best_asset_for_platform(assets: list[dict]) -> dict | None:
 
 
 def fetch_latest_release(repo: str) -> dict:
-    """Query GitHub API for the latest release metadata for the given repo."""
-    url = f"https://api.github.com/repos/{repo}/releases/latest"
+    """Query GitHub API for the most recent release (including pre-releases)."""
+    # Fetch list of releases so pre-releases (like betas) are not skipped
+    url = f"https://api.github.com/repos/{repo}/releases?per_page=5"
     req = urllib.request.Request(
         url,
         headers={
@@ -298,7 +304,15 @@ def fetch_latest_release(repo: str) -> dict:
         if status != 200:
             raise RuntimeError(f"GitHub API returned HTTP status {status}")
         raw = response.read().decode("utf-8")
-        return json.loads(raw)
+        releases = json.loads(raw)
+        if isinstance(releases, list) and releases:
+            # Filter out drafts
+            published = [r for r in releases if not r.get("draft", False)]
+            if published:
+                return published[0]
+        elif isinstance(releases, dict) and "tag_name" in releases:
+            return releases
+        raise RuntimeError("No published releases found.")
 
 
 def launch_and_install(file_path: str, parent: QWidget | None = None) -> bool:
