@@ -40,8 +40,18 @@ def _clamp_diarization_thread_env():
     ):
         os.environ.setdefault(var, str(capped))
 
-
 _clamp_diarization_thread_env()
+
+if sys.platform == "win32":
+    # Ensure Windows locates torch C-runtime dependencies (_C.pyd, torch_cpu.dll)
+    try:
+        import torch
+        if hasattr(os, "add_dll_directory"):
+            torch_lib = Path(torch.__file__).parent / "lib"
+            if torch_lib.is_dir():
+                os.add_dll_directory(str(torch_lib))
+    except Exception:
+        pass
 
 PROTOCOL_VERSION = "1.0"
 CAPABILITIES = ["transcribe", "diarize"]

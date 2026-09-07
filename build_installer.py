@@ -198,11 +198,11 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
 
     cuda_purged = 0
     cuda_lib_prefixes = (
-        "libtorch_cuda", "torch_cuda", "libnvrtc", "nvrtc", "libcudnn", "cudnn",
+        "libnvrtc", "nvrtc", "libcudnn", "cudnn",
         "libcublas", "cublas", "libcusolver", "cusolver", "libcurand", "curand",
         "libcufft", "cufft", "libnccl", "nccl", "libnvJitLink", "libnvblas",
     )
-    for base in internal_dirs:
+    for base in internal_dirs::
         if not base.exists():
             continue
         for nvidia_dir in base.glob("**/nvidia"):
@@ -309,10 +309,14 @@ def main() -> None:
         "--collect-all", "tokenizers",
         "--collect-all", "huggingface_hub",
         "--collect-all", "torch",
+        "--collect-binaries", "torch",      # <--- Add this line
+        "--copy-metadata", "torch",        # <--- Add this line
         "--collect-all", "torchaudio",
+        "--collect-binaries", "torchaudio", # <--- Add this line
         "--collect-all", "sentencepiece",
         "--collect-all", "soundfile",
         "--collect-all", "diarize",
+        "--collect-all", "silero_vad",      # <--- Add this line
         "--collect-all", "keyring",
         "--collect-all", "docx",
         "--collect-all", "onnxruntime",

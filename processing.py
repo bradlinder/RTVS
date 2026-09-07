@@ -1285,12 +1285,11 @@ class ProcessingMixin:
             return
 
         expected_speakers = str(getattr(self, "expected_speakers", "auto") or "auto")
-
-        # Interactive speaker estimate: batch processing is deliberately
-        # non-interactive, while standalone Detect Speakers and
-        # Transcribe & Detect Speakers jobs can ask before each detection.
+        # Interactive speaker estimate: batch processing and multi-stage automated pipelines
+        # are deliberately non-interactive and use auto without prompting, while standalone
+        # Detect Speakers runs can still prompt if enabled.
         ask_each_time = str(self.settings_store.value("ask_expected_speakers", "true")).lower() in {"1", "true", "yes"}
-        if not getattr(self, "batch_active", False) and ask_each_time:
+        if not getattr(self, "batch_active", False) and not getattr(self, "pipeline_active", False) and ask_each_time:
             choices = [
                 "Auto-Detect",
                 "1 Speaker (Solo)",
@@ -1321,10 +1320,9 @@ class ProcessingMixin:
                 "3+ Speakers (Panel / Group)": "3+",
             }.get(choice, "auto")
             self.expected_speakers = expected_speakers
-        elif not getattr(self, "batch_active", False):
-            # With prompting disabled, standalone jobs intentionally use the
-            # engine's automatic speaker-count mode rather than a remembered
-            # estimate from a previous job.
+        else:
+            # During automated pipelines, batch jobs, or when prompting is disabled,
+            # default directly to auto speaker detection.
             expected_speakers = "auto"
             self.expected_speakers = "auto"
 
