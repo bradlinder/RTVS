@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -55,7 +56,7 @@ try:
     )
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "1.9.2"
+    PROJECT_VERSION = "1.9.6"
     DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
     INTERNAL_APP_ID = "RadioTVStorySegmenter"
 
@@ -155,6 +156,64 @@ def format_byte_size(num_bytes: int) -> str:
             return f"{num_bytes:.1f} {unit}" if unit != "B" else f"{num_bytes} B"
         num_bytes /= 1024.0
     return f"{num_bytes:.1f} GB"
+
+
+def _is_trusted_download_url(url: str) -> bool:
+    """Only allow downloading update assets from official GitHub domains
+    over HTTPS -- defense in depth in case a release payload is ever
+    tampered with or a MITM'd response substitutes a different URL.
+    """
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        if parsed.scheme != "https":
+            return False
+        host = (parsed.hostname or "").lower()
+        return host == "github.com" or host.endswith(".githubusercontent.com")
+    except Exception:
+        return False
+
+
+def _find_release_checksum(release_info: dict, asset_name: str) -> str | None:
+    """Best-effort lookup of a SHA-256 checksum for `asset_name` among the
+    release's other assets (a "<asset>.sha256" file, or a combined
+    "SHA256SUMS"/"checksums.txt" file). Returns None if no checksum asset
+    is present -- not every release automation publishes one.
+    """
+    assets = (release_info or {}).get("assets", []) or []
+    asset_name_lower = asset_name.lower()
+
+    def _fetch_text(url: str) -> str | None:
+        if not _is_trusted_download_url(url):
+            return None
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": f"RadioTVSegmenter/{PROJECT_VERSION}"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except Exception:
+            return None
+
+    for asset in assets:
+        name = str(asset.get("name", ""))
+        if name.lower() == f"{asset_name_lower}.sha256":
+            text = _fetch_text(asset.get("browser_download_url", ""))
+            if text:
+                token = text.strip().split()[0] if text.strip() else ""
+                if re.fullmatch(r"[0-9a-fA-F]{64}", token or ""):
+                    return token.lower()
+
+    for asset in assets:
+        name = str(asset.get("name", "")).lower()
+        if name in ("sha256sums", "sha256sums.txt", "checksums.txt"):
+            text = _fetch_text(asset.get("browser_download_url", ""))
+            if not text:
+                continue
+            for line in text.splitlines():
+                parts = line.strip().split()
+                if len(parts) >= 2 and parts[1].lstrip("*").lower() == asset_name_lower:
+                    if re.fullmatch(r"[0-9a-fA-F]{64}", parts[0]):
+                        return parts[0].lower()
+    return None
 
 
 def select_best_asset_for_platform(assets: list[dict]) -> dict | None:
@@ -348,10 +407,15 @@ class DownloadUpdateWorker(QThread):
     finished = Signal(str)                 # downloaded_file_path
     error = Signal(str)                    # error message
 
-    def __init__(self, download_url: str, file_name: str, parent: QObject | None = None):
+    def __init__(self, download_url: str, file_name: str, parent: QObject | None = None, release_info: dict | None = None):
         super().__init__(parent)
         self.download_url = download_url
-        self.file_name = file_name
+        # Sanitize to a bare filename -- an asset name from the GitHub API
+        # response should never contain path separators or traversal
+        # components, but don't trust it blindly when building a filesystem
+        # path from it.
+        self.file_name = Path(file_name).name or "update.download"
+        self.release_info = release_info or {}
         self._is_cancelled = False
 
     def cancel(self):
@@ -359,9 +423,21 @@ class DownloadUpdateWorker(QThread):
 
     def run(self):
         try:
+            if not _is_trusted_download_url(self.download_url):
+                self.error.emit(
+                    "Refusing to download: the update URL is not an official GitHub download link."
+                )
+                return
+
             updates_dir = get_app_data_dir() / "updates"
             updates_dir.mkdir(parents=True, exist_ok=True)
-            destination = updates_dir / self.file_name
+            destination = (updates_dir / self.file_name).resolve()
+            # Belt-and-suspenders: confirm the resolved destination is
+            # actually still inside updates_dir even after sanitizing the
+            # filename above (e.g. a name that resolves via symlink tricks).
+            if updates_dir.resolve() not in destination.parents:
+                self.error.emit("Refusing to write the update outside the updates directory.")
+                return
             temp_dest = destination.with_suffix(destination.suffix + ".download")
 
             req = urllib.request.Request(
@@ -370,6 +446,7 @@ class DownloadUpdateWorker(QThread):
             )
 
             start_time = time.time()
+            hasher = hashlib.sha256()
             with urllib.request.urlopen(req, timeout=30) as response:
                 total_bytes = int(response.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -388,6 +465,7 @@ class DownloadUpdateWorker(QThread):
                         if not chunk:
                             break
                         f_out.write(chunk)
+                        hasher.update(chunk)
                         downloaded += len(chunk)
 
                         elapsed = time.time() - start_time
@@ -397,11 +475,25 @@ class DownloadUpdateWorker(QThread):
                         percent = int((downloaded / total_bytes) * 100) if total_bytes > 0 else 0
                         self.progress.emit(percent, downloaded, total_bytes, speed_str)
 
-            if temp_dest.exists():
-                shutil.move(str(temp_dest), str(destination))
-                self.finished.emit(str(destination))
-            else:
+            if not temp_dest.exists():
                 self.error.emit("Downloaded file could not be finalized.")
+                return
+
+            # Checksum lookup is a network call -- do it here, off the GUI
+            # thread, rather than before starting this worker.
+            expected_sha256 = _find_release_checksum(self.release_info, self.file_name)
+            if expected_sha256:
+                actual = hasher.hexdigest().lower()
+                if actual != expected_sha256.lower():
+                    temp_dest.unlink(missing_ok=True)
+                    self.error.emit(
+                        "Downloaded file failed SHA-256 verification and was discarded. "
+                        "This can indicate a corrupted or tampered download -- please try again."
+                    )
+                    return
+
+            shutil.move(str(temp_dest), str(destination))
+            self.finished.emit(str(destination))
 
         except Exception as exc:
             self.error.emit(f"Download failed: {exc}")
@@ -618,6 +710,15 @@ class CheckUpdateDialog(QDialog):
             self._open_github_release()
             return
 
+        if not _is_trusted_download_url(download_url):
+            QMessageBox.critical(
+                self, "Update Blocked",
+                "The update download URL did not point to an official GitHub domain, "
+                "so it was blocked for your safety.",
+            )
+            self._open_github_release()
+            return
+
         self.status_label.setText(f"Downloading update: {file_name}...")
         self.status_label.setStyleSheet("font-size: 13px; font-weight: bold;")
         self.progress_bar.show()
@@ -626,7 +727,7 @@ class CheckUpdateDialog(QDialog):
         self.action_btn.setEnabled(False)
         self.close_btn.setText("Cancel")
 
-        self.download_worker = DownloadUpdateWorker(download_url, file_name, self)
+        self.download_worker = DownloadUpdateWorker(download_url, file_name, self, release_info=self.release_info)
         self.download_worker.progress.connect(self._on_download_progress)
         self.download_worker.finished.connect(self._on_download_finished)
         self.download_worker.error.connect(self._on_download_error)

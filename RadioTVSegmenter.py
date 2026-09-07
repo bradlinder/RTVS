@@ -5,13 +5,14 @@ are implemented in focused mixins so future changes can target smaller files
 without changing the MainWindow-facing API.
 """
 import sys
-from bootstrap import configure_runtime_environment, ensure_sherpa_onnx_runtime
+from bootstrap import configure_runtime_environment, ensure_sherpa_onnx_runtime, ensure_keyring_runtime
 
-# Bootstrap writable model/cache locations and verify the Parakeet runtime before
-# importing the rest of the application. Source builds can install it automatically;
-# packaged builds contain it via build_installer.py.
+# Bootstrap writable model/cache locations and verify required runtimes before
+# importing the rest of the application. Source builds can install them automatically;
+# packaged builds contain them via build_installer.py.
 configure_runtime_environment()
 _sherpa_runtime_ready = ensure_sherpa_onnx_runtime()
+_keyring_runtime_ready = ensure_keyring_runtime()
 
 # If invoked as a background AI worker subprocess, dispatch immediately without loading the GUI.
 if len(sys.argv) > 1 and sys.argv[1] in ("--prs-worker", "--worker"):
@@ -94,10 +95,9 @@ class MainWindow(
 
         self.duration = 0
         self.current_position = 0
-
         self.skip_seconds = 5
         self.whisper_model = "small"
-        self.silence_threshold = 3.0
+        self.silence_threshold = 2.0
         self.lead_in_padding = 0.5
         self.expected_speakers = "auto"
         self.translation_direction = "auto"

@@ -9,7 +9,7 @@ import os
 import json
 import html
 from pathlib import Path
-from PySide6.QtCore import QProcess, QProcessEnvironment, QThread, Qt, QTimer
+from PySide6.QtCore import QProcess, QProcessEnvironment, QThread, Qt, QTimer, QEventLoop, Signal
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -37,7 +37,102 @@ from prs_shared import (
 )
 
 
+class RuntimeSetupWorker(QThread):
+    """Runs runtime_manager.ensure_environment() off the GUI thread, so that
+    a first-time (or version-upgrade) isolated-venv build for the local AI
+    worker doesn't freeze the main window ("Application Not Responding").
+    """
+    progress = Signal(str)
+    finished_ok = Signal(bool)
+
+    def __init__(self, runtime_mgr, feature, parent=None):
+        super().__init__(parent)
+        self.runtime_mgr = runtime_mgr
+        self.feature = feature
+
+    def run(self):
+        try:
+            ok = self.runtime_mgr.ensure_environment(
+                self.feature, progress_cb=lambda msg: self.progress.emit(msg)
+            )
+        except Exception as exc:
+            self.progress.emit(f"Error: {exc}")
+            ok = False
+        self.finished_ok.emit(ok)
+
+
 class ProcessingMixin:
+    def _ensure_runtime_environment_responsive(self, feature) -> bool:
+        """Make sure the isolated venv for `feature` ('transcribe' or
+        'diarize') is ready before launching the local worker, without
+        freezing the GUI if it still needs to be created or upgraded.
+
+        Returns True once ready to proceed, False if setup failed or the
+        user cancelled -- callers should abort the launch in that case,
+        the same way they already do for a FileNotFoundError raised by
+        _worker_command()/_resolve_worker_command().
+        """
+        if getattr(sys, "frozen", False):
+            return True  # frozen builds use a pre-built worker executable; no venv is ever created here
+        runtime_mgr = getattr(self, "runtime_mgr", None)
+        if runtime_mgr is None:
+            return True
+        gpu_launch_fn = getattr(self, "gpu_worker_launch_info", None)
+        if callable(gpu_launch_fn) and gpu_launch_fn() is not None:
+            return True  # the GPU path provisions its own environment elsewhere
+
+        try:
+            if runtime_mgr.is_env_up_to_date(feature):
+                return True
+        except Exception:
+            pass
+
+        progress_dialog = QProgressDialog(
+            f"Preparing the local {feature} environment (first run, or an update is needed)...",
+            "Cancel", 0, 0, self,
+        )
+        progress_dialog.setWindowTitle("Preparing Local Environment")
+        progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        progress_dialog.setMinimumDuration(0)
+        progress_dialog.setAutoClose(True)
+        progress_dialog.setAutoReset(True)
+
+        worker = RuntimeSetupWorker(runtime_mgr, feature, self)
+        loop = QEventLoop(self)
+        result = {"ok": False}
+
+        worker.progress.connect(progress_dialog.setLabelText)
+
+        def _on_finished(ok):
+            result["ok"] = ok
+            loop.quit()
+
+        worker.finished_ok.connect(_on_finished)
+        progress_dialog.canceled.connect(loop.quit)
+        worker.start()
+        progress_dialog.show()
+        loop.exec()
+        progress_dialog.close()
+
+        if not worker.isFinished():
+            # The user cancelled the dialog while setup is still running in
+            # the background. Let the install keep running to completion
+            # rather than killing it mid-way (an interrupted venv/pip
+            # install can leave a corrupt environment behind) -- just don't
+            # make the user wait for it right now.
+            self.log_activity(
+                f"[PROCESSING] {feature.title()} environment setup is continuing in the background after Cancel.",
+                mark_dirty=False,
+            )
+            return False
+
+        if not result["ok"]:
+            QMessageBox.critical(
+                self, "Environment Setup Failed",
+                f"Could not prepare the local {feature} environment. Check the activity log for details.",
+            )
+        return result["ok"]
+
     def cancel_current_process(self):
         # Halt any ongoing file export or WordPress upload
         if hasattr(self, "cancel_export"):
@@ -714,6 +809,9 @@ class ProcessingMixin:
             self.log_activity("[TRANSCRIPTION] A transcription job is already running.")
             return
 
+        if not self._ensure_runtime_environment_responsive("transcribe"):
+            return
+
         self.set_tools_actions_enabled(False)
         self.progress.setValue(0)
         self.progress.show()
@@ -800,8 +898,9 @@ class ProcessingMixin:
         self.statusBar().showMessage("Starting local transcription...")
 
         process = QProcess(self)
-        process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         process.readyReadStandardOutput.connect(self.on_transcription_output)
+        process.readyReadStandardError.connect(self.on_transcription_stderr)
         process.finished.connect(self.on_transcription_process_finished)
         process.finished.connect(lambda: unregister_process(process))
         process.errorOccurred.connect(self.on_transcription_process_error)
@@ -882,7 +981,7 @@ class ProcessingMixin:
                 if version != HELPER_PROTOCOL_VERSION:
                     self.transcription_error(
                         "The local processing helper is incompatible with this version of the application.\n\n"
-                        f"Expected helper protocol 80.2, but found {version or 'unknown'}.\n\n"
+                        f"Expected helper protocol {HELPER_PROTOCOL_VERSION}, but found {version or 'unknown'}.\n\n"
                         "Please use the helper included with this version of Radio & TV Story Segmenter."
                     )
                     return
@@ -920,6 +1019,31 @@ class ProcessingMixin:
                 self.log_activity(f"[WARNING] Transcription helper: {message.get('message', '')}")
             elif kind == "error":
                 self.transcription_error(str(message.get("message", "Transcription failed.")))
+
+    def on_transcription_stderr(self):
+        """Route the worker's stderr (third-party library warnings, C-level
+        driver output) straight to the log. This is deliberately a separate
+        channel from stdout (see SeparateChannels above) rather than merged
+        with it -- stdout carries the line-based JSON protocol, and a stray
+        stderr write landing mid-line there could corrupt a JSON message
+        (e.g. the final "finished" result) and silently fail the job.
+        """
+        process = self.transcription_process
+        if process is None:
+            return
+        data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace")
+        for line in data.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            lowered = line.lower()
+            if "error" in lowered or "traceback" in lowered or "exception" in lowered:
+                level = "[ERROR]"
+            elif "warning" in lowered or "warnings.warn" in lowered:
+                level = "[WARNING]"
+            else:
+                level = "[INFO]"
+            self.log_activity(f"[TRANSCRIPTION] {level} Helper (stderr): {line}", mark_dirty=False)
 
     def _handle_live_streaming_segment(self, segment):
         """Append an incoming live transcript chunk directly to the view without rebuilding the map."""
@@ -1233,6 +1357,9 @@ class ProcessingMixin:
             self.diarization_finished(result)
             return
 
+        if not self._ensure_runtime_environment_responsive("diarize"):
+            return
+
         self.set_tools_actions_enabled(False)
         self.progress.setValue(0)
         self.progress.show()
@@ -1252,8 +1379,9 @@ class ProcessingMixin:
         self.diarization_result_received = False
 
         process = QProcess(self)
-        process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         process.readyReadStandardOutput.connect(self.on_diarization_output)
+        process.readyReadStandardError.connect(self.on_diarization_stderr)
         process.finished.connect(self.on_diarization_process_finished)
         process.finished.connect(lambda: unregister_process(process))
         process.errorOccurred.connect(self.on_diarization_process_error)
@@ -1324,7 +1452,7 @@ class ProcessingMixin:
                 if version != HELPER_PROTOCOL_VERSION:
                     self.diarization_error(
                         "The local processing helper is incompatible with this version of the application.\n\n"
-                        f"Expected helper protocol 80.2, but found {version or 'unknown'}.\n\n"
+                        f"Expected helper protocol {HELPER_PROTOCOL_VERSION}, but found {version or 'unknown'}.\n\n"
                         "Please use the helper included with this version of Radio & TV Story Segmenter."
                     )
                     return
@@ -1360,6 +1488,27 @@ class ProcessingMixin:
                 self.diarization_error(
                     str(message.get("message", "Speaker Detection failed."))
                 )
+
+    def on_diarization_stderr(self):
+        """Route the worker's stderr straight to the log, separate from the
+        stdout JSON protocol (see SeparateChannels above) so third-party
+        library output can't corrupt an in-flight JSON message."""
+        process = self.diarization_process
+        if process is None:
+            return
+        data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace")
+        for line in data.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            lowered = line.lower()
+            if "error" in lowered or "traceback" in lowered or "exception" in lowered:
+                level = "[ERROR]"
+            elif "warning" in lowered or "warnings.warn" in lowered:
+                level = "[WARNING]"
+            else:
+                level = "[INFO]"
+            self.log_activity(f"[SPEAKER DETECT] {level} Helper (stderr): {line}", mark_dirty=False)
 
     def on_diarization_process_finished(self, exit_code, exit_status):
         self.on_diarization_output()
@@ -1532,10 +1681,14 @@ class ProcessingMixin:
         self.update_processing_progress(percent, message)
 
     def auto_detect_finished(self, new_stories):
+        # 1. Hide progress bar and stop background tick timer unconditionally
+        self.progress.setValue(100)
         self.progress.hide()
         self.cancel_button.hide()
+        self.set_processing_stage(None)
         self.set_tools_actions_enabled(True)
 
+        # 2. Commit stories to UI and state
         old_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
         self.commit_story_change(old_stories, new_stories, "Detect Stories")
 
@@ -1546,6 +1699,8 @@ class ProcessingMixin:
         self.log_activity(f"[STORY DETECT] Complete: Auto-created {count} story region(s).")
         self.statusBar().showMessage(msg)
         self.save_project()
+
+        # 3. Advance automated multi-stage pipeline if active
         if self.pipeline_active and self.pipeline_queue:
             QTimer.singleShot(0, self._run_next_selected_processing)
         elif self.batch_active and self.pipeline_active:
@@ -1554,7 +1709,6 @@ class ProcessingMixin:
             QTimer.singleShot(0, self._batch_next_media)
         elif self.pipeline_active:
             self.pipeline_active = False
-            self.set_processing_stage(None)
             self.log_activity("[AUTOMATION] Selected processing complete.")
 
     def auto_detect_error(self, message):

@@ -363,9 +363,9 @@ class ModelManagementMixin:
             ("small", "Whisper Small"),
             ("distil-medium.en", "Distil-Whisper Medium (English)"),
             ("medium", "Whisper Medium"),
-            ("distil-large-v3", "Distil-Whisper Large v3"),
+            ("distil-large-v3", "Distil-Whisper Large v3 (English)"),
             ("large-v3", "Whisper Large"),
-            ("parakeet-onnx", "Parakeet ONNX Fast TDT"),
+            ("parakeet-onnx", "Parakeet ONNX Fast TDT (English)"),
         ]
         for model_id, label in whisper_models:
             path = self.model_cache_path(model_id)

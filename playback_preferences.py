@@ -19,7 +19,7 @@ class RestoreSelectedSettingsDialog(QDialog):
         ("ai_models", "AI Models & Storage Directory", "Whisper speech recognition model (small, beam size 5), translation model (tiny), and models storage folder."),
         ("gpu_acceleration", "Hardware / GPU Acceleration", "GPU and DirectML hardware acceleration settings."),
         ("playback_timeline", "Playback & Timeline Display", "Skip duration (5s), waveform visibility, thumbnail strip, and transcript selection mode."),
-        ("detection_diarization", "Story Detection & Diarization Defaults", "Silence threshold (3.0s), lead-in padding (0.5s), default expected speakers (auto), and speaker prompts."),
+        ("detection_diarization", "Story Detection & Diarization Defaults", "Silence threshold (2.0s), lead-in padding (0.5s), default expected speakers (auto), and speaker prompts."),
         ("batch_processing", "Batch Processing Tool Options", "Batch tasks (transcribe, diarize, detect stories), output formats, and batch custom directory."),
         ("export_options", "Export Window: Formats & Content Options", "Export formats (TXT, DOCX, Media enabled; SRT, VTT disabled) and content options (speakers, timestamps, languages)."),
         ("export_directory", "Export Window: Custom Location", "Clear saved custom export location and restore default project folder export routing."),
@@ -339,14 +339,36 @@ class PlaybackPreferencesMixin:
         if len(self.activity_snapshots) >= MAX_ACTIVITY_SNAPSHOTS:
             self.activity_snapshots.pop(0)
 
+        # A full transcript/diarization/translations clone is only needed
+        # when a real data mutation just happened (mark_dirty=True signals
+        # exactly that, same as everywhere else in the app) or this is the
+        # very first snapshot. Pure informational log lines (progress
+        # messages, status updates -- the overwhelming majority of calls on
+        # a long broadcast) reuse the previous snapshot's already-cloned,
+        # already-isolated copies instead of re-serializing several
+        # megabytes of JSON on every call. This is safe because restoring a
+        # snapshot always makes its own fresh copy before assigning to live
+        # state (see restore_snapshot below), so live edits afterward never
+        # mutate an object a snapshot still references.
+        needs_fresh_clone = mark_dirty or not self.activity_snapshots
+        if needs_fresh_clone:
+            transcript_clone = self._clone_transcript_state(self.transcript) if self.transcript else None
+            diarization_clone = copy.deepcopy(self.diarization) if self.diarization else None
+            translations_clone = copy.deepcopy(self.translations)
+        else:
+            prev = self.activity_snapshots[-1]
+            transcript_clone = prev["transcript"]
+            diarization_clone = prev["diarization"]
+            translations_clone = prev["translations"]
+
         snapshot = {
             "log_text": log_entry_str,
             "stories": [Story.from_dict(s.to_dict()) for s in self.stories],
-            "transcript": json.loads(json.dumps(self.transcript)) if self.transcript else None,
-            "diarization": json.loads(json.dumps(self.diarization)) if self.diarization else None,
+            "transcript": transcript_clone,
+            "diarization": diarization_clone,
             "speaker_names": dict(self.speaker_names),
             "segment_speaker_overrides": dict(self.segment_speaker_overrides),
-            "translations": json.loads(json.dumps(self.translations)),
+            "translations": translations_clone,
             "translation_display_mode": self.translation_display_mode,
             "selected_indices": list(self.current_selected_story_indices),
         }
@@ -1011,15 +1033,15 @@ class PlaybackPreferencesMixin:
 
         # 9. Story Detection & Diarization
         if "detection_diarization" in selected_set:
-            self.settings_store.setValue("silence_threshold", 3.0)
+            self.settings_store.setValue("silence_threshold", 2.0)
             self.settings_store.setValue("lead_in_padding", 0.5)
             self.settings_store.setValue("default_expected_speakers", "auto")
             self.settings_store.setValue("ask_expected_speakers", True)
-            self.silence_threshold = 3.0
+            self.silence_threshold = 2.0
             self.lead_in_padding = 0.5
             self.expected_speakers = "auto"
             if "gap_spin" in lw and lw["gap_spin"]:
-                lw["gap_spin"].setValue(3.0)
+                lw["gap_spin"].setValue(2.0)
             if "pad_spin" in lw and lw["pad_spin"]:
                 lw["pad_spin"].setValue(0.5)
             if "expected_speakers_combo" in lw and lw["expected_speakers_combo"]:
@@ -1154,7 +1176,7 @@ class PlaybackPreferencesMixin:
         # Left category tree / list
         cat_list = QListWidget(dialog)
         cat_list.setFixedWidth(160)
-        categories = ["General", "Audio Hardware", "Updates & GitHub", "AI Models", "Playback & Timeline", "Detection", "Batch Processing"]
+        categories = ["General", "Audio Hardware", "Updates & GitHub", "AI Models", "Playback & Timeline", "Detection", "Batch Processing", "WordPress"]
         for cat in categories:
             cat_list.addItem(QListWidgetItem(cat))
         content_layout.addWidget(cat_list)
@@ -1586,6 +1608,70 @@ class PlaybackPreferencesMixin:
         batch_layout.addStretch()
         stack.addWidget(page_batch)
 
+        # 8. WordPress Page
+        from wordpress_export import _get_wp_password, _set_wp_password, WordPressClient
+
+        page_wp = QWidget()
+        wp_layout = QVBoxLayout(page_wp)
+        wp_desc = QLabel(
+            "Configure your WordPress site connection using an <b>Application Password</b>.<br>"
+            "To generate one in WordPress: go to <i>Users &gt; Profile &gt; Application Passwords</i>."
+        )
+        wp_desc.setWordWrap(True)
+        wp_layout.addWidget(wp_desc)
+
+        orig_wp_url = str(self.settings_store.value("wp_site_url", "") or "").strip()
+        orig_wp_user = str(self.settings_store.value("wp_username", "") or "").strip()
+        orig_wp_pwd = _get_wp_password(orig_wp_user) if orig_wp_user else ""
+
+        wp_form = QFormLayout()
+        wp_url_edit = QLineEdit(orig_wp_url)
+        wp_url_edit.setPlaceholderText("https://yoursite.com")
+        wp_user_edit = QLineEdit(orig_wp_user)
+        wp_user_edit.setPlaceholderText("your_username")
+        wp_pass_edit = QLineEdit()
+        wp_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        wp_pass_edit.setPlaceholderText("xxxx xxxx xxxx xxxx")
+        if orig_wp_pwd:
+            wp_pass_edit.setText(orig_wp_pwd)
+
+        wp_form.addRow("Site URL:", wp_url_edit)
+        wp_form.addRow("Username:", wp_user_edit)
+        wp_form.addRow("App Password:", wp_pass_edit)
+        wp_layout.addLayout(wp_form)
+
+        wp_status_label = QLabel("")
+        wp_status_label.setWordWrap(True)
+        wp_layout.addWidget(wp_status_label)
+
+        wp_test_btn = QPushButton("Test Connection")
+
+        def _test_wp_connection():
+            url = wp_url_edit.text().strip()
+            user = wp_user_edit.text().strip()
+            pwd = wp_pass_edit.text().strip()
+            if not url or not user or not pwd:
+                QMessageBox.warning(dialog, "Incomplete Settings", "Please enter Site URL, Username, and Password first.")
+                return
+            wp_test_btn.setEnabled(False)
+            wp_status_label.setText("Testing connection...")
+            wp_status_label.setStyleSheet("color: #888888;")
+            wp_status_label.repaint()
+            client = WordPressClient(url, user, pwd)
+            ok, msg = client.test_connection()
+            wp_test_btn.setEnabled(True)
+            if ok:
+                wp_status_label.setText(f"✓ {msg}")
+                wp_status_label.setStyleSheet("color: #2ea44f; font-weight: bold;")
+            else:
+                wp_status_label.setText(f"✗ {msg}")
+                wp_status_label.setStyleSheet("color: #e06c75;")
+
+        wp_test_btn.clicked.connect(_test_wp_connection)
+        wp_layout.addWidget(wp_test_btn)
+        wp_layout.addStretch()
+        stack.addWidget(page_wp)
+
         content_layout.addWidget(stack, 1)
         main_layout.addLayout(content_layout)
 
@@ -1775,6 +1861,34 @@ class PlaybackPreferencesMixin:
             self.settings_store.setValue("batch_opt_include_speakers", batch_spk_chk.isChecked())
             self.settings_store.setValue("batch_opt_include_times", batch_time_chk.isChecked())
 
+            # Save WordPress only when values have been modified
+            wp_url = wp_url_edit.text().strip()
+            wp_user = wp_user_edit.text().strip()
+            wp_pwd = wp_pass_edit.text().strip()
+
+            if wp_url != orig_wp_url:
+                self.settings_store.setValue("wp_site_url", wp_url)
+            if wp_user != orig_wp_user:
+                self.settings_store.setValue("wp_username", wp_user)
+
+            # Only re-save the credential and trigger the keyring warning if username/password actually changed
+            if wp_user and wp_pwd and (wp_user != orig_wp_user or wp_pwd != orig_wp_pwd):
+                saved_in_keyring = _set_wp_password(wp_user, wp_pwd)
+                if not saved_in_keyring:
+                    QMessageBox.warning(
+                        dialog,
+                        "System Credential Storage Unavailable",
+                        "Your operating system's secure credential storage (keyring) is not "
+                        "available on this machine, so the WordPress application password has "
+                        "been saved locally instead, encrypted with a key derived from this "
+                        "machine.\n\n"
+                        "This is not as strong as a system keyring -- it primarily guards "
+                        "against the password being read in plain text from a settings file, "
+                        "registry export, or backup, not against someone with code-execution "
+                        "access to this machine.",
+                    )
+            
+
             # Force these writes to disk now rather than relying on
             # QSettings' own flush timing, so a Preferences change is
             # durable even if the app is closed or killed shortly after.
@@ -1787,8 +1901,6 @@ class PlaybackPreferencesMixin:
             if close_dialog:
                 dialog.accept()
 
-        save_btn.clicked.connect(lambda: _save_preferences(close_dialog=True))
-        cancel_btn.clicked.connect(dialog.reject)
         btn_box.accepted.connect(lambda: _save_preferences(close_dialog=True))
         btn_box.rejected.connect(dialog.reject)
 

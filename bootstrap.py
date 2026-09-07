@@ -75,6 +75,31 @@ def ensure_sherpa_onnx_runtime():
         print(f"[STARTUP] Could not install sherpa-onnx automatically: {exc}", file=sys.stderr)
         return False
 
+def ensure_keyring_runtime():
+    """Ensure keyring (and pywin32-ctypes on Windows) is installed for secure credential storage."""
+    missing = []
+    if importlib.util.find_spec("keyring") is None:
+        missing.append("keyring>=24.0.0")
+    if sys.platform == "win32" and importlib.util.find_spec("win32ctypes") is None:
+        missing.append("pywin32-ctypes>=0.2.2")
+
+    if not missing:
+        return True
+
+    if getattr(sys, "frozen", False):
+        print(f"[STARTUP] Keyring dependencies missing in packaged build: {missing}", file=sys.stderr)
+        return False
+
+    print(f"[STARTUP] Installing missing credential dependencies: {', '.join(missing)}...", flush=True)
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", *missing],
+            check=True,
+        )
+        return importlib.util.find_spec("keyring") is not None
+    except Exception as exc:
+        print(f"[STARTUP] Could not install keyring dependencies automatically: {exc}", file=sys.stderr)
+        return False
 
 def check_and_install_core():
     """Backward-compatible startup dependency check."""

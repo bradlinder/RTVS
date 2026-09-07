@@ -231,6 +231,22 @@ jobs:
           path: release_assets/
           merge-multiple: true
 
+      - name: Generate SHA-256 checksums
+        working-directory: release_assets
+        run: |
+          set -e
+          # One "<asset>.sha256" file per release asset (matches what the
+          # in-app updater looks for first), plus a combined SHA256SUMS
+          # file for anyone who wants to verify manually.
+          rm -f SHA256SUMS
+          for f in *; do
+            [ -f "$f" ] || continue
+            sha256sum "$f" | tee -a SHA256SUMS
+            sha256sum "$f" > "$f.sha256"
+          done
+          echo "Generated checksums:"
+          cat SHA256SUMS
+
       - name: Determine Release Tag
         id: vars
         run: |

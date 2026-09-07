@@ -2,6 +2,7 @@ import html
 from bisect import bisect_right
 import copy
 import gzip
+import io
 import hashlib
 import json
 import math
@@ -20,8 +21,6 @@ from pathlib import Path
 
 from docx import Document
 from docx.shared import Pt, RGBColor
-
-from faster_whisper import WhisperModel
 
 from html.parser import HTMLParser
 
@@ -238,7 +237,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "1.9.4"
+PROJECT_VERSION = "1.9.7"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -1666,15 +1665,30 @@ def read_document_text(path: Path) -> str:
 
 class StoryAutoDetectWorker(QObject):
     finished = Signal(list)
-    progress = Signal(str, int)
+    progress = Signal((str, int), (str,))
     error = Signal(str)
 
-    def __init__(self, audio_file, silence_threshold=3.0, lead_in_padding=0.5, audio_duration=0, transcript_segments=None, whisper_model="tiny", **kwargs):
+    # Patterns indicating non-speech / music hallucinations from Whisper
+    MUSIC_TOKEN_RE = re.compile(
+        r"^([♪♫♬\s]+|\[(?:music|applause|laughter|cheering|sound|singing|theme)\]|\((?:music|applause|laughter|singing)\))$",
+        re.IGNORECASE
+    )
+
+    def __init__(
+        self,
+        audio_file,
+        silence_threshold=2.0,
+        lead_in_padding=0.5,
+        audio_duration=0,
+        transcript_segments=None,
+        whisper_model="tiny",
+        **kwargs,
+    ):
         super().__init__()
         self.audio_file = str(audio_file)
-        self.silence_threshold = float(silence_threshold)
-        self.lead_in_padding = float(lead_in_padding)
-        self.audio_duration = float(audio_duration)
+        self.silence_threshold = float(silence_threshold or 2.0)
+        self.lead_in_padding = float(lead_in_padding or 0.5)
+        self.audio_duration = float(audio_duration or 0.0)
         self.transcript_segments = transcript_segments or []
         self.whisper_model = whisper_model or "tiny"
         self._is_cancelled = False
@@ -1682,75 +1696,218 @@ class StoryAutoDetectWorker(QObject):
     def cancel(self):
         self._is_cancelled = True
 
+    def _emit_progress(self, message: str, percent: int = 0):
+        if self._is_cancelled:
+            return
+        pct = max(0, min(100, int(percent)))
+        try:
+            self.progress.emit(str(message), pct)
+        except Exception:
+            try:
+                self.progress.emit(str(message))
+            except Exception:
+                pass
+        try:
+            self.progress[str].emit(str(message))
+        except Exception:
+            pass
+
+    def _is_real_speech_word(self, word_text: str) -> bool:
+        """Filter out Whisper music notes and audio event tags."""
+        txt = word_text.strip()
+        if not txt or self.MUSIC_TOKEN_RE.match(txt):
+            return False
+        # Discard strings that are purely musical symbols
+        if all(ch in "♪♫♬ \t\r\n" for ch in txt):
+            return False
+        return True
+
     def run(self):
         try:
-            speech_chunks = []
-            if self.transcript_segments:
-                self.progress.emit("[Step 1/3] Using transcript timestamps for instant story detection...", 30)
-                for seg in self.transcript_segments:
-                    start = seg.get("start", 0.0) if isinstance(seg, dict) else getattr(seg, "start", 0.0)
-                    end = seg.get("end", start) if isinstance(seg, dict) else getattr(seg, "end", start)
-                    if end > start:
-                        speech_chunks.append((float(start), float(end)))
-
-            if not speech_chunks:
-                # Story detection falls back to faster-whisper VAD-enabled speech segmentation
-                self.progress.emit("[Step 1/3] Loading CPU Voice Activity Detection (Whisper VAD)...", 20)
-                model_name = self.whisper_model if self.whisper_model else "tiny"
-                model = WhisperModel(model_name, device="cpu", compute_type="int8", download_root=str(get_models_storage_dir()))
-
-                if self._is_cancelled:
-                    self.error.emit("Process canceled by user.")
-                    return
-
-                self.progress.emit("[Step 2/3] Analyzing speech intervals and audio gaps...", 50)
-
-                segments, info = model.transcribe(
-                    self.audio_file,
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=int(self.silence_threshold * 1000)),
-                )
-
-                for seg in segments:
-                    if self._is_cancelled:
-                        self.error.emit("Process canceled by user.")
-                        return
-                    speech_chunks.append((seg.start, seg.end))
-
-            self.progress.emit("[Step 3/3] Clustering speech boundaries into stories...", 85)
-
-            if not speech_chunks:
-                self.finished.emit([])
+            if self._is_cancelled:
+                self.error.emit("Process canceled by user.")
                 return
 
             detected_stories = []
-            curr_start = max(0.0, speech_chunks[0][0] - self.lead_in_padding)
-            curr_end = speech_chunks[0][1]
 
-            for idx in range(1, len(speech_chunks)):
-                prev_end = speech_chunks[idx - 1][1]
-                next_start = speech_chunks[idx][0]
-                gap = next_start - prev_end
+            # ==========================================================
+            # PATH A: Transcript-Guided Mode (Dialogue Absence Math)
+            # ==========================================================
+            if self.transcript_segments:
+                self._emit_progress("[Step 1/2] Analyzing dialogue transitions...", 30)
 
-                if gap >= self.silence_threshold:
-                    detected_stories.append(Story(
-                        start=curr_start,
-                        end=curr_end + self.lead_in_padding,
-                        title=f"Story {len(detected_stories) + 1}"
-                    ))
-                    curr_start = max(0.0, next_start - self.lead_in_padding)
-                    curr_end = speech_chunks[idx][1]
-                else:
-                    curr_end = speech_chunks[idx][1]
+                # Collect words, strictly filtering out music symbols and sound event tags
+                all_words = []
+                for seg in self.transcript_segments:
+                    words = seg.get("words", []) if isinstance(seg, dict) else getattr(seg, "words", [])
+                    if words:
+                        for w in words:
+                            w_st = float(w.get("start", 0.0) if isinstance(w, dict) else getattr(w, "start", 0.0))
+                            w_et = float(w.get("end", w_st) if isinstance(w, dict) else getattr(w, "end", w_st))
+                            w_txt = str(w.get("word", "") if isinstance(w, dict) else getattr(w, "word", "")).strip()
+                            if w_et >= w_st and self._is_real_speech_word(w_txt):
+                                all_words.append((w_st, w_et, w_txt))
 
-            if curr_start < curr_end:
-                detected_stories.append(Story(
-                    start=curr_start,
-                    end=curr_end + self.lead_in_padding,
-                    title=f"Story {len(detected_stories) + 1}"
-                ))
+                sentence_endings = (".", "!", "?", '"', '”', '’', "»")
 
-            self.progress.emit("Story detection complete.", 100)
+                # Strategy A1: High-precision word-level dialogue gap analysis
+                if len(all_words) > 15:
+                    all_words.sort(key=lambda x: x[0])
+                    story_starts = [max(0.0, all_words[0][0] - self.lead_in_padding)]
+                    story_ends = []
+
+                    # Transitions over music: 1.1s dialogue gap after a sentence end marks a new story
+                    sentence_gap_limit = max(0.9, min(1.8, self.silence_threshold * 0.60))
+                    raw_gap_limit = max(1.4, self.silence_threshold)
+
+                    for i in range(len(all_words) - 1):
+                        if self._is_cancelled:
+                            self.error.emit("Process canceled by user.")
+                            return
+
+                        curr_w_end = all_words[i][1]
+                        next_w_start = all_words[i + 1][0]
+                        dialogue_gap = next_w_start - curr_w_end
+                        curr_text = all_words[i][2]
+
+                        ends_sentence = any(curr_text.endswith(p) for p in sentence_endings)
+
+                        if (ends_sentence and dialogue_gap >= sentence_gap_limit) or (dialogue_gap >= raw_gap_limit):
+                            story_ends.append(curr_w_end + min(0.3, self.lead_in_padding))
+                            story_starts.append(max(0.0, next_w_start - self.lead_in_padding))
+
+                    final_end = max(float(all_words[-1][1]), self.audio_duration)
+                    story_ends.append(final_end)
+
+                    for idx, (s_start, s_end) in enumerate(zip(story_starts, story_ends)):
+                        if s_end - s_start >= 4.0:
+                            detected_stories.append(Story(
+                                start=round(s_start, 2),
+                                end=round(s_end, 2),
+                                title=f"Story {len(detected_stories) + 1}"
+                            ))
+
+                # Strategy A2: Segment-level fallback with music filtering
+                if not detected_stories:
+                    segs = sorted(
+                        self.transcript_segments,
+                        key=lambda s: float(s.get("start", 0.0) if isinstance(s, dict) else getattr(s, "start", 0.0))
+                    )
+                    speech_chunks = []
+                    for s in segs:
+                        st = float(s.get("start", 0.0) if isinstance(s, dict) else getattr(s, "start", 0.0))
+                        et = float(s.get("end", st) if isinstance(s, dict) else getattr(s, "end", st))
+                        txt = str(s.get("text", "") if isinstance(s, dict) else getattr(s, "text", "")).strip()
+                        if et > st and self._is_real_speech_word(txt):
+                            speech_chunks.append((st, et, txt))
+
+                    if speech_chunks:
+                        story_starts = [max(0.0, speech_chunks[0][0] - self.lead_in_padding)]
+                        story_ends = []
+                        sentence_gap_limit = max(0.9, min(1.8, self.silence_threshold * 0.60))
+                        raw_gap_limit = max(1.3, self.silence_threshold * 0.80)
+
+                        for idx in range(1, len(speech_chunks)):
+                            if self._is_cancelled:
+                                self.error.emit("Process canceled by user.")
+                                return
+
+                            prev_end = speech_chunks[idx - 1][1]
+                            next_start = speech_chunks[idx][0]
+                            gap = next_start - prev_end
+                            prev_text = speech_chunks[idx - 1][2]
+
+                            ends_sentence = any(prev_text.endswith(p) for p in sentence_endings)
+
+                            if (ends_sentence and gap >= sentence_gap_limit) or (gap >= raw_gap_limit):
+                                story_ends.append(prev_end + min(0.3, self.lead_in_padding))
+                                story_starts.append(max(0.0, next_start - self.lead_in_padding))
+
+                        final_end = max(float(speech_chunks[-1][1]), self.audio_duration)
+                        story_ends.append(final_end)
+
+                        for idx, (s_start, s_end) in enumerate(zip(story_starts, story_ends)):
+                            if s_end - s_start >= 4.0:
+                                detected_stories.append(Story(
+                                    start=round(s_start, 2),
+                                    end=round(s_end, 2),
+                                    title=f"Story {len(detected_stories) + 1}"
+                                ))
+
+                if detected_stories:
+                    self._emit_progress("Story detection complete.", 100)
+                    self.finished.emit(detected_stories)
+                    return
+
+            # ==========================================================
+            # PATH B: Raw Media Mode (Silero VAD — Speech Only, Ignores Music)
+            # ==========================================================
+            if not self.audio_file or not os.path.isfile(self.audio_file):
+                raise FileNotFoundError(f"Audio file not found: {self.audio_file}")
+
+            self._emit_progress("[Step 1/2] Detecting speech activity with Silero VAD...", 25)
+
+            import soundfile as sf
+            import torch
+            from silero_vad import load_silero_vad, get_speech_timestamps
+
+            # Load 16kHz mono audio directly via soundfile
+            audio_data, sample_rate = sf.read(str(self.audio_file), dtype="float32")
+            wav = torch.from_numpy(audio_data)
+            if wav.ndim > 1:
+                wav = wav.mean(dim=-1)
+
+            if sample_rate != 16000:
+                import torchaudio
+                resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
+                wav = resampler(wav)
+                sample_rate = 16000
+
+            vad_model = load_silero_vad()
+            # Silero classifies voice activity; music and room noise do not count as speech
+            speech_timestamps = get_speech_timestamps(
+                wav,
+                vad_model,
+                sampling_rate=16000,
+                min_speech_duration_ms=250,
+                min_silence_duration_ms=int(self.silence_threshold * 1000),
+                return_seconds=True
+            )
+
+            total_dur = max(float(len(wav)) / 16000.0, self.audio_duration)
+
+            if speech_timestamps:
+                self._emit_progress("[Step 2/2] Assembling stories from vocal intervals...", 85)
+                story_starts = [max(0.0, speech_timestamps[0]["start"] - self.lead_in_padding)]
+                story_ends = []
+
+                for i in range(len(speech_timestamps) - 1):
+                    if self._is_cancelled:
+                        self.error.emit("Process canceled by user.")
+                        return
+
+                    curr_speech_end = speech_timestamps[i]["end"]
+                    next_speech_start = speech_timestamps[i + 1]["start"]
+                    gap = next_speech_start - curr_speech_end
+
+                    if gap >= self.silence_threshold:
+                        story_ends.append(curr_speech_end + min(0.3, self.lead_in_padding))
+                        story_starts.append(max(0.0, next_speech_start - self.lead_in_padding))
+
+                story_ends.append(max(float(speech_timestamps[-1]["end"]), total_dur))
+
+                for idx, (st, et) in enumerate(zip(story_starts, story_ends)):
+                    if et - st >= 4.0:
+                        detected_stories.append(Story(
+                            start=round(st, 2),
+                            end=round(et, 2),
+                            title=f"Story {len(detected_stories) + 1}"
+                        ))
+
+            if not detected_stories and total_dur > 0:
+                detected_stories = [Story(start=0.0, end=round(total_dur, 2), title="Story 1")]
+
+            self._emit_progress("Story detection complete.", 100)
             self.finished.emit(detected_stories)
 
         except Exception as exc:
@@ -2084,14 +2241,45 @@ def serialize_rtvs_project(data: dict) -> bytes:
 
 def deserialize_rtvs_project(raw_bytes: bytes) -> dict:
     """Deserialize project payload, transparently handling both gzip-compressed (.rtvs)
-    and legacy uncompressed UTF-8 JSON files."""
+    and legacy uncompressed UTF-8 JSON files.
+
+    Decompression is streamed with an upper ceiling (MAX_DECOMPRESSED_PROJECT_BYTES)
+    rather than done in one unbounded gzip.decompress() call, so a corrupted or
+    maliciously crafted small gzip payload that expands to gigabytes can't exhaust
+    memory and crash the app -- legitimate project JSON is orders of magnitude
+    smaller than the ceiling.
+    """
     if not raw_bytes:
         return {}
     if len(raw_bytes) >= 2 and raw_bytes[:2] == b"\x1f\x8b":
-        text = gzip.decompress(raw_bytes).decode("utf-8")
+        text = _decompress_gzip_bounded(raw_bytes).decode("utf-8")
     else:
         text = raw_bytes.decode("utf-8", errors="replace")
     return json.loads(text)
+
+
+MAX_DECOMPRESSED_PROJECT_BYTES = 200 * 1024 * 1024  # 200 MB; far larger than any legitimate project JSON
+
+
+def _decompress_gzip_bounded(raw_bytes: bytes, max_bytes: int = MAX_DECOMPRESSED_PROJECT_BYTES) -> bytes:
+    """Decompress a gzip payload in chunks, stopping with a clear error the
+    moment the decompressed size would exceed max_bytes, instead of
+    materializing an unbounded amount of data in one gzip.decompress() call.
+    """
+    chunk_size = 1024 * 1024
+    out = bytearray()
+    with gzip.GzipFile(fileobj=io.BytesIO(raw_bytes), mode="rb") as gz:
+        while True:
+            chunk = gz.read(chunk_size)
+            if not chunk:
+                break
+            out += chunk
+            if len(out) > max_bytes:
+                raise ValueError(
+                    f"Project file decompresses to more than {max_bytes // (1024 * 1024)} MB; "
+                    "refusing to load (the file may be corrupted or invalid)."
+                )
+    return bytes(out)
 
 
 def read_rtvs_project_file(file_path) -> dict:

@@ -443,7 +443,7 @@ class MediaBatchMixin:
 
         # Detection Thresholds
         try:
-            self.silence_threshold = float(self.settings_store.value("silence_threshold", 3.0) or 3.0)
+            self.silence_threshold = float(self.settings_store.value("silence_threshold", 2.0) or 2.0)
             self.lead_in_padding = float(self.settings_store.value("lead_in_padding", 0.5) or 0.5)
             self.expected_speakers = str(self.settings_store.value("default_expected_speakers", "auto") or "auto")
         except Exception:
@@ -640,7 +640,7 @@ class MediaBatchMixin:
             return
 
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = read_rtvs_project_file(path)
             media = self.resolve_project_media(path, data.get("audio_file"))
             if not data.get("audio_file") or media is not None:
                 self.load_project_file(path, prompt=False, preserve_media=False)

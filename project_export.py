@@ -1523,11 +1523,30 @@ class ProjectExportMixin:
                 continue
         return None
 
+    # Extensions resolve_project_media() will accept as a project's media file.
+    # A project file (.rtvs) can reference an arbitrary path; without this
+    # whitelist, opening a malicious project could resolve to -- and, with
+    # "Copy media file to project folder" enabled, copy -- an arbitrary
+    # non-media file the victim happens to have on disk. Deliberately broad
+    # (covers less-common containers too) since the media-open dialog itself
+    # imposes no extension restriction ("Media Files (*.*)") -- the goal here
+    # is excluding non-media files, not second-guessing which media formats
+    # a user may have legitimately opened.
+    _VALID_MEDIA_EXTENSIONS = {
+        ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".oga", ".opus", ".wma",
+        ".aiff", ".aif", ".caf", ".amr", ".ac3", ".dts", ".ra", ".rm",
+        ".mp4", ".m4v", ".mov", ".mkv", ".avi", ".webm", ".wmv", ".mpg", ".mpeg",
+        ".3gp", ".3g2", ".ts", ".mts", ".m2ts", ".asf", ".flv",
+    }
+
     def resolve_project_media(self, project_file, audio_reference, audio_file_abs=None):
+        def _is_valid_media_candidate(candidate: Path) -> bool:
+            return candidate.exists() and candidate.is_file() and candidate.suffix.lower() in self._VALID_MEDIA_EXTENSIONS
+
         # 1. Check remembered absolute path if available and exists on disk
         if audio_file_abs:
             abs_candidate = Path(audio_file_abs).expanduser().resolve()
-            if abs_candidate.exists() and abs_candidate.is_file():
+            if _is_valid_media_candidate(abs_candidate):
                 return abs_candidate
 
         if not audio_reference:
@@ -1538,38 +1557,38 @@ class ProjectExportMixin:
         # 2. Check audio_reference if already absolute and exists
         if ref_path.is_absolute():
             cand = ref_path.resolve()
-            if cand.exists() and cand.is_file():
+            if _is_valid_media_candidate(cand):
                 return cand
 
         proj_dir = project_file.parent
 
         # 3. Check relative to project_file.parent
         rel_candidate = (proj_dir / ref_path).resolve()
-        if rel_candidate.exists() and rel_candidate.is_file():
+        if _is_valid_media_candidate(rel_candidate):
             return rel_candidate
 
         # 4. Check inside Media/ subfolder in project dir
         media_candidate = (proj_dir / "Media" / ref_path.name).resolve()
-        if media_candidate.exists() and media_candidate.is_file():
+        if _is_valid_media_candidate(media_candidate):
             return media_candidate
 
         # 5. Check direct basename in project directory
         basename_candidate = (proj_dir / ref_path.name).resolve()
-        if basename_candidate.exists() and basename_candidate.is_file():
+        if _is_valid_media_candidate(basename_candidate):
             return basename_candidate
 
         # 6. Check in default projects directory
         default_dir = getattr(self, "default_project_directory", "")
         if default_dir:
             cand = (Path(default_dir) / ref_path.name).resolve()
-            if cand.exists() and cand.is_file():
+            if _is_valid_media_candidate(cand):
                 return cand
 
         # 7. Check in last media directory
         last_media = getattr(self, "last_media_directory", "")
         if last_media:
             cand = (Path(last_media) / ref_path.name).resolve()
-            if cand.exists() and cand.is_file():
+            if _is_valid_media_candidate(cand):
                 return cand
 
         return None

@@ -545,11 +545,6 @@ class UiLayoutMixin:
         pref_act.triggered.connect(self.open_preferences_dialog)
         settings_menu.addAction(pref_act)
 
-        wp_settings_act = QAction("&WordPress Export Settings...", self)
-        wp_settings_act.setShortcut(platform_seq("Ctrl+Shift+W"))
-        wp_settings_act.triggered.connect(self._open_wp_settings)
-        settings_menu.addAction(wp_settings_act)
-
         self.translation_model_action = QAction("&Manage AI Models...", self)
         self.translation_model_action.setShortcut(platform_seq("Ctrl+M"))
         self.translation_model_action.triggered.connect(self.open_translation_model_manager)

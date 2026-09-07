@@ -10,6 +10,7 @@ import html
 import json
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,31 @@ def _get_keyring():
         return None
 
 
+def _get_wp_fallback_cipher():
+    """Best-effort symmetric cipher bound to this machine, used only for
+    the QSettings fallback when no system keyring service is available
+    (e.g. a portable USB run, or Linux without Secret Service/KWallet).
+
+    This is NOT a substitute for a real OS keyring: deriving the key from
+    machine-identifying data means the stored value is only meaningfully
+    protected against someone reading the settings file/registry off this
+    machine without also having code-execution access to it (e.g. a casual
+    file scraper, an unencrypted backup, a registry export) -- not against
+    a determined local attacker with access to the running machine.
+    """
+    try:
+        import base64
+        import hashlib
+        import platform
+        from cryptography.fernet import Fernet
+
+        host_salt = f"{platform.node()}|{INTERNAL_APP_ID}|rtvs-wp-fallback".encode("utf-8")
+        key = base64.urlsafe_b64encode(hashlib.sha256(host_salt).digest())
+        return Fernet(key)
+    except Exception:
+        return None
+
+
 def _get_wp_password(username: str) -> str:
     """Retrieve the stored WordPress application password."""
     if not username:
@@ -59,13 +85,30 @@ def _get_wp_password(username: str) -> str:
         except Exception:
             pass
     settings = QSettings(INTERNAL_APP_ID, INTERNAL_APP_ID)
-    return str(settings.value(f"wp_pass_{username}", "") or "")
+    raw = str(settings.value(f"wp_pass_{username}", "") or "")
+    if not raw:
+        return ""
+    is_encrypted = str(settings.value(f"wp_pass_{username}_enc", "")).lower() in {"1", "true", "yes"}
+    if not is_encrypted:
+        return raw
+    cipher = _get_wp_fallback_cipher()
+    if cipher is None:
+        return ""
+    try:
+        return cipher.decrypt(raw.encode("ascii")).decode("utf-8")
+    except Exception:
+        return ""
 
 
-def _set_wp_password(username: str, password: str) -> None:
-    """Store the WordPress application password securely."""
+def _set_wp_password(username: str, password: str) -> bool:
+    """Store the WordPress application password securely.
+
+    Returns True if it was saved to the system keyring, False if it fell
+    back to (encrypted, where possible) local storage -- callers can use
+    this to show an advisory notice when the fallback path is used.
+    """
     if not username:
-        return
+        return False
     kr = _get_keyring()
     saved_in_keyring = False
     if kr is not None:
@@ -76,10 +119,23 @@ def _set_wp_password(username: str, password: str) -> None:
             pass
     settings = QSettings(INTERNAL_APP_ID, INTERNAL_APP_ID)
     if not saved_in_keyring:
-        settings.setValue(f"wp_pass_{username}", password)
+        cipher = _get_wp_fallback_cipher()
+        if cipher is not None:
+            try:
+                token = cipher.encrypt(password.encode("utf-8")).decode("ascii")
+                settings.setValue(f"wp_pass_{username}", token)
+                settings.setValue(f"wp_pass_{username}_enc", True)
+            except Exception:
+                settings.setValue(f"wp_pass_{username}", password)
+                settings.setValue(f"wp_pass_{username}_enc", False)
+        else:
+            settings.setValue(f"wp_pass_{username}", password)
+            settings.setValue(f"wp_pass_{username}_enc", False)
     else:
         # Clear fallback if saved in keyring
         settings.remove(f"wp_pass_{username}")
+        settings.remove(f"wp_pass_{username}_enc")
+    return saved_in_keyring
 
 
 def generate_wp_excerpt(text: str, max_words: int = 55) -> str:
@@ -413,7 +469,20 @@ class WordPressSettingsDialog(QDialog):
         self.settings.setValue("wp_site_url", url)
         self.settings.setValue("wp_username", user)
         if user and pwd:
-            _set_wp_password(user, pwd)
+            saved_in_keyring = _set_wp_password(user, pwd)
+            if not saved_in_keyring:
+                QMessageBox.warning(
+                    self,
+                    "System Credential Storage Unavailable",
+                    "Your operating system's secure credential storage (keyring) is not "
+                    "available on this machine, so the WordPress application password has "
+                    "been saved locally instead, encrypted with a key derived from this "
+                    "machine.\n\n"
+                    "This is not as strong as a system keyring -- it primarily guards "
+                    "against the password being read in plain text from a settings file, "
+                    "registry export, or backup, not against someone with code-execution "
+                    "access to this machine.",
+                )
 
         self.accept()
 
@@ -475,6 +544,7 @@ class WordPressExportMixin:
         # 1. Prepare the media file. This can take a while for large WAV files.
         report_progress(1, "Preparing audio for WordPress…")
         temp_audio = None
+        temp_dir = None
         try:
             target_media = str(audio_src)
             source_suffix = Path(audio_src).suffix.lower()
@@ -485,8 +555,12 @@ class WordPressExportMixin:
             # This keeps the actual bytes, extension, and MIME type consistent.
             if needs_clip or needs_mp3:
                 report_progress(1, "Converting audio to MP3…")
-                temp_dir = Path(tempfile.gettempdir()) / "rtvs_wp_export"
-                temp_dir.mkdir(parents=True, exist_ok=True)
+                # A unique per-job directory (not a fixed shared name) avoids
+                # permission conflicts with other users on shared/multi-user
+                # systems and prevents concurrent exports from overwriting
+                # each other's temp files; mkdtemp also creates it
+                # owner-only (0700 on POSIX).
+                temp_dir = Path(tempfile.mkdtemp(prefix="rtvs_wp_"))
                 base = Path(safe_filename(media_filename or post_title or "audio_clip")).stem
                 if needs_clip:
                     temp_audio = temp_dir / f"{base}_{int(start or 0)}_{int(end or 0)}.mp3"
@@ -519,6 +593,8 @@ class WordPressExportMixin:
                     temp_audio.unlink()
                 except Exception:
                     pass
+            if temp_dir and temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
         # 3. Build post content HTML. WordPress should mirror the local transcript
         # export style: speaker-labelled paragraphs when enabled, no timestamps,

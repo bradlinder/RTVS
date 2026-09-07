@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.9.6
+
+- **Moved WordPress settings into Preferences**: Site URL, Username, App Password, and Test Connection now live under Preferences > WordPress. The standalone "WordPress Export Settings..." menu item has been removed; the contextual "WordPress Settings..." button inside the Export dialog is unchanged and uses the same underlying settings.
+- **Manage Models**: labeled the two Whisper models and the Parakeet model that are English-only ("Distil-Whisper Large v3 (English)", "Parakeet ONNX Fast TDT (English)") -- verified against each model's documentation rather than assumed.
+- **Security**: sanitized update-download filenames and validated destination paths against directory traversal; restricted update downloads to official GitHub domains over HTTPS; added SHA-256 verification when a release publishes one; WordPress application passwords now use machine-derived encryption for the local-storage fallback (instead of plaintext) when no system keyring is available, with an on-screen notice when that fallback is used; project files now validate media file extensions before resolving/copying referenced media, closing a path where a malicious project file could reference and copy an arbitrary file; project file decompression is now streamed with a 200MB ceiling instead of unbounded.
+- **Performance**: activity-log snapshots no longer re-serialize the full transcript/diarization/translations on every log entry -- only when a real edit occurs; first-run or upgrade installs of the local transcription/diarization environment now show a progress dialog instead of freezing the window.
+- **Reliability**: the local transcription/diarization worker's stdout (JSON protocol) and stderr (diagnostic output) are no longer merged, preventing third-party library warnings from occasionally corrupting an in-flight result; WordPress export temp files now use a unique per-job directory instead of a shared fixed one; a worker-protocol-mismatch error dialog no longer shows a hardcoded, incorrect expected version number.
+
 ## v1.9.4
 
 - **Global Multi-Stage Elapsed Time**: The progress indicator now tracks and displays elapsed time across all operations and multi-stage pipelines (including combined transcription + speaker diarization) from start to finish, rather than only during diarization.
