@@ -1,7 +1,7 @@
 #define MyAppName "Radio & TV Segmenter"
 
 #ifndef MyAppVersion
-#define MyAppVersion "2.1"
+#define MyAppVersion "2.1.0"
 #endif
 
 #define MyAppPublisher "Radio & TV Segmenter"
@@ -18,6 +18,7 @@ AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\Radio & TV Segmenter
 UsePreviousAppDir=no
+DirExistsWarning=no
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\..\dist\installer
@@ -35,7 +36,7 @@ LicenseFile=..\..\NOTICES.txt
 ChangesAssociations=yes
 
 [InstallDelete]
-; Clean up legacy shortcuts created by previous releases (with "Story" in the name)
+; Clean up legacy shortcuts created by previous releases (with "Story" in the name)[cite: 10]
 Type: files; Name: "{autodesktop}\Radio & TV Story Segmenter.lnk"
 Type: files; Name: "{group}\Radio & TV Story Segmenter.lnk"
 
@@ -58,6 +59,6 @@ Root: HKA; Subkey: "Software\Classes\RTVSProject\shell\open\command"; ValueType:
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Never delete the per-user data directory. It contains projects, settings, logs,
-; downloaded models, and optional runtimes that should survive an application update/uninstall.
+; Never delete the per-user data directory. It contains projects, settings, logs,[cite: 10]
+; downloaded models, and optional runtimes that should survive an application update/uninstall.[cite: 10]
 Type: filesandordirs; Name: "{app}"
