@@ -202,7 +202,7 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
         "libcublas", "cublas", "libcusolver", "cusolver", "libcurand", "curand",
         "libcufft", "cufft", "libnccl", "nccl", "libnvJitLink", "libnvblas",
     )
-    for base in internal_dirs::
+    for base in internal_dirs:
         if not base.exists():
             continue
         for nvidia_dir in base.glob("**/nvidia"):
