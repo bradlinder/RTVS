@@ -19,7 +19,7 @@ class RestoreSelectedSettingsDialog(QDialog):
         ("ai_models", "AI Models & Storage Directory", "Whisper speech recognition model (small, beam size 5), translation model (tiny), and models storage folder."),
         ("gpu_acceleration", "Hardware / GPU Acceleration", "GPU and DirectML hardware acceleration settings."),
         ("playback_timeline", "Playback & Timeline Display", "Skip duration (5s), waveform visibility, thumbnail strip, and transcript selection mode."),
-        ("detection_diarization", "Story Detection & Diarization Defaults", "Silence threshold (2.0s), lead-in padding (0.5s), default expected speakers (auto), and speaker prompts."),
+        ("detection_diarization", "Story Detection & Diarization Defaults", "Silence threshold (3.0s), lead-in padding (0.5s), default expected speakers (auto), and speaker prompts."),
         ("batch_processing", "Batch Processing Tool Options", "Batch tasks (transcribe, diarize, detect stories), output formats, and batch custom directory."),
         ("export_options", "Export Window: Formats & Content Options", "Export formats (TXT, DOCX, Media enabled; SRT, VTT disabled) and content options (speakers, timestamps, languages)."),
         ("export_directory", "Export Window: Custom Location", "Clear saved custom export location and restore default project folder export routing."),
@@ -28,7 +28,7 @@ class RestoreSelectedSettingsDialog(QDialog):
 
     def __init__(self, parent=None, on_restore_selected=None):
         super().__init__(parent)
-        self.setWindowTitle("Restore Default Settings")
+        self.setWindowTitle("Restore System Defaults")
         self.resize(540, 560)
         self.on_restore_selected = on_restore_selected
         self.checkboxes = {}
@@ -1033,15 +1033,15 @@ class PlaybackPreferencesMixin:
 
         # 9. Story Detection & Diarization
         if "detection_diarization" in selected_set:
-            self.settings_store.setValue("silence_threshold", 2.0)
+            self.settings_store.setValue("silence_threshold", 3.0)
             self.settings_store.setValue("lead_in_padding", 0.5)
             self.settings_store.setValue("default_expected_speakers", "auto")
             self.settings_store.setValue("ask_expected_speakers", True)
-            self.silence_threshold = 2.0
+            self.silence_threshold = 3.0
             self.lead_in_padding = 0.5
             self.expected_speakers = "auto"
             if "gap_spin" in lw and lw["gap_spin"]:
-                lw["gap_spin"].setValue(2.0)
+                lw["gap_spin"].setValue(3.0)
             if "pad_spin" in lw and lw["pad_spin"]:
                 lw["pad_spin"].setValue(0.5)
             if "expected_speakers_combo" in lw and lw["expected_speakers_combo"]:
@@ -1184,6 +1184,15 @@ class PlaybackPreferencesMixin:
         # Right stacked pages
         stack = QStackedWidget(dialog)
 
+        def _add_custom_defaults_btn(layout, cat_title):
+            btn = QPushButton("Save as Custom Defaults")
+            btn.setToolTip(f"Save current {cat_title} settings as your custom defaults.")
+            def _save_custom():
+                _save_preferences(close_dialog=False)
+                QMessageBox.information(dialog, "Custom Defaults Saved", f"Current {cat_title} settings have been saved as your custom defaults.")
+            btn.clicked.connect(_save_custom)
+            layout.addWidget(btn)
+
         # 1. General Page
         page_general = QWidget()
         gen_layout = QVBoxLayout(page_general)
@@ -1248,11 +1257,8 @@ class PlaybackPreferencesMixin:
         autosave_spin.setSuffix(" min (0 = off)")
         gen_form.addRow("Auto-save Interval:", autosave_spin)
 
-        restore_sel_gen_btn = QPushButton("Restore Default Settings…")
-        restore_sel_gen_btn.setToolTip("Select specific settings and categories to restore to defaults.")
-        gen_form.addRow("Reset Preferences:", restore_sel_gen_btn)
-
         gen_layout.addLayout(gen_form)
+        _add_custom_defaults_btn(gen_layout, "General")
         gen_layout.addStretch()
         stack.addWidget(page_general)
 
@@ -1308,6 +1314,7 @@ class PlaybackPreferencesMixin:
         audio_form.addRow("Device Test:", test_btn)
 
         audio_layout.addLayout(audio_form)
+        _add_custom_defaults_btn(audio_layout, "Audio Hardware")
         audio_layout.addStretch()
         stack.addWidget(page_audio)
 
@@ -1338,6 +1345,7 @@ class PlaybackPreferencesMixin:
         )
         up_info.setStyleSheet("color: #666; font-size: 12px; margin-top: 10px;")
         up_layout.addWidget(up_info)
+        _add_custom_defaults_btn(up_layout, "Updates & GitHub")
         up_layout.addStretch()
         stack.addWidget(page_updates)
 
@@ -1425,7 +1433,7 @@ class PlaybackPreferencesMixin:
                 self.open_model_cleanup_dialog()
         manage_models_btn.clicked.connect(_open_mgr)
         mod_layout.addWidget(manage_models_btn)
-
+        _add_custom_defaults_btn(mod_layout, "AI Models")
         mod_layout.addStretch()
         stack.addWidget(page_models)
 
@@ -1460,6 +1468,7 @@ class PlaybackPreferencesMixin:
         play_form.addRow("New Text Selection Behavior:", sel_mode_combo)
 
         play_layout.addLayout(play_form)
+        _add_custom_defaults_btn(play_layout, "Playback & Timeline")
         play_layout.addStretch()
         stack.addWidget(page_play)
 
@@ -1502,6 +1511,7 @@ class PlaybackPreferencesMixin:
         det_form.addRow("Speaker Estimate Prompt:", ask_speakers_chk)
 
         det_layout.addLayout(det_form)
+        _add_custom_defaults_btn(det_layout, "Story Detection & Diarization")
         det_layout.addStretch()
         stack.addWidget(page_detect)
 
@@ -1605,6 +1615,7 @@ class PlaybackPreferencesMixin:
         batch_form.addRow("Factory Defaults:", batch_options_reset_btn)
 
         batch_layout.addLayout(batch_form)
+        _add_custom_defaults_btn(batch_layout, "Batch Processing")
         batch_layout.addStretch()
         stack.addWidget(page_batch)
 
@@ -1669,6 +1680,7 @@ class PlaybackPreferencesMixin:
 
         wp_test_btn.clicked.connect(_test_wp_connection)
         wp_layout.addWidget(wp_test_btn)
+        _add_custom_defaults_btn(wp_layout, "WordPress Connection")
         wp_layout.addStretch()
         stack.addWidget(page_wp)
 
@@ -1727,8 +1739,8 @@ class PlaybackPreferencesMixin:
         }
 
         bottom_bar = QHBoxLayout()
-        restore_sel_btn = QPushButton("Restore Default Settings…")
-        restore_sel_btn.setToolTip("Select specific settings and categories to restore to defaults.")
+        restore_sel_btn = QPushButton("Restore System Defaults…")
+        restore_sel_btn.setToolTip("Select specific settings and categories to restore to system factory defaults.")
 
         bottom_bar.addWidget(restore_sel_btn)
         bottom_bar.addStretch()
@@ -1750,7 +1762,6 @@ class PlaybackPreferencesMixin:
             )
             sel_dlg.exec()
 
-        restore_sel_gen_btn.clicked.connect(_open_restore_selected_dialog)
         restore_sel_btn.clicked.connect(_open_restore_selected_dialog)
 
         def _save_preferences(*args, close_dialog=True):

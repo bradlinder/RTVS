@@ -237,7 +237,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "1.9.8"
+PROJECT_VERSION = "1.9.9"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -1677,7 +1677,7 @@ class StoryAutoDetectWorker(QObject):
     def __init__(
         self,
         audio_file,
-        silence_threshold=2.0,
+        silence_threshold=3.0,
         lead_in_padding=0.5,
         audio_duration=0,
         transcript_segments=None,
@@ -1686,7 +1686,7 @@ class StoryAutoDetectWorker(QObject):
     ):
         super().__init__()
         self.audio_file = str(audio_file)
-        self.silence_threshold = float(silence_threshold or 2.0)
+        self.silence_threshold = float(silence_threshold or 3.0)
         self.lead_in_padding = float(lead_in_padding or 0.5)
         self.audio_duration = float(audio_duration or 0.0)
         self.transcript_segments = transcript_segments or []
@@ -1763,7 +1763,6 @@ class StoryAutoDetectWorker(QObject):
             )
 
             total_dur = max(float(len(wav)) / 16000.0, self.audio_duration)
-            print(f"[STORY DEBUG] Silero VAD found {len(speech_timestamps)} speech chunks.")
 
             if speech_timestamps:
                 self._emit_progress("[Step 2/2] Assembling stories from vocal intervals...", 85)
@@ -1797,7 +1796,6 @@ class StoryAutoDetectWorker(QObject):
             if not detected_stories and total_dur > 0:
                 detected_stories = [Story(start=0.0, end=round(total_dur, 2), title="Story 1")]
 
-            print(f"[STORY DEBUG] Silero VAD generated {len(detected_stories)} stories.")
             self._emit_progress("Story detection complete.", 100)
             self.finished.emit(detected_stories)
 

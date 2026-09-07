@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter — v1.9.8
+"""Radio & TV Segmenter — v1.9.9
 
 This is the thin application composition root. UI/processing responsibilities
 are implemented in focused mixins so future changes can target smaller files
@@ -97,7 +97,7 @@ class MainWindow(
         self.current_position = 0
         self.skip_seconds = 5
         self.whisper_model = "small"
-        self.silence_threshold = 2.0
+        self.silence_threshold = 3.0
         self.lead_in_padding = 0.5
         self.expected_speakers = "auto"
         self.translation_direction = "auto"

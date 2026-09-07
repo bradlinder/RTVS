@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.9.9
+
+- **Adjustable Custom Defaults**: Added "Save as Custom Defaults" buttons to each sub-menu in the preferences dialog, allowing users to save custom defaults that override original system defaults. Updated the reset preference option to "Restore System Defaults" to restore original factory defaults.
+- **Updated Story Detection Default**: Changed the default story detection silence threshold to 3.0s.
+- **Silero VAD Debug Cleanup**: Removed [STORY DEBUG] print statements from codebase.
+- **Unified Application Version 1.9.9**: Synchronized version 1.9.9 across application constants, local PyInstaller/Inno Setup/Debian/macOS builders, GitHub Actions release workflows, documentation, and update verification manifests.
+
 ## v1.9.8
 
 - **Resilient Multi-Stage Speaker Detection Progress**: Replaced brittle percentage-drop heuristics with keyword-based stage mapping across VAD, embedding extraction, and speaker clustering stages. Added monotonic percentage scaling with an upper safety ceiling (99%) to eliminate progress jumps and stalling during diarization.
