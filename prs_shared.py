@@ -801,7 +801,7 @@ class StoryListWidget(QListWidget):
 # Interactive Transcript Edit Widget
 # ============================================================
 
-def transcript_text_view_stylesheet(mode, font_size=14):
+def transcript_text_view_stylesheet(mode, font_size=16):
     """Shared visual treatment for transcript-style views.
 
     ``font_size`` is deliberately supplied at runtime so the user's transcript
@@ -1068,7 +1068,7 @@ class InteractiveTranscriptEdit(QTextEdit):
         # Update the widget font as well as its stylesheet so QTextDocument's
         # inherited HTML text follows the scale consistently.
         font = QFont(self.font())
-        font.setPointSizeF(14.0 * self.font_scale * 72.0 / 96.0)
+        font.setPointSizeF(16.0 * self.font_scale * 72.0 / 96.0)
         self.setFont(font)
         self.document().setDefaultFont(font)
         self.setStyleSheet(transcript_text_view_stylesheet(self.current_theme, 14 * self.font_scale))

@@ -128,3 +128,7 @@ This application incorporates or interfaces with several open source libraries a
 * FFmpeg: LGPL v2.1+ / GPL v2+ (executed externally)
 
 For full license texts and copyright acknowledgments, see NOTICES.txt or open Help -> Third-Party Licenses within the application.
+
+## Acknowledgments
+
+This project was developed with the aid of AI collaboration tools, including Gemini, Claude, and ChatGPT.
