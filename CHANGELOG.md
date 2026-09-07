@@ -1,3 +1,9 @@
+## v2.1-stable
+
+- **Timeline now themes with Light and High Contrast modes** (previously covered in the earlier changelog entry).
+- **Fixed**: opening a new media file skipped an intended immediate duration probe (`probed_duration` was always `None`, dead code left over from an earlier refactor) -- the timeline could briefly show a stale or zero duration until the media player's own async duration signal arrived a moment later. Restored the probe and reduced its worst-case timeout from 15s to 5s.
+- **Fixed**: `safe_filename()` (used for exported story/project folder and file names) didn't guard against an input that sanitizes down to nothing but dots -- a folder-name prompt or a project file's own story title of ".." could resolve one directory level *above* the intended export location instead of into a new subfolder. Dot-only results now fall back to a safe default name.
+
 ## v2.1.0-beta
 
 - **Visual Theme Refresh**: Refined the dark visual system with layered charcoal/slate surfaces, restrained cyan interaction accents, cleaner borders, rounded controls, minimalist scrollbars, modern menus, and cohesive focus/selection states.

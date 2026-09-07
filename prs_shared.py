@@ -239,7 +239,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "2.1.0-beta"
+PROJECT_VERSION = "2.1-stable"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -482,7 +482,17 @@ def safe_filename(text):
         text = "Untitled Story"
     text = re.sub(r'[<>:"/\\|?*]', "", text)
     text = re.sub(r"\s+", "_", text)
-    return text[:100]
+    text = text[:100]
+    # A result that's nothing but dots (".", "..", "....") is a
+    # current-dir/parent-dir path component when used as a single path
+    # segment, not a real filename -- e.g. a project folder-name prompt or
+    # a story title of ".." would otherwise resolve one level *above* the
+    # intended export directory. This can come from direct user input or
+    # from a loaded project file's own data, so guard it once here rather
+    # than at each of this function's call sites.
+    if not text.strip("."):
+        text = "Untitled_Story"
+    return text
 
 
 def is_sentence_end(text):

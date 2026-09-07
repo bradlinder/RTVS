@@ -14,7 +14,7 @@ class MediaBatchMixin:
             result = subprocess.run(
                 [ffprobe_path() or "ffprobe", "-v", "error", "-show_entries", "format=duration",
                  "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15, check=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5, check=True,
             )
             value = float(result.stdout.strip())
             return value if value > 0 else None
@@ -1023,7 +1023,7 @@ class MediaBatchMixin:
 
             self.audio_file = path
 
-            probed_duration = None
+            probed_duration = self.probe_media_duration(path)
             self.player.setSource(QUrl.fromLocalFile(str(path)))
             self.current_media_is_video = self.is_video_file(path)
             self.update_video_preview_state()

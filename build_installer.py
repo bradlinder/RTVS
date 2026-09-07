@@ -39,7 +39,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.1.0-beta"
+    PROJECT_VERSION = "2.1-stable"
 
 # Only the PySide6 submodules this app actually imports (verified against
 # every `from PySide6.X import ...` in the source tree). The previous build

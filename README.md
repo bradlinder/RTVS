@@ -1,103 +1,130 @@
-# Radio & TV Segmenter 2.1.0-beta
+# Radio & TV Story Segmenter
 
-Cross-platform story segmenter and transcriber for Windows, macOS, and Linux (Debian/Ubuntu).
+Radio & TV Story Segmenter is a cross-platform desktop application built with Python and PySide6. Designed for broadcast journalists, audio producers, podcasters, and researchers, it transcribes long-form audio and video recordings, labels distinct speakers, translates text across languages, and segments programs into independent, publishable stories.
 
-## Distribution model
+---
 
-The base application is **CPU-first and CPU-only**. Large optional GPU packages are not included in the installer. AI models are downloaded only when needed, and optional NVIDIA CUDA support can be installed later from Settings on supported Windows systems.
+## Features
 
-Mutable data (models, logs, cached translation models, optional runtimes, and settings) is stored in the user's application-data directory rather than beside the installed executable.
+* Automated Speech Transcription: Powered by faster-whisper (CTranslate2) with local Whisper models from tiny up to large-v3.
+* Speaker Diarization: Uses pyannote.audio and Silero VAD to detect and attribute speakers across multi-person interviews and panel segments.
+* Bilingual Translation: Direct in-app Spanish/English translation using local Helsinki-NLP MarianMT transformer models with sentence-level alignment.
+* Interactive Transcript Editor: Click-to-seek playback navigation, inline text correction, customizable font scaling, and speaker reattribution tools.
+* Visual Waveform Timeline: Synchronized timeline with zoom, scrub markers, region selection, and optional video thumbnail strips.
+* Hardware Acceleration: Multi-backend detection supporting NVIDIA CUDA, AMD/Intel DirectML via ONNX Runtime, and Apple Silicon MPS.
+* Multi-Format Publishing & Exports:
+* Standard Subtitles (SRT, VTT)
+* Plain and annotated transcripts (TXT, Markdown, CSV)
+* Cockos Reaper Digital Audio Workstation project markers (EDL)
+* WordPress REST API direct draft/post creation
+* Audio segment extractions sliced directly through FFmpeg
 
-## Build the application
 
-Build on the target operating system; PyInstaller does not cross-compile.
 
-1. Create a clean Python 3.12 build environment.
-2. Install the build/runtime dependencies from `requirements.txt` and `requirements-build.txt`.
-3. Install **CPU-only PyTorch** in the build environment. For Windows/Linux, use the PyTorch CPU wheel index so CUDA libraries are not accidentally added to the installer.
-4. Make `ffmpeg` and `ffprobe` available on PATH, or set `PRS_FFMPEG_DIR` to the directory containing them.
-5. Run:
+---
 
-```text
-python build_installer.py
-```
+## Installation & Setup
 
-The build copies FFmpeg/ffprobe into the application's private runtime directory. End users do not need a separate FFmpeg installation.
+### 1. Prerequisites
 
-### Windows installer
+* Python: 3.10 to 3.12 (64-bit recommended)
+* FFmpeg: Must be installed and accessible in your system PATH (or placed in the project root directory).
+* Node.js 18+ & npm: (Optional) Only required if building the integrated React/Vite transcript preview components.
 
-Build `dist\\RadioTVSegmenter` first, then open `installer/Windows/RadioTVStorySegmenter.iss` with Inno Setup and compile it. The resulting installer is written to `dist\\installer`.
+### 2. Environment Configuration
 
-The installer does **not** remove the user's application-data directory when uninstalled.
+Clone the repository and set up a virtual environment:
 
-### macOS installer
+Windows:
+python -m venv venv
+venv\Scripts\activate
 
-Build `dist/RadioTVSegmenter.app` first, then run:
+Linux / macOS:
+python3 -m venv venv
+source venv/bin/activate
 
-```text
-installer/macOS/build_app.sh
-```
+Install standard application requirements:
+pip install -r requirements.txt
 
-Set `DEVELOPER_ID_APPLICATION` before running the script to sign the app. Set `NOTARY_PROFILE` to an existing `notarytool` keychain profile to submit and staple the DMG.
+### 3. GPU Hardware Acceleration (Optional)
 
-### Linux (Debian / Ubuntu) installer
+* NVIDIA: Ensure CUDA 11.8 or 12.x drivers are installed. PyTorch will leverage CUDA automatically.
+* AMD / Intel (Windows): Install DirectML runtime execution:
+pip install onnxruntime-directml
+* Apple Silicon: PyTorch uses Metal Performance Shaders (MPS) natively on macOS.
 
-Build `dist/RadioTVSegmenter` first, then run:
+---
 
-```text
-bash installer/Linux/build_deb.sh
-```
+## Running the Application
 
-Or run the automated 1-click build script:
+Launch the desktop client via:
+python RadioTVSegmenter.py
 
-```text
-./build_linux.sh
-```
+Or on Windows:
+Run_RadioTVSegmenter.bat
 
-The resulting package `dist/RadioTVSegmenter-2.1.0-beta-Linux-amd64.deb` can be installed on any Debian or Ubuntu system using:
+---
 
-```text
-sudo apt install ./dist/RadioTVSegmenter-2.1.0-beta-Linux-amd64.deb
-```
+## Workflows & Export Integrations
 
-A standalone compressed tarball (`dist/RadioTVSegmenter-2.1.0-beta-Linux-x86_64.tar.gz`) is also generated for non-Debian distributions.
+### Segmenting Stories
 
-## Optional GPU support
+1. Load Media: Drag and drop an audio or video file onto the timeline canvas or select File -> Open Media...
+2. Process Pipeline: Use Tools -> Multi-Stage Processing... (Ctrl+R / Cmd+R) to run transcription, speaker detection, and automated story segmentation in sequence.
+3. Refine Segments: Highlight text in the transcript or drag region handles on the timeline, then click Add Story to create segment boundaries.
 
-The base installer does not contain CUDA, NVIDIA libraries, or a second Python environment. On supported Windows systems, Settings > Processing > GPU Acceleration (NVIDIA CUDA) can provision the optional environment after installation. The Windows package contains only the small `uv` runtime manager needed to create the private Python environment; the large CUDA-enabled packages are downloaded only if the user chooses GPU acceleration.
+### Cockos Reaper DAW (EDL Marker Export)
 
-macOS currently runs CPU-only because the optional backend is NVIDIA CUDA.
+* Exports selected stories and timeline cuts into a standard EDL (.edl) edit decision list compatible with Reaper and Samplitude.
+* Import into Reaper:
+1. Open Cockos Reaper.
+2. Choose File -> Open Project or Item -> Open Items in Editor.
+3. Select the generated .edl file. Segments will map onto the timeline with speaker markers preserved.
 
-## Size-control rules
 
-- Do not use `--collect-all PySide6`; only the Qt modules actually used by the application are collected.
-- Do not build with CUDA-enabled PyTorch.
-- Do not bundle translation-only or GPU-only dependencies beyond what the current CPU pipeline actually imports.
-- Keep AI model files out of the installer; download them on demand.
 
-## Updates and Releases
+### WordPress Direct Publishing
 
-Radio & TV Segmenter includes an integrated update mechanism that connects directly to GitHub Releases:
+* Pushes selected segmented stories and transcribed body copy directly to WordPress sites via the REST API.
+* Setup & Authentication:
+1. In WordPress Admin, navigate to Users -> Profile.
+2. Scroll down to Application Passwords, enter a descriptive name (e.g., StorySegmenter), and click Add New Application Password.
+3. Copy the 24-character generated password (with spaces) into the application's WordPress Export dialog along with your site URL and username. Note: Your regular login password is not accepted by the REST API.
 
-- **Check for Updates Dialog**: Access via **About > Check for Updates…** or the **Preferences > Updates & GitHub** category.
-- **Automated Platform Asset Matching**: Queries the latest GitHub release metadata and identifies the correct binary package for the current operating system (`.exe` on Windows, `.dmg` on macOS, `.deb` on Debian/Ubuntu, `.tar.gz` on Linux).
-- **Background Download & Installation**: Downloads releases with live progress and transfer speed indicators, then launches the installer and gracefully closes the running application.
-- **Configurable Startup Checks**: Supports optional silent update checks on startup, alerting you in the status bar whenever a new version is published.
-- **Repository Customization**: By default queries `bradlinder/RTVS` (https://github.com/bradlinder/RTVS), or a custom fork via `GITHUB_REPO` environment variable or the Preferences dialog.
 
-## License & Attributions
 
-Radio & TV Segmenter is licensed under the [MIT License](LICENSE).
+---
 
-This software incorporates, bundles, and interfaces with open-source software under their respective licenses:
-* **PySide6 / Qt 6**: Licensed under the GNU Lesser General Public License version 3 ([LGPLv3](https://www.gnu.org/licenses/lgpl-3.0.html)). Dynamically linked; users may replace the Qt shared libraries with compatible builds.
-* **FFmpeg / ffprobe**: Licensed under the [LGPLv2.1+](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html) / GPLv2+. Invoked as separate external executables. Source code is available from [ffmpeg.org](https://ffmpeg.org/).
-* **faster-whisper & CTranslate2**: Licensed under the [MIT License](https://github.com/SYSTRAN/faster-whisper).
-* **OpenAI Whisper**: Licensed under the [MIT License](https://github.com/openai/whisper).
-* **PyTorch**: Licensed under the [BSD 3-Clause License](https://github.com/pytorch/pytorch).
-* **Hugging Face Transformers & Hub**: Licensed under the [Apache License 2.0](https://github.com/huggingface/transformers).
-* **NumPy**: Licensed under the [BSD 3-Clause License](https://github.com/numpy/numpy).
-* **python-docx & pypdf**: Licensed under the [MIT License](https://github.com/python-openxml/python-docx) and [BSD 3-Clause License](https://github.com/py-pdf/pypdf).
-* **Application Icon**: *"Electronic Media"* by Fatam Organa from [Noun Project](https://thenounproject.com/icon/electronic-media-5929933/), licensed under [Creative Commons Attribution 3.0 Unported (CC BY 3.0)](https://creativecommons.org/licenses/by/3.0/).
+## Keyboard Shortcuts
 
-See [NOTICES.txt](NOTICES.txt) for the complete legal notices, copyright disclosures, and license texts.
+| Action | Windows / Linux | macOS |
+| --- | --- | --- |
+| Play / Pause | Space | Space |
+| Seek Forward / Backward | Right / Left | Right / Left |
+| Timeline Zoom | + / - | + / - |
+| Transcript Font Scale | Ctrl++ / Ctrl+- / Ctrl+0 | Cmd++ / Cmd+- / Cmd+0 |
+| New / Open Project | Ctrl+N / Ctrl+Shift+O | Cmd+N / Cmd+Shift+O |
+| Save Project | Ctrl+S | Cmd+S |
+| Export Dialog | Ctrl+E | Cmd+E |
+| Find and Replace | Ctrl+F | Cmd+F |
+| Toggle Timeline Panel | Alt+1 | Ctrl+Option+1 |
+| Toggle Transcript Panel | Alt+2 | Ctrl+Option+2 |
+| Toggle Stories Panel | Alt+3 | Ctrl+Option+3 |
+| Toggle History Panel | Alt+4 | Ctrl+Option+4 |
+
+---
+
+## Third-Party Notices & License
+
+Radio & TV Story Segmenter is released under the MIT License.
+
+This application incorporates or interfaces with several open source libraries and pre-trained models:
+
+* faster-whisper & CTranslate2: MIT License
+* pyannote.audio: MIT License
+* Silero VAD: MIT License
+* Hugging Face Transformers & MarianMT: Apache 2.0 License
+* PySide6 / Qt 6: LGPL v3 / Commercial
+* FFmpeg: LGPL v2.1+ / GPL v2+ (executed externally)
+
+For full license texts and copyright acknowledgments, see NOTICES.txt or open Help -> Third-Party Licenses within the application.
