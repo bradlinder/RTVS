@@ -3,7 +3,7 @@ name: Build & Release Installers
 on:
   push:
     tags:
-      - 'v*' # Automatically triggers and creates a Release when pushing a version tag (e.g. v2.1.0-beta)
+      - 'v*' # Triggers on semantic version tag pushes (e.g., v2.1.0-beta)
   workflow_dispatch:
     inputs:
       build_windows:
@@ -23,12 +23,13 @@ on:
         type: boolean
         default: true
       release_tag:
-        description: 'Release Tag (e.g., v2.1.0-beta - optional, defaults to tag or timestamp)'
+        description: 'Release Tag (e.g., v2.1.0-beta - optional, defaults to git tag)'
         type: string
         default: ''
 
 env:
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -133,7 +134,6 @@ jobs:
             export PATH="$HOME/bin:$PATH"
           fi
           
-          # Fallback to Homebrew if static binaries are not functional
           if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
             echo "Falling back to Homebrew for FFmpeg..."
             HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
@@ -242,9 +242,6 @@ jobs:
         working-directory: release_assets
         run: |
           set -e
-          # One "<asset>.sha256" file per release asset (matches what the
-          # in-app updater looks for first), plus a combined SHA256SUMS
-          # file for anyone who wants to verify manually.
           rm -f SHA256SUMS
           for f in *; do
             [ -f "$f" ] || continue
@@ -262,7 +259,7 @@ jobs:
           elif [ -n "${{ inputs.release_tag }}" ]; then
             echo "tag=${{ inputs.release_tag }}" >> $GITHUB_OUTPUT
           else
-            echo "tag=v2.1.0-beta-$(date +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
+            echo "tag=v2.1.0-beta" >> $GITHUB_OUTPUT
           fi
 
       - name: Create GitHub Release & Upload Binaries

@@ -1,13 +1,12 @@
 """Update manager and GitHub release installer for Radio & TV Segmenter.
 
 Handles:
-- Querying the GitHub REST API for latest releases and assets
+- Querying the GitHub REST API for latest releases and assets (including pre-releases)
 - Semantic version parsing and comparison against PROJECT_VERSION
-- Matching platform-appropriate installer assets (.exe on Windows, .dmg on macOS, .tar.gz on Linux)
+- Matching platform-appropriate installer assets (.exe on Windows, .dmg on macOS, .deb/.tar.gz on Linux)
 - Non-blocking background workers for checking and downloading updates
 - Real-time download progress tracking with cancellation support
 - Automatic launching of installers with graceful application shutdown
-- Visual Qt dialog matching application dark/light theme
 """
 from __future__ import annotations
 
@@ -120,14 +119,14 @@ except Exception:
 
 
 def parse_version_tuple(version_str: str) -> tuple[tuple[int, ...], int]:
-    """Parse a version string into a numeric tuple and a stability weight.
-    Releases with no suffix (or '-stable') get weight 1; '-beta'/'-rc' get weight 0.
+    """Parse version string into comparable numerical components and a stability weight.
+    Releases without pre-release tags receive weight 1; pre-releases ('-beta', '-rc') receive 0.
     """
     if not version_str:
         return ((0, 0, 0), 0)
     cleaned = re.sub(r"^[vV]", "", version_str.strip())
     is_prerelease = bool(re.search(r"[-_.]?(beta|alpha|rc|dev|preview)", cleaned, re.IGNORECASE))
-    
+
     parts = []
     for chunk in cleaned.split("."):
         m = re.match(r"^(\d+)", chunk)
@@ -153,7 +152,6 @@ def is_version_newer(remote_version_str: str, current_version_str: str = PROJECT
 
 
 def format_byte_size(num_bytes: int) -> str:
-    """Format bytes into human-readable string (e.g. '78.4 MB')."""
     if num_bytes <= 0:
         return "Unknown size"
     for unit in ["B", "KB", "MB", "GB"]:
@@ -164,10 +162,6 @@ def format_byte_size(num_bytes: int) -> str:
 
 
 def _is_trusted_download_url(url: str) -> bool:
-    """Only allow downloading update assets from official GitHub domains
-    over HTTPS -- defense in depth in case a release payload is ever
-    tampered with or a MITM'd response substitutes a different URL.
-    """
     try:
         from urllib.parse import urlparse
         parsed = urlparse(url)
@@ -180,11 +174,6 @@ def _is_trusted_download_url(url: str) -> bool:
 
 
 def _find_release_checksum(release_info: dict, asset_name: str) -> str | None:
-    """Best-effort lookup of a SHA-256 checksum for `asset_name` among the
-    release's other assets (a "<asset>.sha256" file, or a combined
-    "SHA256SUMS"/"checksums.txt" file). Returns None if no checksum asset
-    is present -- not every release automation publishes one.
-    """
     assets = (release_info or {}).get("assets", []) or []
     asset_name_lower = asset_name.lower()
 
@@ -221,21 +210,28 @@ def _find_release_checksum(release_info: dict, asset_name: str) -> str | None:
     return None
 
 
-def select_best_asset_for_platform(assets: list[dict]) -> dict | None:
-    """Select the most suitable release asset dictionary for the current operating system."""
+def select_best_asset_for_platform(assets: list[dict], target_version: str = "") -> dict | None:
+    """Select the most suitable release asset dictionary for the current operating system,
+    boosting assets that explicitly match the target version tag.
+    """
     if not assets:
         return None
 
     current_os = sys.platform
     candidates: list[tuple[int, dict]] = []
+    clean_ver = target_version.lstrip("vV").strip().lower() if target_version else ""
 
     for asset in assets:
         name = asset.get("name", "").lower()
         score = 0
 
+        # Prioritize assets containing the specific target version string
+        if clean_ver and clean_ver in name:
+            score += 50
+
         if current_os == "win32":
             if name.endswith(".exe"):
-                score = 10
+                score += 10
                 if "radiotv" in name or "segmenter" in name:
                     score += 15
                 if "setup" in name or "installer" in name:
@@ -248,7 +244,7 @@ def select_best_asset_for_platform(assets: list[dict]) -> dict | None:
 
         elif current_os == "darwin":
             if name.endswith(".dmg"):
-                score = 10
+                score += 10
                 if "radiotv" in name or "segmenter" in name:
                     score += 15
                 if "macos" in name or "mac" in name or "darwin" in name:
@@ -258,27 +254,26 @@ def select_best_asset_for_platform(assets: list[dict]) -> dict | None:
                 candidates.append((5, asset))
 
         else:
-            # Linux / Unix: Prioritize Debian/Ubuntu packages (.deb) when running on Debian/Ubuntu systems
             is_debian = (
                 Path("/etc/debian_version").exists()
                 or ("ubuntu" in Path("/etc/os-release").read_text(errors="ignore").lower() if Path("/etc/os-release").exists() else False)
                 or ("debian" in Path("/etc/os-release").read_text(errors="ignore").lower() if Path("/etc/os-release").exists() else False)
             )
             if name.endswith(".deb"):
-                score = 30 if is_debian else 18
+                score += 30 if is_debian else 18
                 if "radiotv" in name or "segmenter" in name:
                     score += 5
                 candidates.append((score, asset))
             elif name.endswith(".appimage"):
-                score = 25
+                score += 25
                 candidates.append((score, asset))
             elif name.endswith(".tar.gz") or name.endswith(".tgz"):
-                score = 15
+                score += 15
                 if "linux" in name or "x86_64" in name:
                     score += 5
                 candidates.append((score, asset))
             elif name.endswith(".rpm"):
-                score = 30 if not is_debian and Path("/etc/redhat-release").exists() else 8
+                score += 30 if not is_debian and Path("/etc/redhat-release").exists() else 8
                 candidates.append((score, asset))
 
     if candidates:
@@ -290,7 +285,6 @@ def select_best_asset_for_platform(assets: list[dict]) -> dict | None:
 
 def fetch_latest_release(repo: str) -> dict:
     """Query GitHub API for the most recent release (including pre-releases)."""
-    # Fetch list of releases so pre-releases (like betas) are not skipped
     url = f"https://api.github.com/repos/{repo}/releases?per_page=5"
     req = urllib.request.Request(
         url,
@@ -306,7 +300,6 @@ def fetch_latest_release(repo: str) -> dict:
         raw = response.read().decode("utf-8")
         releases = json.loads(raw)
         if isinstance(releases, list) and releases:
-            # Filter out drafts
             published = [r for r in releases if not r.get("draft", False)]
             if published:
                 return published[0]
@@ -316,7 +309,6 @@ def fetch_latest_release(repo: str) -> dict:
 
 
 def launch_and_install(file_path: str, parent: QWidget | None = None) -> bool:
-    """Launch the downloaded installer executable or mount package, then close the app."""
     path = Path(file_path).resolve()
     if not path.is_file():
         if parent:
@@ -325,10 +317,6 @@ def launch_and_install(file_path: str, parent: QWidget | None = None) -> bool:
 
     if sys.platform == "win32":
         try:
-            # Launch Inno Setup or executable installer. shell=True is not
-            # needed to start an executable directly and cmd.exe's quoting
-            # doesn't fully protect paths containing shell-special
-            # characters, so launch it without a shell.
             subprocess.Popen([str(path)])
             return True
         except Exception as exc:
@@ -346,18 +334,15 @@ def launch_and_install(file_path: str, parent: QWidget | None = None) -> bool:
             return False
 
     else:
-        # Linux
         try:
             if path.name.endswith(".AppImage"):
                 path.chmod(0o755)
                 subprocess.Popen([str(path)])
                 return True
             elif path.name.endswith(".deb"):
-                # Launch the native Debian/Ubuntu package installer GUI (e.g., Ubuntu Software, GDebi, QApt)
                 subprocess.Popen(["xdg-open", str(path)])
                 return True
             else:
-                # Open the downloads directory in the system file manager
                 subprocess.Popen(["xdg-open", str(path.parent)])
                 return True
         except Exception as exc:
@@ -367,10 +352,9 @@ def launch_and_install(file_path: str, parent: QWidget | None = None) -> bool:
 
 
 class CheckUpdateWorker(QThread):
-    """Worker thread that checks GitHub for the latest release."""
-    update_available = Signal(dict, dict, bool)  # release_info, asset_info, is_newer
-    up_to_date = Signal(str, str)                # current_ver, remote_tag
-    error = Signal(str)                          # error message
+    update_available = Signal(dict, dict, bool)
+    up_to_date = Signal(str, str)
+    error = Signal(str)
 
     def __init__(self, repo: str | None = None, parent: QObject | None = None):
         super().__init__(parent)
@@ -385,7 +369,7 @@ class CheckUpdateWorker(QThread):
                 return
 
             assets = release_data.get("assets", [])
-            best_asset = select_best_asset_for_platform(assets) or {}
+            best_asset = select_best_asset_for_platform(assets, target_version=tag_name) or {}
             is_newer = is_version_newer(tag_name, PROJECT_VERSION)
 
             if is_newer:
@@ -416,18 +400,13 @@ class CheckUpdateWorker(QThread):
 
 
 class DownloadUpdateWorker(QThread):
-    """Worker thread that downloads the release asset file with chunked progress."""
-    progress = Signal(int, int, int, str)  # percent, downloaded_bytes, total_bytes, speed_str
-    finished = Signal(str)                 # downloaded_file_path
-    error = Signal(str)                    # error message
+    progress = Signal(int, int, int, str)
+    finished = Signal(str)
+    error = Signal(str)
 
     def __init__(self, download_url: str, file_name: str, parent: QObject | None = None, release_info: dict | None = None):
         super().__init__(parent)
         self.download_url = download_url
-        # Sanitize to a bare filename -- an asset name from the GitHub API
-        # response should never contain path separators or traversal
-        # components, but don't trust it blindly when building a filesystem
-        # path from it.
         self.file_name = Path(file_name).name or "update.download"
         self.release_info = release_info or {}
         self._is_cancelled = False
@@ -438,17 +417,12 @@ class DownloadUpdateWorker(QThread):
     def run(self):
         try:
             if not _is_trusted_download_url(self.download_url):
-                self.error.emit(
-                    "Refusing to download: the update URL is not an official GitHub download link."
-                )
+                self.error.emit("Refusing to download: the update URL is not an official GitHub download link.")
                 return
 
             updates_dir = get_app_data_dir() / "updates"
             updates_dir.mkdir(parents=True, exist_ok=True)
             destination = (updates_dir / self.file_name).resolve()
-            # Belt-and-suspenders: confirm the resolved destination is
-            # actually still inside updates_dir even after sanitizing the
-            # filename above (e.g. a name that resolves via symlink tricks).
             if updates_dir.resolve() not in destination.parents:
                 self.error.emit("Refusing to write the update outside the updates directory.")
                 return
@@ -493,17 +467,12 @@ class DownloadUpdateWorker(QThread):
                 self.error.emit("Downloaded file could not be finalized.")
                 return
 
-            # Checksum lookup is a network call -- do it here, off the GUI
-            # thread, rather than before starting this worker.
             expected_sha256 = _find_release_checksum(self.release_info, self.file_name)
             if expected_sha256:
                 actual = hasher.hexdigest().lower()
                 if actual != expected_sha256.lower():
                     temp_dest.unlink(missing_ok=True)
-                    self.error.emit(
-                        "Downloaded file failed SHA-256 verification and was discarded. "
-                        "This can indicate a corrupted or tampered download -- please try again."
-                    )
+                    self.error.emit("Downloaded file failed SHA-256 verification and was discarded.")
                     return
 
             shutil.move(str(temp_dest), str(destination))
@@ -514,8 +483,6 @@ class DownloadUpdateWorker(QThread):
 
 
 class CheckUpdateDialog(QDialog):
-    """User-facing dialog for checking, reviewing, downloading, and installing updates."""
-
     def __init__(self, parent: QWidget | None = None, auto_start: bool = True):
         super().__init__(parent)
         self.setWindowTitle(f"Check for Updates — {APP_DISPLAY_NAME}")
@@ -540,7 +507,6 @@ class CheckUpdateDialog(QDialog):
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(14)
 
-        # Header area with icon and title
         header_layout = QHBoxLayout()
         header_layout.setSpacing(14)
 
@@ -566,25 +532,21 @@ class CheckUpdateDialog(QDialog):
         header_layout.addStretch()
         main_layout.addLayout(header_layout)
 
-        # Separator line
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
         main_layout.addWidget(line)
 
-        # Status & Message Area
         self.status_label = QLabel("Connecting to GitHub...")
         self.status_label.setStyleSheet("font-size: 13px; font-weight: 500;")
         main_layout.addWidget(self.status_label)
 
-        # Progress bar (used during check and download)
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)  # Indeterminate at start
+        self.progress_bar.setRange(0, 0)
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setFixedHeight(18)
         main_layout.addWidget(self.progress_bar)
 
-        # Release Notes / Details Box
         self.notes_label = QLabel("Release Notes:")
         self.notes_label.setStyleSheet("font-size: 12px; font-weight: bold; margin-top: 6px;")
         self.notes_label.hide()
@@ -598,13 +560,11 @@ class CheckUpdateDialog(QDialog):
         self.notes_browser.hide()
         main_layout.addWidget(self.notes_browser, 1)
 
-        # Asset info label
         self.asset_info_label = QLabel("")
         self.asset_info_label.setStyleSheet("font-size: 12px; color: #555;")
         self.asset_info_label.hide()
         main_layout.addWidget(self.asset_info_label)
 
-        # Bottom Button Bar
         self.btn_layout = QHBoxLayout()
         self.btn_layout.setSpacing(10)
 
@@ -630,7 +590,6 @@ class CheckUpdateDialog(QDialog):
         main_layout.addLayout(self.btn_layout)
 
     def start_check(self):
-        """Start querying the GitHub API for updates."""
         self.status_label.setText(f"Checking for updates from {self.repo}...")
         self.progress_bar.show()
         self.progress_bar.setRange(0, 0)
@@ -668,10 +627,8 @@ class CheckUpdateDialog(QDialog):
         self.status_label.setText(f"★ A new update is available: {name}")
         self.status_label.setStyleSheet("font-size: 14px; color: #1976d2; font-weight: bold;")
 
-        # Display Release Notes
         self.notes_label.show()
         self.notes_browser.show()
-        # Basic HTML formatting for notes
         formatted_body = body.replace("\r\n", "\n").replace("\n", "<br>")
         self.notes_browser.setHtml(
             f"<div style='font-family: sans-serif; line-height: 1.4;'>"
@@ -681,7 +638,6 @@ class CheckUpdateDialog(QDialog):
             f"</div>"
         )
 
-        # Asset details
         if asset_info and asset_info.get("browser_download_url"):
             asset_name = asset_info.get("name", "installer package")
             asset_size = format_byte_size(asset_info.get("size", 0))
@@ -716,7 +672,6 @@ class CheckUpdateDialog(QDialog):
             self._install_and_restart()
 
     def start_download(self):
-        """Start downloading the platform installer asset."""
         download_url = self.asset_info.get("browser_download_url")
         file_name = self.asset_info.get("name", f"RadioTVSegmenter-Update-{self.release_info.get('tag_name')}.exe")
 
@@ -770,7 +725,6 @@ class CheckUpdateDialog(QDialog):
         self.close_btn.setText("Close")
 
     def _install_and_restart(self):
-        """Launch the downloaded installer and cleanly terminate the application."""
         if not self.downloaded_path:
             return
 
@@ -795,11 +749,6 @@ class CheckUpdateDialog(QDialog):
         QDesktopServices.openUrl(QUrl(url))
 
     def _handle_close(self):
-        # If the initial GitHub check is still running, detach its signals
-        # before closing. The network call it's waiting on can take up to
-        # its own timeout to return, so we don't block the UI on it here --
-        # but without disconnecting, it would otherwise emit into slots on
-        # this dialog after Qt has already torn it down.
         if self.check_worker and self.check_worker.isRunning():
             try:
                 self.check_worker.update_available.disconnect(self._on_update_available)
@@ -814,10 +763,7 @@ class CheckUpdateDialog(QDialog):
 
 
 class UpdaterMixin:
-    """Mixin for MainWindow to provide update checking and startup checks."""
-
     def check_for_updates(self, interactive: bool = True):
-        """Open the Check for Updates dialog."""
         dialog = CheckUpdateDialog(self, auto_start=True)
         if interactive:
             dialog.exec()
@@ -825,7 +771,6 @@ class UpdaterMixin:
             dialog.show()
 
     def trigger_silent_update_check(self):
-        """Perform a silent background update check without showing UI unless an update is found."""
         try:
             settings = QSettings(INTERNAL_APP_ID, INTERNAL_APP_ID)
             auto_check = str(settings.value("auto_check_updates", "true")).lower() in {"1", "true", "yes"}
@@ -846,5 +791,4 @@ class UpdaterMixin:
 
         worker.update_available.connect(on_update)
         worker.start()
-        # Keep reference so it doesn't get garbage collected immediately
         self._silent_update_worker = worker

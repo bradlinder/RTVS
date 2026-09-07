@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Build the installable Radio & TV Segmenter 2.1.0-beta application with PyInstaller.
+"""Build the installable Radio & TV Segmenter application with PyInstaller.
 
-Run this script on the target operating system (Windows installers must be
-built on Windows, macOS ones on macOS -- PyInstaller does not cross-compile).
-It intentionally refuses to produce a release package unless FFmpeg and
-ffprobe are available at build time, because the finished application is
-expected to carry its own media runtime rather than require end users to
-install FFmpeg.
+Run this script on the target operating system (Windows installers must be built on
+Windows, macOS ones on macOS -- PyInstaller does not cross-compile). It intentionally
+refuses to produce a release package unless FFmpeg and ffprobe are available at build time,
+because the finished application is expected to carry its own media runtime rather than
+require end users to install FFmpeg.
 
-This build is CPU-only by design (see requirements.txt): GPU acceleration is
-an optional, separately-downloaded component the user can enable from
-Settings after installing, not something bundled into the installer.
+This build is CPU-only by design (see requirements.txt): GPU acceleration is an optional,
+separately-downloaded component the user can enable from Settings after installing,
+not something bundled into the installer.
 """
+
 from __future__ import annotations
 
 import os
@@ -27,6 +27,7 @@ DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 APP_NAME = "RadioTVSegmenter"
 ENTRY_POINT = "RadioTVSegmenter.py"
+
 UV_VERSION = "0.12.7"
 UV_URLS = {
     "win32-x86_64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-x86_64-pc-windows-msvc.zip",
@@ -39,16 +40,9 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.1-stable"
+    PROJECT_VERSION = "2.1.0-beta"
 
-# Only the PySide6 submodules this app actually imports (verified against
-# every `from PySide6.X import ...` in the source tree). The previous build
-# used `--collect-all PySide6`, which pulls in the ENTIRE Qt distribution --
-# QtWebEngine, Qt3D, QtCharts, QtQuick/QML, QtSql, QtBluetooth, QtPdf, and
-# more -- none of which this app uses, at a large size cost. Collecting only
-# what's used, plus an explicit exclude list as a backstop against
-# over-eager PyInstaller hooks, is the single biggest lever for installer
-# size on top of the CPU-only ML stack below.
+# Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]
 PYSIDE6_EXCLUDES = [
     "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick",
@@ -74,16 +68,16 @@ def find_tool(name: str) -> str:
     env_dir = os.environ.get("PRS_FFMPEG_DIR")
     target_exe = exe_name(name)
     candidates = []
-    
+
     if env_dir:
         candidates.append(Path(env_dir) / target_exe)
         candidates.append(Path(env_dir) / "bin" / target_exe)
-    
+
     # 2. Check System PATH
     found = shutil.which(name)
     if found:
         candidates.append(Path(found))
-        
+
     # 3. Check local project directories
     candidates.extend([
         ROOT / "bin" / target_exe,
@@ -91,7 +85,7 @@ def find_tool(name: str) -> str:
         ROOT / "ffmpeg" / "bin" / target_exe,
         ROOT / "ffmpeg" / target_exe,
     ])
-    
+
     # 4. Check common OS installation paths
     if sys.platform == "win32":
         win_candidates = [
@@ -141,9 +135,6 @@ def find_tool(name: str) -> str:
 
 
 def check_cpu_only_torch() -> None:
-    """Check that the build venv's torch is CPU-only. This build is meant to be
-    CPU-only and small; a CUDA-enabled torch wheel alone adds 2+ GB. GPU acceleration
-    is an optional component provisioned on demand via Settings, not bundled here."""
     try:
         result = subprocess.run(
             [sys.executable, "-c", "import torch; print(torch.version.cuda or '')"],
@@ -177,14 +168,9 @@ def run(cmd: list[str]) -> None:
 
 
 def provision_optional_runtime_tools(app_root: Path) -> None:
-    """Add only the tiny helper needed to provision optional Windows runtimes.
-
-    uv is intentionally the only extra runtime-management binary shipped in the
-    base installer. Large CUDA/ML packages remain entirely on-demand. macOS does
-    not ship CUDA support, so no helper is added there.
-    """
     if sys.platform != "win32":
         return
+
     machine = os.environ.get("PROCESSOR_ARCHITECTURE", "").lower()
     arch_key = "win32-arm64" if "arm64" in machine else "win32-x86_64"
     url = UV_URLS[arch_key]
@@ -193,8 +179,9 @@ def provision_optional_runtime_tools(app_root: Path) -> None:
     uv_dest = dest_dir / "uv.exe"
     if uv_dest.exists():
         return
+
     archive = BUILD / "uv.zip"
-    print(f"[BUILD] Downloading uv {UV_VERSION} for optional runtime provisioning…")
+    print(f"[BUILD] Downloading uv {UV_VERSION} for optional runtime provisioning...")
     urllib.request.urlretrieve(url, archive)
     with zipfile.ZipFile(archive) as zf:
         member = next((n for n in zf.namelist() if n.lower().endswith("/uv.exe") or n.lower() == "uv.exe"), None)
@@ -206,11 +193,9 @@ def provision_optional_runtime_tools(app_root: Path) -> None:
 
 
 def prune_unneeded_bundled_files(app_root: Path) -> None:
-    """Remove non-runtime files like C++ headers, test suites, debug symbols, and accidental CUDA bloat."""
     print("[BUILD] Pruning non-runtime assets and symbol bloat from bundle...")
     internal_dirs = [app_root / "_internal", app_root]
 
-    # 1. Purge accidental CUDA/NVIDIA libraries that may have been pulled in by dependencies
     cuda_purged = 0
     cuda_lib_prefixes = (
         "libtorch_cuda", "torch_cuda", "libnvrtc", "nvrtc", "libcudnn", "cudnn",
@@ -220,7 +205,6 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
     for base in internal_dirs:
         if not base.exists():
             continue
-        # Remove any nvidia package folders
         for nvidia_dir in base.glob("**/nvidia"):
             if nvidia_dir.is_dir():
                 print(f"[BUILD] Purging CUDA package directory: {nvidia_dir}")
@@ -230,10 +214,10 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
             if item.is_file() and any(item.name.startswith(p) for p in cuda_lib_prefixes):
                 item.unlink(missing_ok=True)
                 cuda_purged += 1
+
     if cuda_purged:
         print(f"[BUILD] Purged {cuda_purged} accidental CUDA files/directories from bundle.")
 
-    # 2. C++ headers, share directories, and developer includes
     header_patterns = [
         "torch/include", "torch/share", "torchaudio/include", "scipy/include",
         "PySide6/include", "PySide6/glue", "PySide6/typesystems", "PySide6/scripts",
@@ -247,7 +231,6 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
                 print(f"[BUILD] Removing unneeded directory: {target}")
                 shutil.rmtree(target, ignore_errors=True)
 
-    # 3. Test directories, debug symbols, and type stubs
     pruned_files = 0
     for base in internal_dirs:
         if not base.exists():
@@ -259,10 +242,10 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
                     pruned_files += 1
             elif item.is_dir() and item.name in ("tests", "testing", "test") and any(k in str(item).lower() for k in ("torch", "scipy", "transformers", "ctranslate2", "pyside6", "sympy", "jinja2")):
                 shutil.rmtree(item, ignore_errors=True)
+
     if pruned_files:
         print(f"[BUILD] Pruned {pruned_files} debug/stub files from bundle.")
 
-    # 4. Strip unneeded symbols from Linux ELF shared objects and binaries
     if sys.platform.startswith("linux") and shutil.which("strip"):
         stripped_count = 0
         for base in internal_dirs:
@@ -294,7 +277,6 @@ def main() -> None:
 
     ffmpeg = find_tool("ffmpeg")
     ffprobe = find_tool("ffprobe")
-
     check_cpu_only_torch()
 
     shutil.rmtree(BUILD, ignore_errors=True)
@@ -303,8 +285,7 @@ def main() -> None:
     pyside6_flags = []
     for module in PYSIDE6_USED_SUBMODULES:
         pyside6_flags += ["--collect-submodules", f"PySide6.{module}"]
-    
-    # Heavy unused submodules, test suites, and redundant backends to exclude from base build
+
     general_excludes = [
         *PYSIDE6_EXCLUDES,
         "torch.testing", "torch.distributed", "torch.onnx", "torch.compiler",
@@ -383,6 +364,7 @@ def main() -> None:
                 print(f"[BUILD WARNING] Could not update Info.plist document types: {e}")
     else:
         app_root = DIST / APP_NAME
+
     runtime_bin = app_root / "runtime" / "bin"
     workers_dir = app_root / "workers"
     resources_dir = app_root / "resources"
@@ -390,7 +372,6 @@ def main() -> None:
     workers_dir.mkdir(parents=True, exist_ok=True)
     resources_dir.mkdir(parents=True, exist_ok=True)
 
-    # Copy bundled visual resources (icons)
     if (ROOT / "resources").exists():
         for res in (ROOT / "resources").iterdir():
             if res.is_file():
@@ -399,7 +380,6 @@ def main() -> None:
     shutil.copy2(ffmpeg, runtime_bin / Path(ffmpeg).name)
     shutil.copy2(ffprobe, runtime_bin / Path(ffprobe).name)
 
-    # Bundle licensing and third-party attribution documents
     for doc in ("NOTICES.txt", "LICENSE"):
         doc_file = ROOT / doc
         if doc_file.exists():
@@ -409,15 +389,8 @@ def main() -> None:
                 resources_bundle.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(doc_file, resources_bundle / doc)
 
-    # Ship the worker source script alongside the unified executable.
-    # The unified frozen app runs the worker directly via '--prs-worker', sharing
-    # all compiled PyTorch/Whisper binaries without duplicate storage.
-    # When a user installs GPU acceleration from Settings, the app runs this source
-    # file with the separately-provisioned GPU environment.
     shutil.copy2(ROOT / "radio_tv_story_segmenter_worker.py", workers_dir / "radio_tv_story_segmenter_worker.py")
     provision_optional_runtime_tools(app_root)
-
-    # Prune non-runtime assets (C++ headers, debug symbols, test suites)
     prune_unneeded_bundled_files(app_root)
 
     if os.name != "nt":
@@ -425,9 +398,6 @@ def main() -> None:
             item.chmod(0o755)
 
     print(f"\n[BUILD] {APP_DISPLAY_NAME} v{PROJECT_VERSION} build complete: {app_root.parent if sys.platform == 'darwin' else app_root}")
-    print("[BUILD] FFmpeg and ffprobe were copied into the application runtime.")
-    print("[BUILD] AI worker is unified with the application executable (and worker source is available for optional GPU runtime).")
-    print("[BUILD] Reminder: launch the packaged build directly (not from source) and confirm audio playback works before shipping.")
 
 
 if __name__ == "__main__":
