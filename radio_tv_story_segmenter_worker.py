@@ -142,6 +142,24 @@ def _setup_windows_dll_directories():
 
 _setup_windows_dll_directories()
 
+
+def _safe_tensor_from_numpy(arr):
+    """Safely convert a numpy float32 array into a PyTorch tensor.
+    Works even if PyTorch's native C-extension numpy bridge fails to locate
+    the NumPy C-API symbols ('numpy.core._multiarray_umath').
+    """
+    import torch
+    try:
+        return torch.from_numpy(arr)
+    except (RuntimeError, UserWarning, AttributeError):
+        pass
+    try:
+        return torch.as_tensor(arr, dtype=torch.float32)
+    except (RuntimeError, UserWarning, AttributeError):
+        pass
+    return torch.tensor(arr.tolist(), dtype=torch.float32)
+
+
 PROTOCOL_VERSION = "1.0"
 CAPABILITIES = ["transcribe", "diarize"]
 
@@ -614,6 +632,7 @@ def normalize_audio_for_diarization(source_path):
         "-i", str(source),
         "-vn", "-sn", "-dn",
         "-map", "0:a:0?",
+        "-af", "highpass=f=85,lowpass=f=7500",
         "-ac", "1",
         "-ar", "16000",
         "-c:a", "pcm_s16le",
@@ -736,7 +755,7 @@ def _diarize_solo_fast_path(audio_file, transcript_file=None):
         from silero_vad import load_silero_vad, get_speech_timestamps
 
         data, sample_rate = sf.read(str(normalized_wav), dtype="float32")
-        wav = torch.from_numpy(data)
+        wav = _safe_tensor_from_numpy(data)
         if wav.ndim > 1:
             wav = wav.mean(dim=-1)
 
@@ -867,11 +886,12 @@ def extract_embeddings_batched(
     if sr != 16000:
         import torchaudio
         resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=16000)
-        audio_tensor = resampler(torch.from_numpy(audio_data).unsqueeze(0)).squeeze(0)
-        audio_data = audio_tensor.numpy()
+        base_tensor = _safe_tensor_from_numpy(audio_data).unsqueeze(0)
+        audio_tensor = resampler(base_tensor).squeeze(0)
+        audio_data = audio_tensor.detach().cpu().numpy()
         sr = 16000
     else:
-        audio_tensor = torch.from_numpy(audio_data)
+        audio_tensor = _safe_tensor_from_numpy(audio_data)
 
     window_slices = []
 
@@ -960,14 +980,14 @@ def extract_embeddings_batched(
 
 def run_vad_two_pass(
     audio_path,
-    threshold=0.45,
-    min_speech_duration_ms=200,
-    min_silence_duration_ms=50,
-    speech_pad_ms=20,
-    bridge_pause_threshold_sec=0.25,
+    threshold=0.60,
+    min_speech_duration_ms=250,
+    min_silence_duration_ms=300,
+    speech_pad_ms=10,
+    bridge_pause_threshold_sec=0.10,
 ):
-    """Silero VAD with Pass 1 Pause Bridging (< 250ms).
-    Merges adjacent VAD speech intervals separated by pauses under 250ms,
+    """Silero VAD with Pass 1 Pause Bridging (< 100ms).
+    Merges adjacent VAD speech intervals separated by pauses under 100ms,
     eliminating micro-slicing while preserving natural phrase boundaries.
     """
     import soundfile as sf
@@ -989,14 +1009,14 @@ def run_vad_two_pass(
         except Exception:
             try:
                 import torchaudio
-                t_wav = torch.from_numpy(data)
+                t_wav = _safe_tensor_from_numpy(data)
                 resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-                data = resampler(t_wav).numpy()
+                data = resampler(t_wav).detach().cpu().numpy()
                 sample_rate = 16000
             except Exception:
                 pass
 
-    wav = torch.from_numpy(data)
+    wav = _safe_tensor_from_numpy(data)
 
     try:
         vad_model = load_silero_vad(onnx=True)
@@ -1066,10 +1086,11 @@ def assign_short_segments_to_centroids(
     if sr != 16000:
         import torchaudio
         resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=16000)
-        audio_tensor = resampler(torch.from_numpy(audio_data).unsqueeze(0)).squeeze(0)
+        base_tensor = _safe_tensor_from_numpy(audio_data).unsqueeze(0)
+        audio_tensor = resampler(base_tensor).squeeze(0)
         sr = 16000
     else:
-        audio_tensor = torch.from_numpy(audio_data)
+        audio_tensor = _safe_tensor_from_numpy(audio_data)
 
     total_samples = len(audio_tensor)
     assigned = []
@@ -1079,8 +1100,8 @@ def assign_short_segments_to_centroids(
         end_sec = float(seg.end if hasattr(seg, "end") else seg["end"])
         duration = end_sec - start_sec
 
-        target_dur = max(0.5, duration)
-        pad_needed = max(0.0, target_dur - duration) / 2.0
+        target_dur = max(0.4, duration)
+        pad_needed = min(0.05, max(0.0, target_dur - duration) / 2.0)
         pad_start = max(0.0, start_sec - pad_needed)
         pad_end = min(float(total_samples) / float(sr), end_sec + pad_needed)
 
@@ -1281,7 +1302,7 @@ def diarize(audio_file, expected_speakers="auto", transcript_file=None):
 
         def safe_torchaudio_load(filepath, *args, **kwargs):
             data, sample_rate = sf.read(str(filepath), dtype="float32")
-            tensor = torch.from_numpy(data)
+            tensor = _safe_tensor_from_numpy(data)
             if tensor.ndim == 1:
                 tensor = tensor.unsqueeze(0)
             else:
@@ -1294,7 +1315,7 @@ def diarize(audio_file, expected_speakers="auto", transcript_file=None):
             import silero_vad.utils_vad as silero_utils
             def safe_silero_read_audio(path: str, sampling_rate: int = 16000):
                 data, sr = sf.read(str(path), dtype="float32")
-                wav = torch.from_numpy(data)
+                wav = _safe_tensor_from_numpy(data)
                 if wav.ndim > 1:
                     wav = wav.mean(dim=-1)
                 if sr != sampling_rate:

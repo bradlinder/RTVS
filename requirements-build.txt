@@ -1,4 +1,4 @@
 # Build-time dependencies (not required by the installed app at runtime)
 pyinstaller>=6.22,<7
 Pillow>=10,<12
-
+numpy>=1.26.0,<2.0.0

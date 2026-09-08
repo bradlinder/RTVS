@@ -35,8 +35,6 @@ UV_URLS = {
 }
 
 try:
-    # Single source of truth for the version string/display name so the
-    # installer and the About box never drift apart.
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
@@ -58,13 +56,25 @@ PYSIDE6_EXCLUDES = [
     "PySide6.QtNetworkAuth", "PySide6.QtSpatialAudio",
 ]
 
+# Heavy internal test and benchmarking trees to exclude from packaging
+TEST_AND_BENCHMARK_EXCLUDES = [
+    "torch.testing._internal", "torch.utils.benchmark", "torch.utils.tensorboard",
+    "torchaudio.prototype",
+    "scipy.cluster.tests", "scipy.interpolate.tests", "scipy.signal.tests",
+    "scipy.sparse.tests", "scipy.special.tests", "scipy.ndimage.tests",
+    "scipy.optimize.tests", "scipy.linalg.tests", "scipy.stats.tests",
+    "transformers.commands", "transformers.testing_utils",
+    "sklearn.tests", "sklearn.datasets.tests", "sklearn.feature_extraction.tests",
+    "pytest", "unittest.test", "test", "tests",
+    "triton", "nvidia", "tkinter", "tcl",
+]
+
 
 def exe_name(base: str) -> str:
     return base + (".exe" if os.name == "nt" else "")
 
 
 def find_tool(name: str) -> str:
-    # 1. Environment variable override
     env_dir = os.environ.get("PRS_FFMPEG_DIR")
     target_exe = exe_name(name)
     candidates = []
@@ -73,12 +83,10 @@ def find_tool(name: str) -> str:
         candidates.append(Path(env_dir) / target_exe)
         candidates.append(Path(env_dir) / "bin" / target_exe)
 
-    # 2. Check System PATH
     found = shutil.which(name)
     if found:
         candidates.append(Path(found))
 
-    # 3. Check local project directories
     candidates.extend([
         ROOT / "bin" / target_exe,
         ROOT / "runtime" / "bin" / target_exe,
@@ -86,7 +94,6 @@ def find_tool(name: str) -> str:
         ROOT / "ffmpeg" / target_exe,
     ])
 
-    # 4. Check common OS installation paths
     if sys.platform == "win32":
         win_candidates = [
             Path("C:/ffmpeg/bin") / target_exe,
@@ -114,7 +121,6 @@ def find_tool(name: str) -> str:
             print(f"[BUILD] Found {name}: {resolved}")
             return resolved
 
-    # 5. Interactive prompt fallback if running in an interactive terminal
     if sys.stdin.isatty():
         print(f"\n[BUILD] {name} was not found automatically in PATH or standard folders.")
         user_input = input(f"Please enter the directory containing {name} (or leave empty to exit): ").strip()
@@ -177,17 +183,7 @@ def check_cpu_only_torch() -> None:
         print("[BUILD] torch in the build environment is CPU-only. Good.")
 
 
-
 def torch_windows_binary_flags() -> list[str]:
-    """Explicitly add PyTorch's Windows native DLLs to every frozen build.
-
-    PyInstaller can collect torch's binaries, but the _C extension has native
-    dependencies (notably torch_python.dll, torch_cpu.dll, c10.dll and the
-    OpenMP runtime) that may not be discoverable during analysis.  Supplying
-    the torch/lib directory explicitly makes those dependencies deterministic
-    and prevents the frozen build from ending up with a Python-level torch
-    package but a non-loadable torch._C extension.
-    """
     if sys.platform != "win32":
         return []
     try:
@@ -216,6 +212,7 @@ def torch_windows_binary_flags() -> list[str]:
         flags += ["--add-binary", f"{dll}{os.pathsep}torch/lib"]
     print(f"[BUILD] Explicitly packaging {len(dlls)} PyTorch native DLLs from {lib_dir}")
     return flags
+
 
 def run(cmd: list[str]) -> None:
     print("[BUILD]", " ".join(map(str, cmd)))
@@ -251,7 +248,8 @@ def provision_optional_runtime_tools(app_root: Path) -> None:
 
 def prune_unneeded_bundled_files(app_root: Path) -> None:
     print("[BUILD] Pruning non-runtime assets and symbol bloat from bundle...")
-    internal_dirs = [app_root / "_internal", app_root]
+    main_internal = app_root / "_internal"
+    internal_dirs = [main_internal] if main_internal.exists() else [app_root]
 
     cuda_purged = 0
     cuda_lib_prefixes = (
@@ -263,11 +261,13 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
         if not base.exists():
             continue
         for nvidia_dir in base.glob("**/nvidia"):
-            if nvidia_dir.is_dir():
+            if nvidia_dir.is_dir() and "workers" not in nvidia_dir.parts:
                 print(f"[BUILD] Purging CUDA package directory: {nvidia_dir}")
                 shutil.rmtree(nvidia_dir, ignore_errors=True)
                 cuda_purged += 1
         for item in list(base.rglob("*")):
+            if "workers" in item.parts:
+                continue
             if item.is_file() and any(item.name.startswith(p) for p in cuda_lib_prefixes):
                 item.unlink(missing_ok=True)
                 cuda_purged += 1
@@ -284,7 +284,7 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
             continue
         for hp in header_patterns:
             target = base / Path(hp)
-            if target.is_dir():
+            if target.is_dir() and "workers" not in target.parts:
                 print(f"[BUILD] Removing unneeded directory: {target}")
                 shutil.rmtree(target, ignore_errors=True)
 
@@ -293,6 +293,8 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
         if not base.exists():
             continue
         for item in list(base.rglob("*")):
+            if "workers" in item.parts:
+                continue
             if item.is_file():
                 if item.suffix in (".pdb", ".pyi"):
                     item.unlink(missing_ok=True)
@@ -309,6 +311,8 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
             if not base.exists():
                 continue
             for item in list(base.rglob("*")):
+                if "workers" in item.parts:
+                    continue
                 if item.is_file() and not item.is_symlink():
                     if item.suffix == ".so" or ".so." in item.name or (item.stat().st_mode & 0o111 and not item.suffix):
                         try:
@@ -347,20 +351,20 @@ def main() -> None:
 
     general_excludes = [
         *PYSIDE6_EXCLUDES,
-        "torch.utils.benchmark", "torch.utils.tensorboard",
-        "triton", "nvidia",
-        "scipy.spatial.tests", "scipy.stats.tests", "scipy.optimize.tests",
-        "scipy.linalg.tests", "scipy.sparse.tests", "scipy.ndimage.tests",
-        "pytest", "unittest.test", "test", "tests",
-        "tkinter", "tcl",
+        *TEST_AND_BENCHMARK_EXCLUDES,
     ]
     exclude_flags = []
     for module in general_excludes:
         exclude_flags += ["--exclude-module", module]
 
+    # Optimized UI pass: collect general UI & translation components.
+    # Worker-only stacks (diarize, sherpa_onnx, wespeakerruntime) are excluded here
+    # to avoid duplicating hundreds of megabytes in RadioTVSegmenter.exe.
     collect_main = [
         *pyside6_flags,
         *exclude_flags,
+        "--collect-all", "numpy",
+        "--copy-metadata", "numpy",
         "--collect-all", "faster_whisper",
         "--collect-all", "ctranslate2",
         "--collect-all", "transformers",
@@ -375,16 +379,13 @@ def main() -> None:
         "--copy-metadata", "torchaudio",
         "--collect-all", "sentencepiece",
         "--collect-all", "soundfile",
-        "--collect-all", "diarize",
         "--collect-all", "silero_vad",
         "--copy-metadata", "silero_vad",
-        "--collect-all", "wespeakerruntime",
         "--collect-all", "sklearn",
         "--collect-all", "keyring",
         "--collect-all", "docx",
         "--collect-all", "onnxruntime",
         "--copy-metadata", "onnxruntime",
-        "--collect-all", "sherpa_onnx",
         "--collect-all", "psutil",
         "--collect-all", "scipy",
     ]
@@ -400,7 +401,7 @@ def main() -> None:
 
     print("[BUILD] Compiling single unified application binary with PyInstaller...")
     run([
-        "pyinstaller", "--noconfirm", "--clean", "--onedir", "--windowed",
+        "pyinstaller", "--noconfirm", "--onedir", "--windowed",
         "--name", APP_NAME,
         "--runtime-hook", str(ROOT / "installer" / "pyinstaller" / "torch_dll_hook.py"),
         *torch_binary_flags,
@@ -459,11 +460,7 @@ def main() -> None:
                 resources_bundle.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(doc_file, resources_bundle / doc)
 
-    # Build the AI worker as a real, separate PyInstaller executable.  The GUI
-    # deliberately looks for workers\prs_worker.exe in frozen builds.  The old
-    # build copied only the .py source, so the GUI silently fell back to
-    # RadioTVSegmenter.exe --prs-worker; that caused frozen PyTorch native DLL
-    # loading to fail with NameError: name '_C' is not defined.
+    # Compile the AI worker. PySide6 is excluded from the worker to minimize footprint.
     worker_dist = DIST / "_worker_dist"
     worker_build = BUILD / "worker"
     worker_spec = BUILD / "worker_spec"
@@ -472,6 +469,8 @@ def main() -> None:
     shutil.rmtree(worker_spec, ignore_errors=True)
 
     worker_collect = [
+        "--collect-all", "numpy",
+        "--copy-metadata", "numpy",
         "--collect-all", "faster_whisper",
         "--collect-all", "ctranslate2",
         "--collect-all", "transformers",
@@ -489,6 +488,7 @@ def main() -> None:
         "--collect-all", "diarize",
         "--collect-all", "silero_vad",
         "--copy-metadata", "silero_vad",
+        "--collect-all", "wespeakerruntime",
         "--collect-all", "onnxruntime",
         "--copy-metadata", "onnxruntime",
         "--collect-all", "sherpa_onnx",
@@ -497,11 +497,8 @@ def main() -> None:
         "--collect-all", "psutil",
     ]
     worker_excludes = [
-        "PySide6", "tkinter", "tcl", "pytest", "unittest.test",
-        "torch.utils.benchmark", "torch.utils.tensorboard",
-        "triton", "nvidia", "scipy.spatial.tests", "scipy.stats.tests",
-        "scipy.optimize.tests", "scipy.linalg.tests", "scipy.sparse.tests",
-        "tests", "test",
+        "PySide6",
+        *TEST_AND_BENCHMARK_EXCLUDES,
     ]
     worker_exclude_flags = []
     for module in worker_excludes:
@@ -511,7 +508,7 @@ def main() -> None:
     worker_icon_flags = ["--icon", str(icon_file)] if icon_file.exists() else []
     print("[BUILD] Compiling dedicated AI worker executable...")
     run([
-        "pyinstaller", "--noconfirm", "--clean", "--onedir", "--console",
+        "pyinstaller", "--noconfirm", "--onedir", "--console",
         "--name", "prs_worker",
         "--distpath", str(worker_dist),
         "--workpath", str(worker_build),
@@ -528,9 +525,7 @@ def main() -> None:
     if not (worker_root / exe_name("prs_worker")).is_file():
         raise SystemExit("[FATAL BUILD ERROR] PyInstaller did not produce workers/prs_worker executable.")
 
-    # Copy the complete worker directory, including its own _internal tree.
-    # Do not run the size-pruning routine over it: native ML DLLs are part of
-    # the worker's runtime contract and must remain intact.
+    # Copy the compiled worker into the application bundle
     final_worker_root = workers_dir
     for item in worker_root.iterdir():
         target = final_worker_root / item.name
@@ -543,9 +538,6 @@ def main() -> None:
     provision_optional_runtime_tools(app_root)
     prune_unneeded_bundled_files(app_root)
 
-    # Build-time smoke test of the actual frozen worker.  This catches the
-    # exact class of PyTorch _C/native-DLL failures before an installer is
-    # generated.
     print("[BUILD] Running frozen AI worker self-test...")
     smoke = subprocess.run(
         [str(final_worker_root / exe_name("prs_worker")), "--self-test"],
@@ -562,10 +554,6 @@ def main() -> None:
             "The installer was NOT produced. See the worker diagnostics above."
         )
 
-    # Story Detection and interactive Translation import their ML stacks in
-    # the main process, so verify the frozen GUI executable too. Windowed
-    # PyInstaller builds have no console, therefore --self-test writes its
-    # diagnostics to ai_self_test.txt beside the executable.
     print("[BUILD] Running frozen GUI AI self-test...")
     main_test_file = app_root / "ai_self_test.txt"
     main_smoke = subprocess.run(

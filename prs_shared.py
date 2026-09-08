@@ -24,6 +24,29 @@ from bootstrap import setup_windows_dll_directories
 
 setup_windows_dll_directories()
 
+def _ensure_runtime_bin_on_path():
+    """Ensure bundled runtime/bin (ffmpeg/ffprobe) is on PATH in frozen builds."""
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+    else:
+        exe_dir = Path(__file__).resolve().parent
+
+    candidates = [
+        exe_dir / "runtime" / "bin",
+        exe_dir.parent / "runtime" / "bin",
+        exe_dir / "bin",
+        exe_dir.parent / "bin",
+    ]
+    for c in candidates:
+        if c.is_dir():
+            str_path = str(c.resolve())
+            current_path = os.environ.get("PATH", "")
+            if str_path not in current_path:
+                os.environ["PATH"] = str_path + os.pathsep + current_path
+            break
+
+_ensure_runtime_bin_on_path()
+
 from docx import Document
 from docx.shared import Pt, RGBColor
 
@@ -1818,7 +1841,13 @@ class StoryAutoDetectWorker(QObject):
                 try:
                     import torch
                     from silero_vad import load_silero_vad, get_speech_timestamps
-                    wav = torch.from_numpy(audio_data)
+                    try:
+                        wav = torch.from_numpy(audio_data)
+                    except (RuntimeError, UserWarning, AttributeError):
+                        try:
+                            wav = torch.as_tensor(audio_data, dtype=torch.float32)
+                        except (RuntimeError, UserWarning, AttributeError):
+                            wav = torch.tensor(audio_data.tolist(), dtype=torch.float32)
                     try:
                         vad_model = load_silero_vad(onnx=True)
                     except Exception:
