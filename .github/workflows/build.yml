@@ -48,11 +48,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12 with pip cache
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
+
+      - name: Install and configure uv with cache
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "requirements*.txt"
 
       - name: Configure Windows Defender Exclusions (Fast I/O)
         shell: pwsh
@@ -73,9 +78,8 @@ jobs:
           choco install innosetup --no-progress
           "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Install uv and Python dependencies (Fast CPU PyTorch)
+      - name: Install Python dependencies (Fast CPU PyTorch)
         run: |
-          python -m pip install --upgrade uv
           uv pip install --system --index-url https://download.pytorch.org/whl/cpu "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0"
           uv pip install --system -r requirements.txt -r requirements-build.txt
           uv pip install --system --force-reinstall --no-deps --index-url https://download.pytorch.org/whl/cpu "torch==2.3.1+cpu" "torchaudio==2.3.1+cpu"
@@ -134,11 +138,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12 with pip cache
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
+
+      - name: Install and configure uv with cache
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "requirements*.txt"
 
       - name: Setup FFmpeg (Static macOS Binaries)
         run: |
@@ -177,7 +186,6 @@ jobs:
 
       - name: Install Python dependencies (Fast uv)
         run: |
-          python3 -m pip install --upgrade uv
           uv pip install --system -r requirements.txt -r requirements-build.txt
 
       - name: Run PyInstaller build
@@ -206,11 +214,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12 with pip cache
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
+
+      - name: Install and configure uv with cache
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "requirements*.txt"
 
       - name: Install system dependencies
         run: |
@@ -219,7 +232,6 @@ jobs:
 
       - name: Install Python dependencies (Fast CPU PyTorch with uv)
         run: |
-          python3 -m pip install --upgrade uv
           uv pip install --system --index-url https://download.pytorch.org/whl/cpu "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0"
           uv pip install --system -r requirements.txt -r requirements-build.txt
 
