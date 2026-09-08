@@ -1776,32 +1776,46 @@ class StoryAutoDetectWorker(QObject):
                 from silero_vad import load_silero_vad, get_speech_timestamps
 
                 audio_data, sample_rate = sf.read(str(self.audio_file), dtype="float32")
-                wav = torch.from_numpy(audio_data)
-                if wav.ndim > 1:
-                    wav = wav.mean(dim=-1)
+                if audio_data.ndim > 1:
+                    audio_data = audio_data.mean(axis=-1)
 
                 if sample_rate != 16000:
-                    import torchaudio
-                    resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-                    wav = resampler(wav)
-                    sample_rate = 16000
+                    try:
+                        from scipy.signal import resample_poly
+                        from math import gcd
+                        g = gcd(sample_rate, 16000)
+                        audio_data = resample_poly(audio_data, 16000 // g, sample_rate // g).astype("float32")
+                        sample_rate = 16000
+                    except Exception:
+                        try:
+                            import torchaudio
+                            t_wav = torch.from_numpy(audio_data)
+                            resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
+                            audio_data = resampler(t_wav).numpy()
+                            sample_rate = 16000
+                        except Exception:
+                            pass
 
-                vad_model = load_silero_vad()
-                
-                # Use the user's silence threshold from Preferences to define story breaks
-                min_silence_ms = max(800, int(self.silence_threshold * 800))
-                
+                wav = torch.from_numpy(audio_data)
+
+                try:
+                    vad_model = load_silero_vad(onnx=True)
+                except Exception:
+                    vad_model = load_silero_vad()
+
+                # Fine-grained speech activity detection (400ms pause threshold)
+                # so every music break or quiet section is separated as a gap.
                 speech_timestamps = get_speech_timestamps(
                     wav,
                     vad_model,
                     sampling_rate=16000,
-                    min_speech_duration_ms=300,
-                    min_silence_duration_ms=min_silence_ms,
-                    return_seconds=True
+                    min_speech_duration_ms=250,
+                    min_silence_duration_ms=400,
+                    return_seconds=True,
                 )
                 total_dur = max(float(len(wav)) / 16000.0, self.audio_duration)
             except Exception as vad_err:
-                # If VAD fails or neural dependencies fail to load, fallback to transcript timestamps if available
+                # If VAD fails or neural dependencies fail to load, fallback to transcript timestamps
                 if self.transcript_segments:
                     speech_timestamps = []
                     for seg in self.transcript_segments:
@@ -1818,7 +1832,7 @@ class StoryAutoDetectWorker(QObject):
                 self._emit_progress("[Step 2/2] Assembling stories from vocal intervals...", 85)
                 story_starts = [max(0.0, speech_timestamps[0]["start"] - self.lead_in_padding)]
                 story_ends = []
-                target_gap = max(1.2, float(self.silence_threshold))
+                target_gap = max(1.0, float(self.silence_threshold))
 
                 for i in range(len(speech_timestamps) - 1):
                     if self._is_cancelled:
@@ -1836,7 +1850,7 @@ class StoryAutoDetectWorker(QObject):
                 story_ends.append(max(float(speech_timestamps[-1]["end"]), total_dur))
 
                 for idx, (st, et) in enumerate(zip(story_starts, story_ends)):
-                    if et - st >= 5.0:  # Minimum story length safety filter (5 seconds)
+                    if et - st >= 3.0:  # Minimum story duration filter
                         detected_stories.append(Story(
                             start=round(st, 2),
                             end=round(et, 2),
