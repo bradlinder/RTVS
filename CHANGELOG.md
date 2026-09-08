@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.2
+
+### Enhancements
+- Updated application and installer versioning to v2.2 across Python core modules, build scripts, Windows Inno Setup scripts, and GitHub Actions workflows.
+
 ## v2.1.6
 
 ### Windows packaging/runtime reliability

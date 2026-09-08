@@ -1,4 +1,4 @@
-## v2.1.6 packaging fix
+## v2.2 stability notes
 
 The Windows frozen build now creates and installs a dedicated `workers/prs_worker.exe`
 with its complete PyInstaller `_internal` runtime. The GUI no longer falls back to

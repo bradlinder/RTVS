@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo =====================================================================
-echo  Radio ^& TV Story Segmenter v2.1.6 - Automated 1-Click Build (Windows)
+echo  Radio ^& TV Story Segmenter v2.2 - Automated 1-Click Build (Windows)
 echo =====================================================================
 echo.
 
@@ -95,7 +95,7 @@ if defined ISCC_PATH (
     echo [BONUS] Inno Setup compiler found at "!ISCC_PATH!".
     echo Compiling Windows setup installer executable...
     for /f "tokens=*" %%v in ('python -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2^>nul') do set "APP_VER=%%v"
-    if not defined APP_VER set "APP_VER=2.1.6"
+    if not defined APP_VER set "APP_VER=2.2"
     "!ISCC_PATH!" /DMyAppVersion="!APP_VER!" installer\Windows\RadioTVStorySegmenter.iss
     if %ERRORLEVEL% equ 0 (
         echo [SUCCESS] Windows Installer created in installer\Windows\Output\
