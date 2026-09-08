@@ -78,12 +78,14 @@ jobs:
           python -m pip install --upgrade uv
           uv pip install --system --index-url https://download.pytorch.org/whl/cpu "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0"
           uv pip install --system -r requirements.txt -r requirements-build.txt
+          uv pip install --system --force-reinstall --no-deps --index-url https://download.pytorch.org/whl/cpu "torch==2.3.1+cpu" "torchaudio==2.3.1+cpu"
+          python -c "import torch; print('Torch ' + torch.__version__ + ' CUDA=' + str(torch.version.cuda)); assert torch.version.cuda is None; print('torch._C OK')"
 
       - name: Extract Project Version
         id: get_version
         shell: bash
         run: |
-          VERSION=$(python -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.1.4")
+          VERSION=$(python -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.1.5")
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Run PyInstaller build
@@ -227,7 +229,7 @@ jobs:
       - name: Package Debian (.deb) & Distributable Tarball (.tar.gz)
         run: |
           bash installer/Linux/build_deb.sh
-          VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.1.4")
+          VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.1.5")
           cd dist
           tar -czvf "RadioTVSegmenter-${VERSION}-Linux-x86_64.tar.gz" RadioTVSegmenter/
           cd ..
@@ -285,7 +287,7 @@ jobs:
           elif [ -n "${{ inputs.release_tag }}" ]; then
             echo "tag=${{ inputs.release_tag }}" >> $GITHUB_OUTPUT
           else
-            echo "tag=v2.1.4" >> $GITHUB_OUTPUT
+            echo "tag=v2.1.5" >> $GITHUB_OUTPUT
           fi
 
       - name: Create GitHub Release & Upload Binaries

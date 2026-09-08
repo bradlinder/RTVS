@@ -939,7 +939,7 @@ class UiLayoutMixin:
         # Main content (header, version, description, open-source attribution)
         content_label = QLabel(
             "<h2 style='margin: 0 0 6px 0;'>Radio &amp; TV Segmenter</h2>"
-            "<p style='margin: 0 0 10px 0;'><b>Version 2.1.4</b></p>"
+            "<p style='margin: 0 0 10px 0;'><b>Version 2.1.5</b></p>"
             "<p style='margin: 0 0 14px 0; color: #b0b0b0;'>"
             "An automated broadcast audio segmentation, transcription, and speaker detection platform built for radio production."
             "</p>"

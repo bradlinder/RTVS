@@ -1,10 +1,11 @@
-"""Radio & TV Segmenter — v2.1.4
+"""Radio & TV Segmenter — v2.1.5
 
 This is the thin application composition root. UI/processing responsibilities
 are implemented in focused mixins so future changes can target smaller files
 without changing the MainWindow-facing API.
 """
 import sys
+from pathlib import Path
 from bootstrap import configure_runtime_environment, ensure_sherpa_onnx_runtime, ensure_keyring_runtime
 
 # Bootstrap writable model/cache locations and verify required runtimes before
@@ -18,6 +19,29 @@ _keyring_runtime_ready = ensure_keyring_runtime()
 if len(sys.argv) > 1 and sys.argv[1] in ("--prs-worker", "--worker"):
     import radio_tv_story_segmenter_worker
     raise SystemExit(radio_tv_story_segmenter_worker.main(sys.argv[2:]))
+
+# Build-time/runtime smoke test. This runs before Qt is imported so the frozen
+# executable can prove that its own native ML stack is loadable.
+if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
+    failures = []
+    checks = []
+    def _check(label, fn):
+        try:
+            value = fn()
+            checks.append(f"[SELF-TEST] {label}: PASS" + (f" ({value})" if value else ""))
+        except Exception as exc:
+            failures.append((label, exc))
+            checks.append(f"[SELF-TEST] {label}: FAIL: {type(exc).__name__}: {exc}")
+    _check("PyTorch", lambda: __import__("torch").__version__)
+    _check("PyTorch C extension", lambda: str(__import__("torch")._C))
+    _check("CTranslate2", lambda: __import__("ctranslate2").__version__)
+    _check("Transformers", lambda: __import__("transformers").__version__)
+    _check("Silero VAD", lambda: __import__("silero_vad").__name__)
+    # Windowed PyInstaller builds may have no stdout/stderr. Persist the
+    # diagnostic beside the executable so the build can inspect it.
+    test_file = Path(sys.executable).resolve().parent / "ai_self_test.txt" if getattr(sys, "frozen", False) else Path("ai_self_test.txt")
+    test_file.write_text("\n".join(checks) + "\n", encoding="utf-8")
+    raise SystemExit(1 if failures else 0)
 
 from prs_shared import *
 from runtime_manager import RuntimeManager

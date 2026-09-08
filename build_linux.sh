@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")"
 
 echo "====================================================================="
-echo " Radio & TV Segmenter v2.1.4 - Automated 1-Click Build (Linux)"
+echo " Radio & TV Segmenter v2.1.5 - Automated 1-Click Build (Linux)"
 echo "====================================================================="
 echo ""
 
@@ -34,6 +34,8 @@ echo "[3/5] Installing / verifying lightweight CPU build dependencies..."
 pip install --upgrade pip --quiet
 pip install --prefer-binary "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0" --index-url https://download.pytorch.org/whl/cpu --quiet
 pip install --prefer-binary -r requirements.txt -r requirements-build.txt --extra-index-url https://download.pytorch.org/whl/cpu --quiet
+pip install --force-reinstall --no-deps "torch==2.3.1+cpu" "torchaudio==2.3.1+cpu" --index-url https://download.pytorch.org/whl/cpu --quiet
+python3 -c "import torch; print('Torch ' + torch.__version__ + ' CUDA=' + str(torch.version.cuda)); assert torch.version.cuda is None; print('torch._C OK')"
 
 # 4. Run the installer builder
 echo "[4/5] Running PyInstaller binary compilation..."
@@ -41,7 +43,7 @@ python3 build_installer.py
 
 # 5. Build Debian package & distributable tarball
 echo "[5/5] Packaging Linux distributions (.deb & .tar.gz)..."
-VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.1.4")
+VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.1.5")
 
 if [ -f "installer/Linux/build_deb.sh" ] && command -v dpkg-deb >/dev/null 2>&1; then
     bash installer/Linux/build_deb.sh

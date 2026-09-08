@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo =====================================================================
-echo  Radio ^& TV Story Segmenter v2.1.4 - Automated 1-Click Build (Windows)
+echo  Radio ^& TV Story Segmenter v2.1.5 - Automated 1-Click Build (Windows)
 echo =====================================================================
 echo.
 
@@ -59,6 +59,15 @@ echo [3/4] Installing / verifying lightweight CPU build dependencies...
 python -m pip install --upgrade pip --quiet
 pip install --prefer-binary "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0" --index-url https://download.pytorch.org/whl/cpu --quiet
 pip install --prefer-binary -r requirements.txt -r requirements-build.txt --extra-index-url https://download.pytorch.org/whl/cpu --quiet
+:: Re-assert CPU-only PyTorch after dependency resolution. This prevents a
+:: normal PyPI CUDA wheel from replacing the CPU wheel and breaking torch._C.
+pip install --force-reinstall --no-deps "torch==2.3.1+cpu" "torchaudio==2.3.1+cpu" --index-url https://download.pytorch.org/whl/cpu --quiet
+python -c "import torch; print('Torch ' + torch.__version__ + ' CUDA=' + str(torch.version.cuda)); assert torch.version.cuda is None; print('torch._C OK')"
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] CPU-only PyTorch verification failed. Aborting build.
+    pause
+    exit /b 1
+)
 
 :: 4. Execute build script
 echo [4/4] Running PyInstaller binary compilation...
@@ -86,7 +95,7 @@ if defined ISCC_PATH (
     echo [BONUS] Inno Setup compiler found at "!ISCC_PATH!".
     echo Compiling Windows setup installer executable...
     for /f "tokens=*" %%v in ('python -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2^>nul') do set "APP_VER=%%v"
-    if not defined APP_VER set "APP_VER=2.1.4"
+    if not defined APP_VER set "APP_VER=2.1.5"
     "!ISCC_PATH!" /DMyAppVersion="!APP_VER!" installer\Windows\RadioTVStorySegmenter.iss
     if %ERRORLEVEL% equ 0 (
         echo [SUCCESS] Windows Installer created in installer\Windows\Output\

@@ -1,3 +1,14 @@
+## v2.1.5 packaging fix
+
+The Windows frozen build now creates and installs a dedicated `workers/prs_worker.exe`
+with its complete PyInstaller `_internal` runtime. The GUI no longer falls back to
+executing itself as the AI worker. Both the GUI and worker are smoke-tested during
+the build for PyTorch, `torch._C`, CTranslate2, Transformers and Silero VAD.
+
+The Windows build scripts also re-install and verify CPU-only PyTorch 2.3.1 after
+normal dependency resolution so a CUDA-enabled PyPI wheel cannot silently enter the
+release build.
+
 # Release hardening notes — 1.1.1
 
 This build is intended as the installable release candidate.

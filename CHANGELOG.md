@@ -1,3 +1,14 @@
+# Changelog
+
+## v2.1.5
+
+### Windows packaging/runtime reliability
+- Build a dedicated `prs_worker` PyInstaller executable instead of falling back to the GUI executable for local AI processing.
+- Add a PyInstaller Windows runtime hook for PyTorch, CTranslate2, ONNX Runtime, and related native DLL search paths.
+- Add frozen-build AI self-tests for PyTorch, its `_C` native extension, CTranslate2, Transformers, and Silero VAD.
+- Make the build fail before creating an installer when the frozen AI runtime cannot initialize.
+- Preserve the complete worker `_internal` runtime instead of pruning native ML libraries from it.
+
 ## v2.1-stable
 
 - **Timeline now themes with Light and High Contrast modes** (previously covered in the earlier changelog entry).

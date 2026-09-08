@@ -40,7 +40,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.1.4"
+    PROJECT_VERSION = "2.1.5"
 
 # Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]
@@ -143,9 +143,11 @@ def check_cpu_only_torch() -> None:
             creationflags=creationflags,
         )
         cuda_version = result.stdout.strip()
-    except Exception:
-        print("[BUILD] Could not determine torch's CUDA status (torch not importable in this venv?). Continuing.")
-        return
+    except Exception as exc:
+        raise SystemExit(
+            "[FATAL BUILD ERROR] PyTorch cannot be imported in the build environment: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
 
     if cuda_version:
         msg = (
@@ -324,6 +326,7 @@ def main() -> None:
         "--collect-all", "huggingface_hub",
         "--collect-all", "torch",
         "--collect-binaries", "torch",
+        "--hidden-import", "torch._C",
         "--copy-metadata", "torch",
         "--collect-all", "torchaudio",
         "--collect-binaries", "torchaudio",
@@ -357,6 +360,7 @@ def main() -> None:
     run([
         "pyinstaller", "--noconfirm", "--clean", "--onedir", "--windowed",
         "--name", APP_NAME,
+        "--runtime-hook", str(ROOT / "installer" / "pyinstaller" / "torch_dll_hook.py"),
         *icon_flags,
         *doc_flags,
         *collect_main,
@@ -412,9 +416,127 @@ def main() -> None:
                 resources_bundle.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(doc_file, resources_bundle / doc)
 
-    shutil.copy2(ROOT / "radio_tv_story_segmenter_worker.py", workers_dir / "radio_tv_story_segmenter_worker.py")
+    # Build the AI worker as a real, separate PyInstaller executable.  The GUI
+    # deliberately looks for workers\prs_worker.exe in frozen builds.  The old
+    # build copied only the .py source, so the GUI silently fell back to
+    # RadioTVSegmenter.exe --prs-worker; that caused frozen PyTorch native DLL
+    # loading to fail with NameError: name '_C' is not defined.
+    worker_dist = DIST / "_worker_dist"
+    worker_build = BUILD / "worker"
+    worker_spec = BUILD / "worker_spec"
+    shutil.rmtree(worker_dist, ignore_errors=True)
+    shutil.rmtree(worker_build, ignore_errors=True)
+    shutil.rmtree(worker_spec, ignore_errors=True)
+
+    worker_collect = [
+        "--collect-all", "faster_whisper",
+        "--collect-all", "ctranslate2",
+        "--collect-all", "transformers",
+        "--collect-all", "tokenizers",
+        "--collect-all", "huggingface_hub",
+        "--collect-all", "torch",
+        "--collect-binaries", "torch",
+        "--hidden-import", "torch._C",
+        "--copy-metadata", "torch",
+        "--collect-all", "torchaudio",
+        "--collect-binaries", "torchaudio",
+        "--copy-metadata", "torchaudio",
+        "--collect-all", "sentencepiece",
+        "--collect-all", "soundfile",
+        "--collect-all", "diarize",
+        "--collect-all", "silero_vad",
+        "--copy-metadata", "silero_vad",
+        "--collect-all", "onnxruntime",
+        "--copy-metadata", "onnxruntime",
+        "--collect-all", "sherpa_onnx",
+        "--collect-all", "scipy",
+        "--collect-all", "sklearn",
+        "--collect-all", "psutil",
+    ]
+    worker_excludes = [
+        "PySide6", "tkinter", "tcl", "pytest", "unittest.test",
+        "torch.testing", "torch.utils.benchmark", "torch.utils.tensorboard",
+        "triton", "nvidia", "scipy.spatial.tests", "scipy.stats.tests",
+        "scipy.optimize.tests", "scipy.linalg.tests", "scipy.sparse.tests",
+        "tests", "test",
+    ]
+    worker_exclude_flags = []
+    for module in worker_excludes:
+        worker_exclude_flags += ["--exclude-module", module]
+
+    runtime_hook = ROOT / "installer" / "pyinstaller" / "torch_dll_hook.py"
+    worker_icon_flags = ["--icon", str(icon_file)] if icon_file.exists() else []
+    print("[BUILD] Compiling dedicated AI worker executable...")
+    run([
+        "pyinstaller", "--noconfirm", "--clean", "--onedir", "--console",
+        "--name", "prs_worker",
+        "--distpath", str(worker_dist),
+        "--workpath", str(worker_build),
+        "--specpath", str(worker_spec),
+        "--runtime-hook", str(runtime_hook),
+        *worker_icon_flags,
+        *worker_collect,
+        *worker_exclude_flags,
+        str(ROOT / "radio_tv_story_segmenter_worker.py"),
+    ])
+
+    worker_root = worker_dist / "prs_worker"
+    if not (worker_root / exe_name("prs_worker")).is_file():
+        raise SystemExit("[FATAL BUILD ERROR] PyInstaller did not produce workers/prs_worker executable.")
+
+    # Copy the complete worker directory, including its own _internal tree.
+    # Do not run the size-pruning routine over it: native ML DLLs are part of
+    # the worker's runtime contract and must remain intact.
+    final_worker_root = workers_dir
+    for item in worker_root.iterdir():
+        target = final_worker_root / item.name
+        if item.is_dir():
+            shutil.copytree(item, target, dirs_exist_ok=True)
+        else:
+            shutil.copy2(item, target)
+    shutil.rmtree(worker_dist, ignore_errors=True)
+
     provision_optional_runtime_tools(app_root)
     prune_unneeded_bundled_files(app_root)
+
+    # Build-time smoke test of the actual frozen worker.  This catches the
+    # exact class of PyTorch _C/native-DLL failures before an installer is
+    # generated.
+    print("[BUILD] Running frozen AI worker self-test...")
+    smoke = subprocess.run(
+        [str(final_worker_root / exe_name("prs_worker")), "--self-test"],
+        cwd=final_worker_root, capture_output=True, text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    if smoke.stdout:
+        print(smoke.stdout.strip())
+    if smoke.stderr:
+        print(smoke.stderr.strip())
+    if smoke.returncode != 0:
+        raise SystemExit(
+            "[FATAL BUILD ERROR] Frozen AI worker self-test failed. "
+            "The installer was NOT produced. See the worker diagnostics above."
+        )
+
+    # Story Detection and interactive Translation import their ML stacks in
+    # the main process, so verify the frozen GUI executable too. Windowed
+    # PyInstaller builds have no console, therefore --self-test writes its
+    # diagnostics to ai_self_test.txt beside the executable.
+    print("[BUILD] Running frozen GUI AI self-test...")
+    main_test_file = app_root / "ai_self_test.txt"
+    main_smoke = subprocess.run(
+        [str(app_root / exe_name(APP_NAME)), "--self-test"],
+        cwd=app_root, capture_output=True, text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    if main_test_file.exists():
+        print(main_test_file.read_text(encoding="utf-8").strip())
+        main_test_file.unlink(missing_ok=True)
+    if main_smoke.returncode != 0:
+        raise SystemExit(
+            "[FATAL BUILD ERROR] Frozen GUI AI self-test failed. "
+            "The installer was NOT produced."
+        )
 
     if os.name != "nt":
         for item in runtime_bin.iterdir():

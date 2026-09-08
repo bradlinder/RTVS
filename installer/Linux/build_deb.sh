@@ -9,7 +9,7 @@ APP_NAME="RadioTVSegmenter"
 PKG_NAME="radiotvsegmenter"
 
 # Extract project version from single source of truth (prs_shared.py)
-VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.1.4")
+VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.1.5")
 DIST="$ROOT/dist"
 SOURCE_APP="$DIST/$APP_NAME"
 DEB_FILENAME="RadioTVSegmenter-${VERSION}-Linux-amd64.deb"

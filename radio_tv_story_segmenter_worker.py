@@ -1542,6 +1542,28 @@ def main(argv=None):
         return 2
 
     mode = argv[0]
+    if mode == "--self-test":
+        failures = []
+        checks = []
+        def _check(label, fn):
+            try:
+                value = fn()
+                checks.append(f"[SELF-TEST] {label}: PASS" + (f" ({value})" if value else ""))
+            except Exception as exc:
+                failures.append((label, exc))
+                checks.append(f"[SELF-TEST] {label}: FAIL: {type(exc).__name__}: {exc}")
+        _check("PyTorch", lambda: __import__("torch").__version__)
+        _check("PyTorch C extension", lambda: str(__import__("torch")._C))
+        _check("torchaudio", lambda: __import__("torchaudio").__version__)
+        _check("CTranslate2", lambda: __import__("ctranslate2").__version__)
+        _check("Transformers", lambda: __import__("transformers").__version__)
+        _check("Silero VAD", lambda: __import__("silero_vad").__name__)
+        _check("diarize", lambda: __import__("diarize").__name__)
+        _check("NumPy", lambda: __import__("numpy").__version__)
+        for line in checks:
+            print(line, flush=True)
+        return 1 if failures else 0
+
     if mode == "--transcribe":
         if len(argv) < 3:
             emit("error", message="Transcription worker requires an audio-file path and model name.")
