@@ -29,6 +29,9 @@ def app_data_dir() -> Path:
     return path
 
 
+_GLOBAL_DLL_DIRECTORIES = []
+
+
 def setup_windows_dll_directories() -> None:
     """Register native DLL directories (PyTorch, CTranslate2, ONNX Runtime, etc.)
     on Windows before importing C-extensions or ML frameworks.
@@ -36,6 +39,7 @@ def setup_windows_dll_directories() -> None:
     Python 3.8+ on Windows does not search PATH for DLL dependencies of .pyd files,
     requiring os.add_dll_directory() to be called explicitly on directory paths
     containing dependent DLLs (such as torch/lib, ctranslate2, onnxruntime, etc.).
+    The returned cookie must be kept alive globally to prevent GC de-registration.
     """
     if sys.platform != "win32":
         return
@@ -62,6 +66,9 @@ def setup_windows_dll_directories() -> None:
         candidate_dirs.add(exe_dir / "_internal" / "torch" / "lib")
         candidate_dirs.add(exe_dir / "_internal" / "torch")
         candidate_dirs.add(exe_dir / "_internal" / "torchaudio" / "lib")
+        candidate_dirs.add(exe_dir / "_internal" / "ctranslate2")
+        candidate_dirs.add(exe_dir / "_internal" / "onnxruntime" / "capi")
+        candidate_dirs.add(exe_dir / "_internal" / "sherpa_onnx" / "lib")
         candidate_dirs.add(exe_dir / "torch" / "lib")
         candidate_dirs.add(exe_dir / "torch")
 
@@ -115,7 +122,8 @@ def setup_windows_dll_directories() -> None:
                 str_path = str(resolved)
                 if hasattr(os, "add_dll_directory"):
                     try:
-                        os.add_dll_directory(str_path)
+                        handle = os.add_dll_directory(str_path)
+                        _GLOBAL_DLL_DIRECTORIES.append(handle)
                     except Exception:
                         pass
                 added_paths.append(str_path)
@@ -125,6 +133,18 @@ def setup_windows_dll_directories() -> None:
     if added_paths:
         current_path = os.environ.get("PATH", "")
         os.environ["PATH"] = os.pathsep.join(added_paths) + os.pathsep + current_path
+
+    # 6. Preload core Windows runtime DLLs if present
+    import ctypes
+    for dll_name in ("libiomp5md.dll", "c10.dll", "torch_cpu.dll", "fbgemm.dll", "ctranslate2.dll", "onnxruntime.dll"):
+        for base in added_paths:
+            candidate = Path(base) / dll_name
+            if candidate.is_file():
+                try:
+                    ctypes.CDLL(str(candidate))
+                    break
+                except Exception:
+                    pass
 
 
 def configure_runtime_environment() -> Path:

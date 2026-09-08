@@ -42,6 +42,9 @@ def _clamp_diarization_thread_env():
 
 _clamp_diarization_thread_env()
 
+_GLOBAL_WORKER_DLL_HANDLES = []
+
+
 def _setup_windows_dll_directories():
     """Register native DLL directories (PyTorch, CTranslate2, ONNX Runtime, etc.)
     on Windows before importing C-extensions or ML frameworks.
@@ -70,6 +73,9 @@ def _setup_windows_dll_directories():
         candidate_dirs.add(exe_dir / "_internal" / "torch" / "lib")
         candidate_dirs.add(exe_dir / "_internal" / "torch")
         candidate_dirs.add(exe_dir / "_internal" / "torchaudio" / "lib")
+        candidate_dirs.add(exe_dir / "_internal" / "ctranslate2")
+        candidate_dirs.add(exe_dir / "_internal" / "onnxruntime" / "capi")
+        candidate_dirs.add(exe_dir / "_internal" / "sherpa_onnx" / "lib")
         candidate_dirs.add(exe_dir / "torch" / "lib")
         candidate_dirs.add(exe_dir / "torch")
 
@@ -120,7 +126,8 @@ def _setup_windows_dll_directories():
                 str_path = str(resolved)
                 if hasattr(os, "add_dll_directory"):
                     try:
-                        os.add_dll_directory(str_path)
+                        handle = os.add_dll_directory(str_path)
+                        _GLOBAL_WORKER_DLL_HANDLES.append(handle)
                     except Exception:
                         pass
                 added_paths.append(str_path)
@@ -130,6 +137,18 @@ def _setup_windows_dll_directories():
     if added_paths:
         current_path = os.environ.get("PATH", "")
         os.environ["PATH"] = os.pathsep.join(added_paths) + os.pathsep + current_path
+
+    # Preload core Windows runtime DLLs if present
+    import ctypes
+    for dll_name in ("libiomp5md.dll", "c10.dll", "torch_cpu.dll", "fbgemm.dll", "ctranslate2.dll", "onnxruntime.dll"):
+        for base in added_paths:
+            candidate = Path(base) / dll_name
+            if candidate.is_file():
+                try:
+                    ctypes.CDLL(str(candidate))
+                    break
+                except Exception:
+                    pass
 
 _setup_windows_dll_directories()
 
@@ -967,17 +986,32 @@ def run_vad_two_pass(
     from diarize.utils import SpeechSegment
 
     data, sample_rate = sf.read(str(audio_path), dtype="float32")
-    wav = torch.from_numpy(data)
-    if wav.ndim > 1:
-        wav = wav.mean(dim=-1)
+    if data.ndim > 1:
+        data = data.mean(axis=-1)
 
     if sample_rate != 16000:
-        import torchaudio
-        resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-        wav = resampler(wav)
-        sample_rate = 16000
+        try:
+            from scipy.signal import resample_poly
+            from math import gcd
+            g = gcd(sample_rate, 16000)
+            data = resample_poly(data, 16000 // g, sample_rate // g).astype("float32")
+            sample_rate = 16000
+        except Exception:
+            try:
+                import torchaudio
+                t_wav = torch.from_numpy(data)
+                resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
+                data = resampler(t_wav).numpy()
+                sample_rate = 16000
+            except Exception:
+                pass
 
-    vad_model = load_silero_vad()
+    wav = torch.from_numpy(data)
+
+    try:
+        vad_model = load_silero_vad(onnx=True)
+    except Exception:
+        vad_model = load_silero_vad()
     speech_timestamps = get_speech_timestamps(
         wav,
         vad_model,
