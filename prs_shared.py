@@ -268,7 +268,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "2.5"
+PROJECT_VERSION = "2.5.1"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -854,7 +854,8 @@ class StoryListWidget(QListWidget):
             return
         win = self.window()
         is_music = getattr(win, "story_detection_mode", "voice") == "music"
-        term = "Segment" if is_music else "Story"
+        is_es = getattr(win, "language", "en") == "es"
+        term = ("Canción" if is_es else "Song") if is_music else ("Historia" if is_es else "Story")
         menu = QMenu(self)
         export_action = menu.addAction(f"Export {term}...")
         export_action.triggered.connect(self.exportRequested.emit)
@@ -1969,7 +1970,7 @@ class StoryAutoDetectWorker(QObject):
                         })
 
             if self.detection_mode == "music":
-                self._emit_progress("[Step 2/2] Detecting music segments and song boundaries...", 80)
+                self._emit_progress("[Step 2/2] Detecting songs and track boundaries...", 80)
                 # Music Mode: Detect song segments separated by non-musical transitions
                 # (silence, dialog-only speech, or non-musical sounds lasting >= silence_threshold).
                 music_hint_intervals = []
@@ -2095,7 +2096,7 @@ class StoryAutoDetectWorker(QObject):
                         detected_stories.append(Story(
                             start=round(st, 2),
                             end=round(et, 2),
-                            title=f"Segment {len(detected_stories) + 1}"
+                            title=f"Song {len(detected_stories) + 1}"
                         ))
 
             # Voice Mode or fallback if no music intervals detected
@@ -2645,6 +2646,7 @@ class TimelineCanvas(QWidget):
     def __init__(self, parent=None, tokens=None):
         super().__init__(parent)
         self.tokens = tokens if tokens is not None else ThemeTokens()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.duration = 1
         self.position = 0
@@ -3127,7 +3129,7 @@ class TimelineCanvas(QWidget):
 
         is_music = getattr(win, "story_detection_mode", "voice") == "music"
         is_es = getattr(win, "language", "en") == "es"
-        term = ("Segmento" if is_es else "Segment") if is_music else ("Historia" if is_es else "Story")
+        term = ("Canción" if is_es else "Song") if is_music else ("Historia" if is_es else "Story")
 
         select_action = None
         delete_action = None
@@ -3175,7 +3177,7 @@ class TimelineCanvas(QWidget):
         win = self.window()
         is_music = getattr(win, "story_detection_mode", "voice") == "music"
         is_es = getattr(win, "language", "en") == "es"
-        term = ("Segmento" if is_es else "Segment") if is_music else ("Historia" if is_es else "Story")
+        term = ("Canción" if is_es else "Song") if is_music else ("Historia" if is_es else "Story")
         menu = QMenu(self)
         add_action = menu.addAction(f"{('Agregar' if is_es else 'Add')} {term} {('desde la selección' if is_es else 'from Selection')}")
         clear_action = menu.addAction("Borrar selección" if is_es else "Clear Selection")
@@ -3221,6 +3223,28 @@ class TimelineCanvas(QWidget):
             main_win = self.window()
             if hasattr(main_win, "undo_stack"):
                 main_win.undo_stack.redo()
+                event.accept()
+                return
+
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            main_win = self.window()
+            # If there is a selected/highlighted story, delete it directly from the timeline
+            if hasattr(main_win, "delete_selected_story") and getattr(main_win, "current_selected_story_indices", None):
+                main_win.delete_selected_story()
+                event.accept()
+                return
+            elif self.selected_story_indices and hasattr(main_win, "delete_selected_story"):
+                if hasattr(main_win, "apply_story_selection_indices"):
+                    main_win.apply_story_selection_indices(self.selected_story_indices, seek=False)
+                main_win.delete_selected_story()
+                event.accept()
+                return
+            # If there is an active timeline drag selection range without a selected story, clear it
+            elif self.selection_start is not None or self.selection_end is not None:
+                self.selection_start = None
+                self.selection_end = None
+                self.selectionRangeChanged.emit(None, None)
+                self.update()
                 event.accept()
                 return
 

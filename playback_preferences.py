@@ -1502,7 +1502,7 @@ class PlaybackPreferencesMixin:
         det_mode_combo.setToolTip(
             "Detection Basis:\n"
             "• Voice Mode: Segments audio based on silences and pauses in spoken dialogue.\n"
-            "• Music Mode: Designed for music programs. Detects song segments; sets story dividers when a song ends and there is silence, dialog only, or non-musical sounds for the threshold duration."
+            "• Music Mode: Designed for music programs. Detects songs; sets song boundaries when a track ends and there is silence, dialog only, or non-musical sounds for the threshold duration."
         )
         det_form.addRow("Detection Basis / Mode:", det_mode_combo)
 

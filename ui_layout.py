@@ -810,9 +810,9 @@ class UiLayoutMixin:
             is_es = (getattr(self, "language", "en") == "es")
             if is_music:
                 if is_es:
-                    self.auto_detect_action.setText("&Detectar segmentos (Completado)" if has_stories else "&Detectar segmentos...")
+                    self.auto_detect_action.setText("&Detectar canciones (Completado)" if has_stories else "&Detectar canciones...")
                 else:
-                    self.auto_detect_action.setText("Detect Segments (Complete)" if has_stories else "&Detect Segments...")
+                    self.auto_detect_action.setText("Detect Songs (Complete)" if has_stories else "&Detect Songs...")
             else:
                 if is_es:
                     self.auto_detect_action.setText("&Detectar historias (Completado)" if has_stories else "&Detectar historias...")

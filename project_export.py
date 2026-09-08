@@ -94,13 +94,15 @@ class UnifiedExportDialog(QDialog):
         layout.addWidget(dest_group)
 
         # Scope Selection
+        is_music = getattr(self.main_window, "story_detection_mode", "voice") == "music"
+        term_plural = "Songs" if is_music else "Stories"
         scope_group = QGroupBox("Export Scope")
         scope_layout = QVBoxLayout(scope_group)
         self.scope_combo = QComboBox()
-        self.scope_combo.addItem("Selected Stories", "selected_stories")
-        self.scope_combo.addItem("All Stories", "all_stories")
+        self.scope_combo.addItem(f"Selected {term_plural}", "selected_stories")
+        self.scope_combo.addItem(f"All {term_plural}", "all_stories")
         self.scope_combo.addItem("Full Episode", "full")
-        self.scope_combo.addItem("Full Episode & All Stories", "full_and_all_stories")
+        self.scope_combo.addItem(f"Full Episode & All {term_plural}", "full_and_all_stories")
         
         # Set default selection
         idx = self.scope_combo.findData(initial_scope)
@@ -2128,12 +2130,15 @@ class ProjectExportMixin:
 
     def export_selected_stories(self, custom_formats=None, custom_base=None, custom_options=None, directory=None, is_custom_location=False):
         indices = getattr(self, "current_selected_story_indices", [])
+        is_music = getattr(self, "story_detection_mode", "voice") == "music"
+        term = "Song" if is_music else "Story"
+        term_plural = "Songs" if is_music else "Stories"
         if not indices:
-            QMessageBox.warning(self, "No Story Selected", "Please select one or more stories to export.")
+            QMessageBox.warning(self, f"No {term} Selected", f"Please select one or more {term_plural.lower()} to export.")
             return
         stories_to_export = [(i, self.stories[i]) for i in indices if 0 <= i < len(self.stories)]
         if not stories_to_export:
-            QMessageBox.warning(self, "No Story Selected", "No valid stories are currently selected.")
+            QMessageBox.warning(self, f"No {term} Selected", f"No valid {term_plural.lower()} are currently selected.")
             return
 
         base = custom_base or (safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "export")))
@@ -2161,8 +2166,8 @@ class ProjectExportMixin:
             success = self._export_story_files(stories_to_export, formats, base, options, directory, is_custom_location=is_custom_location)
             if success and not self.export_cancelled:
                 self.update_processing_progress(100, "Export complete.")
-                self.log_activity(f"[EXPORT] Exported {len(stories_to_export)} selected story/stories to {directory}")
-                QMessageBox.information(self, "Export Complete", f"Exported {len(stories_to_export)} story segment(s) to:\n{directory}")
+                self.log_activity(f"[EXPORT] Exported {len(stories_to_export)} selected {term.lower()}(s) to {directory}")
+                QMessageBox.information(self, "Export Complete", f"Exported {len(stories_to_export)} {term.lower()}(s) to:\n{directory}")
         except Exception as exc:
             self.log_activity(f"[ERROR] Selected stories export failed: {exc}")
             QMessageBox.critical(self, "Export Error", str(exc))
@@ -2172,8 +2177,11 @@ class ProjectExportMixin:
                 self.cancel_button.hide()
 
     def export_all_stories(self, custom_formats=None, custom_base=None, custom_options=None, directory=None, is_custom_location=False):
+        is_music = getattr(self, "story_detection_mode", "voice") == "music"
+        term = "Song" if is_music else "Story"
+        term_plural = "Songs" if is_music else "Stories"
         if not getattr(self, "stories", []):
-            QMessageBox.warning(self, "No Stories", "There are no story segments in this project to export.")
+            QMessageBox.warning(self, f"No {term_plural}", f"There are no {term_plural.lower()} in this project to export.")
             return
 
         base = custom_base or (safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "export")))
@@ -2202,8 +2210,8 @@ class ProjectExportMixin:
             success = self._export_story_files(stories_to_export, formats, base, options, directory, is_custom_location=is_custom_location)
             if success and not self.export_cancelled:
                 self.update_processing_progress(100, "Export complete.")
-                self.log_activity(f"[EXPORT] Exported all {len(stories_to_export)} stories to {directory}")
-                QMessageBox.information(self, "Export Complete", f"Exported all {len(stories_to_export)} story segment(s) to:\n{directory}")
+                self.log_activity(f"[EXPORT] Exported all {len(stories_to_export)} {term_plural.lower()} to {directory}")
+                QMessageBox.information(self, "Export Complete", f"Exported all {len(stories_to_export)} {term_plural.lower()} to:\n{directory}")
         except Exception as exc:
             self.log_activity(f"[ERROR] All stories export failed: {exc}")
             QMessageBox.critical(self, "Export Error", str(exc))
@@ -2236,8 +2244,11 @@ class ProjectExportMixin:
         if hasattr(self, "cancel_button"):
             self.cancel_button.show()
 
+        is_music = getattr(self, "story_detection_mode", "voice") == "music"
+        term_plural = "Songs" if is_music else "Stories"
+
         try:
-            self.set_processing_stage("Exporting Full & Stories", f"1 of {total_items}: Full Episode")
+            self.set_processing_stage(f"Exporting Full & {term_plural}", f"1 of {total_items}: Full Episode")
             self.update_processing_progress(0, "Exporting full episode...")
             QApplication.processEvents()
 
@@ -2264,8 +2275,8 @@ class ProjectExportMixin:
 
             if not self.export_cancelled:
                 self.update_processing_progress(100, "Export complete.")
-                self.log_activity(f"[EXPORT] Exported full episode and all stories to {directory}")
-                QMessageBox.information(self, "Export Complete", f"Exported full episode and story segments to:\n{directory}")
+                self.log_activity(f"[EXPORT] Exported full episode and all {term_plural.lower()} to {directory}")
+                QMessageBox.information(self, "Export Complete", f"Exported full episode and {term_plural.lower()} to:\n{directory}")
         except Exception as exc:
             self.log_activity(f"[ERROR] Full & story export failed: {exc}")
             QMessageBox.critical(self, "Export Error", str(exc))
@@ -3112,9 +3123,11 @@ class ProjectExportMixin:
         event.accept()
 
     def export_cue_sheet(self, destination_path=None):
-        """Export story/music segments to a standard .cue sheet."""
+        """Export story/song segments to a standard .cue sheet."""
+        is_music = getattr(self, "story_detection_mode", "voice") == "music"
+        term_plural = "Songs" if is_music else "Stories"
         if not getattr(self, "stories", []):
-            QMessageBox.warning(self, "No Stories", "There are no story or music segments to export.")
+            QMessageBox.warning(self, f"No {term_plural}", f"There are no {term_plural.lower()} to export.")
             return False
         base = safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "project"))
         album_title = self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "Album")
@@ -3139,9 +3152,11 @@ class ProjectExportMixin:
         return True
 
     def export_tracklist(self, destination_path=None):
-        """Export story/music segments as YouTube chapters / tracklist formatted text."""
+        """Export story/song segments as YouTube chapters / tracklist formatted text."""
+        is_music = getattr(self, "story_detection_mode", "voice") == "music"
+        term_plural = "Songs" if is_music else "Stories"
         if not getattr(self, "stories", []):
-            QMessageBox.warning(self, "No Stories", "There are no story or music segments to export.")
+            QMessageBox.warning(self, f"No {term_plural}", f"There are no {term_plural.lower()} to export.")
             return False
         base = safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "project"))
         if not destination_path:

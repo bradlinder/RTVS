@@ -1032,7 +1032,9 @@ class TranscriptStoryMixin:
 
     def handle_new_story_started(self, start_time, end_time):
         self.pre_drag_stories_snapshot = [Story.from_dict(s.to_dict()) for s in self.stories]
-        story = Story(start=start_time, end=end_time, title="Untitled Story")
+        is_music = getattr(self, "story_detection_mode", "voice") == "music"
+        default_title = "Untitled Song" if is_music else "Untitled Story"
+        story = Story(start=start_time, end=end_time, title=default_title)
         self.stories.append(story)
 
         self.refresh_story_list()
@@ -1154,13 +1156,29 @@ class TranscriptStoryMixin:
         if not selected_rows:
             return
 
+        is_music = getattr(self, "story_detection_mode", "voice") == "music"
+        term = "Song" if is_music else "Story"
+        term_plural = "Songs" if is_music else "Stories"
+
         old_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
         new_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
 
         for idx in selected_rows:
             del new_stories[idx]
 
-        self.commit_story_change(old_stories, new_stories, "Delete Story")
+        count = len(selected_rows)
+        # Clear story selection so that deleting a highlighted story removes the selection
+        self.apply_story_selection_indices([], seek=False)
+
+        # Clear any timeline drag selection range if present
+        if hasattr(self, "timeline") and hasattr(self.timeline, "canvas"):
+            self.timeline.canvas.selection_start = None
+            self.timeline.canvas.selection_end = None
+            self.timeline.canvas.selectionRangeChanged.emit(None, None)
+            self.timeline.canvas.update()
+
+        desc = f"Delete {term if count == 1 else term_plural}"
+        self.commit_story_change(old_stories, new_stories, desc)
 
     def get_current_interaction_time(self, for_boundary="start"):
         """
@@ -1315,7 +1333,11 @@ class TranscriptStoryMixin:
                 )
                 return
 
-        # Multiple selections workflow: create separate stories for each selected section
+        is_music = getattr(self, "story_detection_mode", "voice") == "music"
+        term = "Song" if is_music else "Story"
+        term_plural = "Songs" if is_music else "Stories"
+
+        # Multiple selections workflow: create separate stories/songs for each selected section
         if len(ranges) > 1:
             old_stories = [Story.from_dict(s.to_dict()) for s in getattr(self, "stories", [])]
             created_stories = []
@@ -1326,12 +1348,12 @@ class TranscriptStoryMixin:
                     e_time = s_time + 1.0
                 text = r.get("text", "").strip()
                 words = text.split()
-                t = " ".join(words[:6]) + ("..." if len(words) > 6 else "") if words else "New Story"
+                t = " ".join(words[:6]) + ("..." if len(words) > 6 else "") if words else f"New {term}"
                 created_stories.append(Story(start=s_time, end=e_time, title=t))
 
             new_stories = sorted(old_stories + created_stories, key=lambda s: s.start)
             if hasattr(self, "commit_story_change"):
-                self.commit_story_change(old_stories, new_stories, f"Add {len(created_stories)} Stories from Multi-Selection")
+                self.commit_story_change(old_stories, new_stories, f"Add {len(created_stories)} {term_plural} from Multi-Selection")
             else:
                 self.stories = new_stories
                 self.refresh_story_list()
@@ -1341,8 +1363,8 @@ class TranscriptStoryMixin:
                 self.apply_story_selection_indices(new_indices)
 
             self.transcript_view.clear_all_selections()
-            self.log_activity(f"[STORY] Added {len(created_stories)} stories from multi-selection.")
-            self.statusBar().showMessage(f"Created {len(created_stories)} stories from multiple selections.")
+            self.log_activity(f"[{'SONG' if is_music else 'STORY'}] Added {len(created_stories)} {term_plural.lower()} from multi-selection.")
+            self.statusBar().showMessage(f"Created {len(created_stories)} {term_plural.lower()} from multiple selections.")
             return
 
         # Single selection workflow
@@ -1384,7 +1406,7 @@ class TranscriptStoryMixin:
 
         # Auto-generate a preliminary title from the first few words of the selection
         words = selected_text.split()
-        default_title = " ".join(words[:6]) + ("..." if len(words) > 6 else "") if words else "New Story"
+        default_title = " ".join(words[:6]) + ("..." if len(words) > 6 else "") if words else f"New {term}"
 
         # Update input boxes if present
         if hasattr(self, "start_input"):
@@ -1400,7 +1422,7 @@ class TranscriptStoryMixin:
         new_stories = sorted(old_stories + [new_story], key=lambda s: s.start)
 
         if hasattr(self, "commit_story_change"):
-            self.commit_story_change(old_stories, new_stories, f"Add Story from Selection: '{default_title}'")
+            self.commit_story_change(old_stories, new_stories, f"Add {term} from Selection: '{default_title}'")
         else:
             self.stories = new_stories
             self.refresh_story_list()
@@ -1411,8 +1433,8 @@ class TranscriptStoryMixin:
             self.apply_story_selection_indices([new_idx])
 
         self.transcript_view.clear_all_selections()
-        self.log_activity(f"[STORY] Added story from selection ({format_time(start_time)} – {format_time(end_time)}).")
-        self.statusBar().showMessage(f"Created story: {default_title}")
+        self.log_activity(f"[{'SONG' if is_music else 'STORY'}] Added {term.lower()} from selection ({format_time(start_time)} – {format_time(end_time)}).")
+        self.statusBar().showMessage(f"Created {term.lower()}: {default_title}")
 
     def play_transcript_selection(self):
         """Play audio corresponding to the current transcript selection."""

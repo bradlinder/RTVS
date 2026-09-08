@@ -317,13 +317,13 @@ class ProcessingMixin:
         """Handle user clicking a story region directly on the timeline canvas."""
         if 0 <= index < len(self.stories):
             is_music = getattr(self, "story_detection_mode", "voice") == "music"
-            term = "Segment" if is_music else "Story"
+            term = "Song" if is_music else "Story"
             self.apply_story_selection_indices([index], seek=False)
             if 0 <= index < self.story_list.count():
                 self.story_list.setCurrentRow(index)
                 self.story_list.scrollToItem(self.story_list.item(index))
             if not getattr(self, "is_restoring_snapshot", False):
-                self.log_activity(f"[{'SEGMENT' if is_music else 'STORY'} SELECT] Clicked {term} #{index + 1}: '{self.stories[index].title}'")
+                self.log_activity(f"[{'SONG' if is_music else 'STORY'} SELECT] Clicked {term} #{index + 1}: '{self.stories[index].title}'")
 
     def story_selection_changed(self):
         if self.is_updating_selection:
@@ -1703,8 +1703,8 @@ class ProcessingMixin:
             return
 
         is_music = (getattr(self, "story_detection_mode", "voice") == "music")
-        term = "Segment" if is_music else "Story"
-        term_plural = "Segments" if is_music else "Stories"
+        term = "Song" if is_music else "Story"
+        term_plural = "Songs" if is_music else "Stories"
 
         if self.stories and not self.pipeline_active and not getattr(self, "pipeline_rerun_confirmed", False):
             answer = QMessageBox.question(
@@ -1725,7 +1725,7 @@ class ProcessingMixin:
         self.cancel_button.show()
         mode_str = str(getattr(self, "story_detection_mode", "voice") or "voice").capitalize()
         self.log_activity(
-            f"[{'SEGMENT' if is_music else 'STORY'} DETECT] Started {term.lower()} detection (Mode: {mode_str}, Threshold: {self.silence_threshold}s)"
+            f"[{'SONG' if is_music else 'STORY'} DETECT] Started {term.lower()} detection (Mode: {mode_str}, Threshold: {self.silence_threshold}s)"
         )
 
         self.story_job_token += 1
@@ -1777,8 +1777,8 @@ class ProcessingMixin:
 
         # 2. Commit stories to project state and update UI lists
         is_music = (getattr(self, "story_detection_mode", "voice") == "music")
-        term = "Segment" if is_music else "Story"
-        term_plural = "Segments" if is_music else "Stories"
+        term = "Song" if is_music else "Story"
+        term_plural = "Songs" if is_music else "Stories"
         old_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
         self.commit_story_change(old_stories, new_stories, f"Detect {term_plural}")
 
@@ -1786,7 +1786,7 @@ class ProcessingMixin:
         self.processing_status["stories"] = True
         self.update_processing_stage_summary()
         msg = f"{term} detection complete: Created {count} {term.lower()} region(s)."
-        self.log_activity(f"[{'SEGMENT' if is_music else 'STORY'} DETECT] Complete: Auto-created {count} {term.lower()} region(s).")
+        self.log_activity(f"[{'SONG' if is_music else 'STORY'} DETECT] Complete: Auto-created {count} {term.lower()} region(s).")
         self.statusBar().showMessage(msg)
         self.save_project()
 
