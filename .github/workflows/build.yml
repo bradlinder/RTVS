@@ -54,6 +54,15 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      - name: Configure Windows Defender Exclusions (Fast I/O)
+        shell: pwsh
+        run: |
+          Set-MpPreference -ExclusionPath (Get-Location).Path
+          if ($env:LOCALAPPDATA) {
+            Set-MpPreference -ExclusionPath "$env:LOCALAPPDATA\pip" -ErrorAction SilentlyContinue
+            Set-MpPreference -ExclusionPath "$env:LOCALAPPDATA\uv" -ErrorAction SilentlyContinue
+          }
+
       - name: Setup FFmpeg (Fast)
         uses: FedericoCarboni/setup-ffmpeg@v3
         with:
