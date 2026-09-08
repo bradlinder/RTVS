@@ -60,21 +60,19 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Inno Setup
-        run: |
-          choco install innosetup --no-progress
-          "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        uses: bmatzelle/setup-innosetup@v1
 
-      - name: Install Python dependencies (CPU-only PyTorch)
+      - name: Install uv and Python dependencies (Fast CPU PyTorch)
         run: |
-          python -m pip install --upgrade pip
-          pip install --prefer-binary "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0" --index-url https://download.pytorch.org/whl/cpu
-          pip install --prefer-binary -r requirements.txt -r requirements-build.txt --extra-index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --upgrade uv
+          uv pip install --system --find-links https://download.pytorch.org/whl/cpu "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0"
+          uv pip install --system --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt -r requirements-build.txt
 
       - name: Extract Project Version
         id: get_version
         shell: bash
         run: |
-          VERSION=$(python -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.1.2")
+          VERSION=$(python -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.1.3")
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Run PyInstaller build
@@ -147,10 +145,10 @@ jobs:
           ffmpeg -version
           ffprobe -version
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies (Fast uv)
         run: |
-          python3 -m pip install --upgrade pip
-          pip install --prefer-binary -r requirements.txt -r requirements-build.txt
+          python3 -m pip install --upgrade uv
+          uv pip install --system -r requirements.txt -r requirements-build.txt
 
       - name: Run PyInstaller build
         run: python3 build_installer.py
@@ -189,11 +187,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg libxcb-cursor0 libpulse0 binutils dpkg-dev
 
-      - name: Install Python dependencies (CPU-only PyTorch)
+      - name: Install Python dependencies (Fast CPU PyTorch with uv)
         run: |
-          python3 -m pip install --upgrade pip
-          pip install --prefer-binary "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0" --index-url https://download.pytorch.org/whl/cpu
-          pip install --prefer-binary -r requirements.txt -r requirements-build.txt --extra-index-url https://download.pytorch.org/whl/cpu
+          python3 -m pip install --upgrade uv
+          uv pip install --system --find-links https://download.pytorch.org/whl/cpu "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0"
+          uv pip install --system --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt -r requirements-build.txt
 
       - name: Run PyInstaller build
         run: python3 build_installer.py
@@ -201,7 +199,7 @@ jobs:
       - name: Package Debian (.deb) & Distributable Tarball (.tar.gz)
         run: |
           bash installer/Linux/build_deb.sh
-          VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.1.2")
+          VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.1.3")
           cd dist
           tar -czvf "RadioTVSegmenter-${VERSION}-Linux-x86_64.tar.gz" RadioTVSegmenter/
           cd ..
@@ -259,7 +257,7 @@ jobs:
           elif [ -n "${{ inputs.release_tag }}" ]; then
             echo "tag=${{ inputs.release_tag }}" >> $GITHUB_OUTPUT
           else
-            echo "tag=v2.1.2" >> $GITHUB_OUTPUT
+            echo "tag=v2.1.3" >> $GITHUB_OUTPUT
           fi
 
       - name: Create GitHub Release & Upload Binaries
