@@ -68,7 +68,7 @@ jobs:
         run: |
           python -m pip install --upgrade uv
           uv pip install --system --find-links https://download.pytorch.org/whl/cpu "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0"
-          uv pip install --system --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt -r requirements-build.txt
+          uv pip install --system -r requirements.txt -r requirements-build.txt
 
       - name: Extract Project Version
         id: get_version
@@ -193,7 +193,7 @@ jobs:
         run: |
           python3 -m pip install --upgrade uv
           uv pip install --system --find-links https://download.pytorch.org/whl/cpu "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0"
-          uv pip install --system --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt -r requirements-build.txt
+          uv pip install --system -r requirements.txt -r requirements-build.txt
 
       - name: Run PyInstaller build
         run: python3 build_installer.py
