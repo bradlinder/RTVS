@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.4.1
+
+### Features & Story Boundary Controls
+- **Set Story Start & End Buttons**: Restored dedicated "Set Story Start" and "Set Story End" action buttons in the Stories & Segments widget.
+- **Contextual Timestamp Snapping**: Pressing either button sets the story's start or end boundary to match the current interaction position across the transcript and timeline:
+  - Active timeline drag selections and highlighted transcript text ranges are prioritized.
+  - Active transcript cursor positions and playback/waveform playhead locations are seamlessly detected and converted into precise story boundaries.
+- **Dynamic Resizing & Contextual Visibility**: The boundary buttons appear cleanly above the Add, Select All, Delete, and Export buttons exclusively when a single story is selected. When multiple stories or no stories are selected, the buttons and their container are collapsed entirely with zero dead vertical space.
+- **Full Undo/Redo & State Integration**: Boundary adjustments are committed into the unified project undo/redo stack (`Ctrl+Z` / `Ctrl+Shift+Z`), immediately refreshing the story list, time range inputs, timeline story regions, and autosave state.
+- **Version Synchronization**: Bumped version to `2.4.1` across `prs_shared.py`, `RadioTVSegmenter.py`, `build_installer.py`, `updater.py`, `package.json`, build scripts, and CI workflows.
+
 ## v2.4
 
 ### Bug Fixes & Stability

@@ -2046,6 +2046,7 @@ class PlaybackPreferencesMixin:
         self.play_button.setText("▶ Play")
 
     def seek_to(self, seconds):
+        self.current_position = float(seconds)
         self.player.setPosition(int(seconds * 1000))
         self.timeline.ensure_position_visible(seconds)
         self.transcript_view.highlight_word_at_time(seconds, self.transcript)

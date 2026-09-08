@@ -259,6 +259,7 @@ class TranscriptStoryMixin:
             return
         selected_range = self.transcript_view.get_selected_time_range()
         if selected_range:
+            self.last_position_source = "transcript"
             self.timeline.set_transcript_selection_range(*selected_range)
             self.statusBar().showMessage(
                 f"Transcript selection: {format_time(selected_range[0])} – {format_time(selected_range[1])}"
@@ -266,6 +267,11 @@ class TranscriptStoryMixin:
         else:
             if not getattr(self.transcript_view, "has_active_selection", lambda: False)():
                 self.timeline.set_transcript_selection_range(None, None)
+            cursor = self.transcript_view.textCursor()
+            ts = self.transcript_view.get_timestamp_at_cursor(cursor)
+            if ts is not None and ts >= 0:
+                self.last_transcript_cursor_time = ts
+                self.last_position_source = "transcript"
 
     def on_transcript_text_changed(self):
         if self.is_updating_transcript_view or getattr(self, "is_restoring_undo", False) or not self.transcript:
@@ -354,12 +360,16 @@ class TranscriptStoryMixin:
         text = url.toString()
         if text.startswith("time:"):
             seconds = float(text.split(":", 1)[1])
+            self.last_position_source = "transcript"
+            self.last_transcript_cursor_time = seconds
             self.seek_to(seconds)
         elif text.startswith("word:"):
             # Viewing-mode left-click is navigation only.  Speaker actions
             # are available from the right-click context menu.
             parts = text.split(":")
             seconds = float(parts[1])
+            self.last_position_source = "transcript"
+            self.last_transcript_cursor_time = seconds
             self.seek_to(seconds)
         elif text.startswith("speaker:"):
             # Do not open speaker-editing UI from a normal left-click.
@@ -1102,6 +1112,126 @@ class TranscriptStoryMixin:
             del new_stories[idx]
 
         self.commit_story_change(old_stories, new_stories, "Delete Story")
+
+    def get_current_interaction_time(self, for_boundary="start"):
+        """
+        Determines the relevant timestamp for setting a story boundary.
+        Checks in order of user intent:
+        1. Active drag-selection on the timeline canvas
+        2. Active text selection in the transcript view
+        3. Active text cursor position in the transcript view (if last focused/edited)
+        4. Current playback / playhead / waveform position
+        """
+        canvas = getattr(getattr(self, "timeline", None), "canvas", None)
+        if canvas and canvas.selection_start is not None and canvas.selection_end is not None:
+            s = min(canvas.selection_start, canvas.selection_end)
+            e = max(canvas.selection_start, canvas.selection_end)
+            return s if for_boundary == "start" else e
+
+        if hasattr(self, "transcript_view"):
+            if self.transcript_view.has_active_selection():
+                sel_range = self.transcript_view.get_selected_time_range()
+                if sel_range:
+                    return sel_range[0] if for_boundary == "start" else sel_range[1]
+
+            if getattr(self, "last_position_source", None) == "transcript":
+                last_ts = getattr(self, "last_transcript_cursor_time", None)
+                if last_ts is not None and last_ts >= 0:
+                    return last_ts
+
+        return getattr(self, "current_position", 0.0)
+
+    def set_selected_story_start(self):
+        """Update the start boundary of the currently selected story to match the current transcript/timeline position."""
+        selected_rows = list(self.current_selected_story_indices)
+        if len(selected_rows) != 1:
+            return
+
+        index = selected_rows[0]
+        if not (0 <= index < len(self.stories)):
+            return
+
+        current_story = self.stories[index]
+        target_time = self.get_current_interaction_time(for_boundary="start")
+        if target_time is None:
+            target_time = getattr(self, "current_position", 0.0)
+
+        target_time = round(max(0.0, float(target_time)), 3)
+
+        if target_time >= current_story.end:
+            QMessageBox.warning(
+                self,
+                "Invalid Boundary",
+                f"Start time ({format_time(target_time)}) must be earlier than story end time ({format_time(current_story.end)})."
+            )
+            return
+
+        if abs(target_time - current_story.start) < 0.001:
+            return
+
+        # Clear any temporary drag selection on timeline
+        canvas = getattr(getattr(self, "timeline", None), "canvas", None)
+        if canvas and canvas.selection_start is not None:
+            canvas.selection_start = None
+            canvas.selection_end = None
+            canvas.update()
+
+        old_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
+        new_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
+        new_stories[index].start = target_time
+
+        desc = f"Set Story #{index + 1} Start Time to {format_time(target_time)}"
+        self.commit_story_change(old_stories, new_stories, desc)
+        self.refresh_story_list()
+        self.apply_story_selection_indices([index], seek=True)
+        self.mark_project_dirty(desc)
+        self.save_project()
+
+    def set_selected_story_end(self):
+        """Update the end boundary of the currently selected story to match the current transcript/timeline position."""
+        selected_rows = list(self.current_selected_story_indices)
+        if len(selected_rows) != 1:
+            return
+
+        index = selected_rows[0]
+        if not (0 <= index < len(self.stories)):
+            return
+
+        current_story = self.stories[index]
+        target_time = self.get_current_interaction_time(for_boundary="end")
+        if target_time is None:
+            target_time = getattr(self, "current_position", 0.0)
+
+        target_time = round(max(0.0, float(target_time)), 3)
+
+        if target_time <= current_story.start:
+            QMessageBox.warning(
+                self,
+                "Invalid Boundary",
+                f"End time ({format_time(target_time)}) must be later than story start time ({format_time(current_story.start)})."
+            )
+            return
+
+        if abs(target_time - current_story.end) < 0.001:
+            return
+
+        # Clear any temporary drag selection on timeline
+        canvas = getattr(getattr(self, "timeline", None), "canvas", None)
+        if canvas and canvas.selection_start is not None:
+            canvas.selection_start = None
+            canvas.selection_end = None
+            canvas.update()
+
+        old_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
+        new_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
+        new_stories[index].end = target_time
+
+        desc = f"Set Story #{index + 1} End Time to {format_time(target_time)}"
+        self.commit_story_change(old_stories, new_stories, desc)
+        self.refresh_story_list()
+        self.apply_story_selection_indices([index], seek=False)
+        self.mark_project_dirty(desc)
+        self.save_project()
 	
     def add_selection_to_story(self):
         """Create a new story segment spanning the selected transcript text."""

@@ -1099,6 +1099,8 @@ class ProjectExportMixin:
         self.start_input.clear()
         self.end_input.clear()
         self.title_input.clear()
+        if hasattr(self, "story_boundary_container"):
+            self.story_boundary_container.setVisible(False)
 
         self.timeline.set_duration(1)
         self.timeline.set_position(0)

@@ -281,6 +281,25 @@ QPushButton#add_story_btn, QPushButton#export_stories_btn {
     background: #38bdf8; color: #081018; border-color: #38bdf8; font-weight: 700;
 }
 QPushButton#add_story_btn:hover, QPushButton#export_stories_btn:hover { background: #67d3ff; border-color: #67d3ff; }
+QPushButton#set_story_start_btn, QPushButton#set_story_end_btn {
+    background: #182230;
+    color: #38bdf8;
+    border: 1px solid #29384d;
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-size: 11px;
+    font-weight: 600;
+}
+QPushButton#set_story_start_btn:hover, QPushButton#set_story_end_btn:hover {
+    background: #1e2c3f;
+    border-color: #38bdf8;
+    color: #ffffff;
+}
+QPushButton#set_story_start_btn:pressed, QPushButton#set_story_end_btn:pressed {
+    background: #0284c7;
+    border-color: #0284c7;
+    color: #081018;
+}
 QPushButton#select_all_stories_btn, QPushButton#export_activity_btn {
     background: transparent; color: #8b949e; border-color: #3a414f;
 }

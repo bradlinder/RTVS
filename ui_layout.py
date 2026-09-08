@@ -255,6 +255,28 @@ class UiLayoutMixin:
         form_layout.addRow("Range:", times_layout)
         stories_box_layout.addLayout(form_layout)
 
+        # Boundary Buttons Container (Visible only when exactly one story is selected)
+        self.story_boundary_container = QWidget(self)
+        self.story_boundary_container.setObjectName("story_boundary_container")
+        boundary_layout = QHBoxLayout(self.story_boundary_container)
+        boundary_layout.setContentsMargins(0, 0, 0, 0)
+        boundary_layout.setSpacing(4)
+
+        self.set_story_start_btn = QPushButton("Set Story Start", self.story_boundary_container)
+        self.set_story_start_btn.setObjectName("set_story_start_btn")
+        self.set_story_start_btn.setToolTip("Set start time of selected story to current transcript or timeline position")
+        self.set_story_start_btn.clicked.connect(self.set_selected_story_start)
+        boundary_layout.addWidget(self.set_story_start_btn)
+
+        self.set_story_end_btn = QPushButton("Set Story End", self.story_boundary_container)
+        self.set_story_end_btn.setObjectName("set_story_end_btn")
+        self.set_story_end_btn.setToolTip("Set end time of selected story to current transcript or timeline position")
+        self.set_story_end_btn.clicked.connect(self.set_selected_story_end)
+        boundary_layout.addWidget(self.set_story_end_btn)
+
+        self.story_boundary_container.hide()
+        stories_box_layout.addWidget(self.story_boundary_container)
+
         # Story action buttons
         story_btns_row = QHBoxLayout()
         story_btns_row.setSpacing(4)

@@ -265,7 +265,7 @@ class ProcessingMixin:
         if not self.is_restoring_snapshot:
             self.log_activity(f"[STORY] {description} ({len(new_stories)} story/stories total)")
 
-    def apply_story_selection_indices(self, selected_rows):
+    def apply_story_selection_indices(self, selected_rows, seek=True):
         self.is_updating_selection = True
         self.current_selected_story_indices = list(selected_rows)
 
@@ -285,11 +285,19 @@ class ProcessingMixin:
                 self.start_input.setText(format_time(story.start))
                 self.end_input.setText(format_time(story.end))
                 self.title_input.setText(story.title)
-                self.seek_to(story.start)
+                if seek:
+                    self.seek_to(story.start)
+                if hasattr(self, "story_boundary_container"):
+                    self.story_boundary_container.setVisible(True)
+            else:
+                if hasattr(self, "story_boundary_container"):
+                    self.story_boundary_container.setVisible(False)
         else:
             self.start_input.clear()
             self.end_input.clear()
             self.title_input.clear()
+            if hasattr(self, "story_boundary_container"):
+                self.story_boundary_container.setVisible(False)
 
         self.timeline.set_stories(self.stories, selected_rows)
         self.is_updating_selection = False
