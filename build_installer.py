@@ -148,18 +148,29 @@ def check_cpu_only_torch() -> None:
         return
 
     if cuda_version:
-        is_ci = os.environ.get("CI", "").lower() in ("true", "1") or os.environ.get("GITHUB_ACTIONS") == "true"
         msg = (
             f"[BUILD] WARNING: torch installed in this build environment reports CUDA {cuda_version}.\n"
             "This build is intended to be CPU-only and small (<500MB). Installing CUDA packages will\n"
-            "balloon the installer to >2GB and fail release asset limits.\n"
+            "balloon the installer to >2GB and fail release asset limits.\n\n"
+            "More importantly: prune_unneeded_bundled_files() below deletes cuDNN/cuBLAS/nvRTC/NCCL\n"
+            "files by name to keep a CPU build small, but it does NOT remove torch_cuda.dll/c10_cuda.dll\n"
+            "themselves. Building from a CUDA-enabled torch therefore does not just produce an oversized\n"
+            "installer -- it produces one where torch's C extension (torch._C) fails to load at all,\n"
+            "because the CUDA DLLs it still depends on have been stripped out. This has shipped broken\n"
+            "builds before (NameError: name '_C' is not defined, breaking Speaker Detection and\n"
+            "Translation, which both import torch) -- so this now always aborts the build rather than\n"
+            "just warning.\n\n"
             "To fix, install CPU-only torch before building:\n"
             "  pip install 'torch>=2.0,<2.4' 'torchaudio>=2.0,<2.4' --index-url https://download.pytorch.org/whl/cpu\n"
-            "  pip install -r requirements.txt -r requirements-build.txt --extra-index-url https://download.pytorch.org/whl/cpu"
+            "  pip install -r requirements.txt -r requirements-build.txt --extra-index-url https://download.pytorch.org/whl/cpu\n\n"
+            "If you specifically need a CUDA build for local testing and understand the above risk,\n"
+            "set PRS_ALLOW_CUDA_BUILD=1 to bypass this check."
         )
-        if is_ci or os.environ.get("PRS_STRICT_CPU"):
-            raise SystemExit(f"\n[FATAL BUILD ERROR]\n{msg}\nAborting build because CUDA was detected during release CI.")
-        print(msg)
+        if os.environ.get("PRS_ALLOW_CUDA_BUILD"):
+            print(msg)
+            print("[BUILD] PRS_ALLOW_CUDA_BUILD is set -- continuing with CUDA torch despite the risk above.")
+            return
+        raise SystemExit(f"\n[FATAL BUILD ERROR]\n{msg}")
     else:
         print("[BUILD] torch in the build environment is CPU-only. Good.")
 

@@ -76,7 +76,7 @@ jobs:
       - name: Install uv and Python dependencies (Fast CPU PyTorch)
         run: |
           python -m pip install --upgrade uv
-          uv pip install --system --find-links https://download.pytorch.org/whl/cpu "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0"
+          uv pip install --system --index-url https://download.pytorch.org/whl/cpu "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0"
           uv pip install --system -r requirements.txt -r requirements-build.txt
 
       - name: Extract Project Version
@@ -218,7 +218,7 @@ jobs:
       - name: Install Python dependencies (Fast CPU PyTorch with uv)
         run: |
           python3 -m pip install --upgrade uv
-          uv pip install --system --find-links https://download.pytorch.org/whl/cpu "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0"
+          uv pip install --system --index-url https://download.pytorch.org/whl/cpu "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0"
           uv pip install --system -r requirements.txt -r requirements-build.txt
 
       - name: Run PyInstaller build
