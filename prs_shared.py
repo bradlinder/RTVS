@@ -1769,16 +1769,39 @@ class StoryAutoDetectWorker(QObject):
             speech_timestamps = None
             total_dur = self.audio_duration
 
+            # Step 1: Read and normalize audio to 16kHz mono float32
+            audio_data = None
+            sample_rate = 16000
+
             try:
                 setup_windows_dll_directories()
                 import soundfile as sf
-                import torch
-                from silero_vad import load_silero_vad, get_speech_timestamps
-
-                audio_data, sample_rate = sf.read(str(self.audio_file), dtype="float32")
+                audio_data, file_sr = sf.read(str(self.audio_file), dtype="float32")
                 if audio_data.ndim > 1:
                     audio_data = audio_data.mean(axis=-1)
+                sample_rate = file_sr
+            except Exception:
+                # Fallback to FFmpeg decode if soundfile cannot read container/codec
+                try:
+                    import subprocess
+                    import numpy as np
+                    ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
+                    cmd = [
+                        ffmpeg_bin, "-y", "-v", "error",
+                        "-i", str(self.audio_file),
+                        "-vn", "-sn", "-dn",
+                        "-ac", "1", "-ar", "16000",
+                        "-f", "f32le", "-"
+                    ]
+                    flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags)
+                    if p.returncode == 0 and len(p.stdout) > 0:
+                        audio_data = np.frombuffer(p.stdout, dtype=np.float32)
+                        sample_rate = 16000
+                except Exception:
+                    pass
 
+            if audio_data is not None and len(audio_data) > 0:
                 if sample_rate != 16000:
                     try:
                         from scipy.signal import resample_poly
@@ -1787,46 +1810,72 @@ class StoryAutoDetectWorker(QObject):
                         audio_data = resample_poly(audio_data, 16000 // g, sample_rate // g).astype("float32")
                         sample_rate = 16000
                     except Exception:
-                        try:
-                            import torchaudio
-                            t_wav = torch.from_numpy(audio_data)
-                            resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-                            audio_data = resampler(t_wav).numpy()
-                            sample_rate = 16000
-                        except Exception:
-                            pass
+                        pass
 
-                wav = torch.from_numpy(audio_data)
+                total_dur = max(float(len(audio_data)) / 16000.0, self.audio_duration)
 
+                # Try Neural Silero VAD (ONNX or Torch)
                 try:
-                    vad_model = load_silero_vad(onnx=True)
-                except Exception:
-                    vad_model = load_silero_vad()
+                    import torch
+                    from silero_vad import load_silero_vad, get_speech_timestamps
+                    wav = torch.from_numpy(audio_data)
+                    try:
+                        vad_model = load_silero_vad(onnx=True)
+                    except Exception:
+                        vad_model = load_silero_vad()
 
-                # Fine-grained speech activity detection (400ms pause threshold)
-                # so every music break or quiet section is separated as a gap.
-                speech_timestamps = get_speech_timestamps(
-                    wav,
-                    vad_model,
-                    sampling_rate=16000,
-                    min_speech_duration_ms=250,
-                    min_silence_duration_ms=400,
-                    return_seconds=True,
-                )
-                total_dur = max(float(len(wav)) / 16000.0, self.audio_duration)
-            except Exception as vad_err:
-                # If VAD fails or neural dependencies fail to load, fallback to transcript timestamps
-                if self.transcript_segments:
-                    speech_timestamps = []
-                    for seg in self.transcript_segments:
-                        text = seg.get("text", "")
-                        if self._is_real_speech(text):
-                            speech_timestamps.append({
-                                "start": float(seg.get("start", 0.0)),
-                                "end": float(seg.get("end", 0.0)),
-                            })
-                else:
-                    raise vad_err
+                    speech_timestamps = get_speech_timestamps(
+                        wav,
+                        vad_model,
+                        sampling_rate=16000,
+                        min_speech_duration_ms=250,
+                        min_silence_duration_ms=400,
+                        return_seconds=True,
+                    )
+                except Exception as vad_err:
+                    # Pure NumPy / SciPy acoustic energy envelope fallback (no neural deps needed)
+                    try:
+                        import numpy as np
+                        chunk_size = int(16000 * 0.1)  # 100ms frames
+                        num_chunks = len(audio_data) // chunk_size
+                        if num_chunks > 0:
+                            chunks = audio_data[:num_chunks * chunk_size].reshape(num_chunks, chunk_size)
+                            rms = np.sqrt(np.mean(chunks ** 2, axis=1) + 1e-12)
+                            db = 20 * np.log10(rms + 1e-12)
+                            silence_thresh_db = np.percentile(db, 20) + 6.0
+                            is_speech = db > silence_thresh_db
+
+                            raw_intervals = []
+                            in_speech = False
+                            start_f = 0
+                            for f_idx, val in enumerate(is_speech):
+                                if val and not in_speech:
+                                    in_speech = True
+                                    start_f = f_idx
+                                elif not val and in_speech:
+                                    in_speech = False
+                                    raw_intervals.append({
+                                        "start": round(start_f * 0.1, 2),
+                                        "end": round(f_idx * 0.1, 2)
+                                    })
+                            if in_speech:
+                                raw_intervals.append({
+                                    "start": round(start_f * 0.1, 2),
+                                    "end": round(num_chunks * 0.1, 2)
+                                })
+                            speech_timestamps = raw_intervals
+                    except Exception:
+                        pass
+
+            if not speech_timestamps and self.transcript_segments:
+                speech_timestamps = []
+                for seg in self.transcript_segments:
+                    text = seg.get("text", "")
+                    if self._is_real_speech(text):
+                        speech_timestamps.append({
+                            "start": float(seg.get("start", 0.0)),
+                            "end": float(seg.get("end", 0.0)),
+                        })
 
             if speech_timestamps:
                 self._emit_progress("[Step 2/2] Assembling stories from vocal intervals...", 85)
