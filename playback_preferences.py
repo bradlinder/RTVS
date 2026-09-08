@@ -1883,6 +1883,8 @@ class PlaybackPreferencesMixin:
             # Save Detection
             self.story_detection_mode = str(det_mode_combo.currentData() or "voice")
             self.settings_store.setValue("story_detection_mode", self.story_detection_mode)
+            if hasattr(self, "update_story_segment_terminology"):
+                self.update_story_segment_terminology()
             self.silence_threshold = gap_spin.value()
             self.lead_in_padding = pad_spin.value()
             self.expected_speakers = str(expected_speakers_combo.currentData() or "auto")
@@ -2780,6 +2782,8 @@ class PlaybackPreferencesMixin:
                 self.settings_store.setValue("story_detection_mode", self.story_detection_mode)
                 self.settings_store.setValue("silence_threshold", self.silence_threshold)
                 self.settings_store.setValue("lead_in_padding", self.lead_in_padding)
+            if hasattr(self, "update_story_segment_terminology"):
+                self.update_story_segment_terminology()
             self.log_activity(f"[SETTINGS] Thresholds set: Mode={self.story_detection_mode.capitalize()}, Gap={self.silence_threshold}s, Padding={self.lead_in_padding}s.")
             self.statusBar().showMessage(f"Detection updated: Mode={self.story_detection_mode.capitalize()}, Gap={self.silence_threshold}s, Padding={self.lead_in_padding}s.")
 

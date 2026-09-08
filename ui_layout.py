@@ -218,9 +218,9 @@ class UiLayoutMixin:
         stories_box_layout = QVBoxLayout(stories_box)
         stories_box_layout.setContentsMargins(8, 8, 8, 8)
         stories_box_layout.setSpacing(6)
-        stories_header = QLabel("Stories & Segments", stories_box)
-        stories_header.setObjectName("stories_section_header")
-        stories_box_layout.addWidget(stories_header)
+        self.stories_header = QLabel("Stories", stories_box)
+        self.stories_header.setObjectName("stories_section_header")
+        stories_box_layout.addWidget(self.stories_header)
         stories_box_layout.setContentsMargins(6, 8, 6, 6)
         stories_box_layout.setSpacing(4)
 
@@ -351,6 +351,7 @@ class UiLayoutMixin:
         self.timeline.canvas.newRegionStarted.connect(self.handle_new_story_started)
         self.timeline.canvas.newRegionUpdated.connect(self.handle_new_story_updated)
         self.timeline.canvas.multiSelectionChanged.connect(self.handle_timeline_multi_selection)
+        self.timeline.canvas.storyClicked.connect(self.on_timeline_story_clicked)
         self.timeline.canvas.dragOperationFinished.connect(self.handle_drag_finished)
         self.timeline.mediaDropped.connect(self.load_media_file)
         
@@ -382,6 +383,10 @@ class UiLayoutMixin:
 
         # Initialize status bar
         self.statusBar().showMessage("Ready")
+
+        # Update terminology (Story vs. Segment) based on initial detection mode
+        if hasattr(self, "update_story_segment_terminology"):
+            self.update_story_segment_terminology()
 
     def build_menus(self):
         """Construct the main application menu bar and associated keyboard shortcuts."""
@@ -614,6 +619,18 @@ class UiLayoutMixin:
         self.batch_processing_action.triggered.connect(self.open_batch_processing_dialog)
         tools_menu.addAction(self.batch_processing_action)
 
+        tools_menu.addSeparator()
+
+        self.regen_waveform_action = QAction("&Regenerate Waveform", self)
+        self.regen_waveform_action.setEnabled(False)
+        self.regen_waveform_action.triggered.connect(self.regenerate_waveform)
+        tools_menu.addAction(self.regen_waveform_action)
+
+        self.regen_thumbnails_action = QAction("Regenerate Video &Thumbnails", self)
+        self.regen_thumbnails_action.setEnabled(False)
+        self.regen_thumbnails_action.triggered.connect(self.regenerate_video_thumbnails)
+        tools_menu.addAction(self.regen_thumbnails_action)
+
        # ==========================================
         # Settings Menu
         # ==========================================
@@ -789,7 +806,18 @@ class UiLayoutMixin:
         if hasattr(self, "diarize_action"):
             self.diarize_action.setText("Detect Speakers (Complete)" if has_diarization else "Detect Speakers...")
         if hasattr(self, "auto_detect_action"):
-            self.auto_detect_action.setText("Detect Stories (Complete)" if has_stories else "Detect Stories...")
+            is_music = (getattr(self, "story_detection_mode", "voice") == "music")
+            is_es = (getattr(self, "language", "en") == "es")
+            if is_music:
+                if is_es:
+                    self.auto_detect_action.setText("&Detectar segmentos (Completado)" if has_stories else "&Detectar segmentos...")
+                else:
+                    self.auto_detect_action.setText("Detect Segments (Complete)" if has_stories else "&Detect Segments...")
+            else:
+                if is_es:
+                    self.auto_detect_action.setText("&Detectar historias (Completado)" if has_stories else "&Detectar historias...")
+                else:
+                    self.auto_detect_action.setText("Detect Stories (Complete)" if has_stories else "&Detect Stories...")
 
     def open_project_dialog(self):
         """Prompt user to open a project file (*.rtvs)."""

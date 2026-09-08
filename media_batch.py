@@ -55,7 +55,14 @@ class MediaBatchMixin:
             if hasattr(self, "timeline"): self.timeline.set_video_thumbnails([])
             return
         if not self.stop_video_thumbnail_worker():
-            self.log_activity("[MEDIA] Thumbnail generation was not restarted because the previous worker is still stopping.", mark_dirty=False)
+            self._pending_thumbnail_restart = True
+            old_thread = getattr(self, "video_thumbnail_thread", None)
+            if old_thread is not None:
+                try:
+                    old_thread.finished.connect(lambda: QTimer.singleShot(100, self._retry_pending_thumbnails))
+                except Exception:
+                    pass
+            self.log_activity("[MEDIA] Previous thumbnail worker is still stopping; thumbnail generation will restart once it finishes.", mark_dirty=False)
             return
         base=Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails"
         base.mkdir(parents=True, exist_ok=True)
@@ -75,6 +82,11 @@ class MediaBatchMixin:
                 pass
         thread.start()
 
+    def _retry_pending_thumbnails(self):
+        if getattr(self, "_pending_thumbnail_restart", False):
+            self._pending_thumbnail_restart = False
+            self.start_video_thumbnail_generation()
+
     def _video_thumbnails_finished(self, items):
         if hasattr(self, "timeline"):
             try:
@@ -84,6 +96,9 @@ class MediaBatchMixin:
             self.timeline.set_video_thumbnails(items)
         self.video_thumbnail_worker=None
         self.video_thumbnail_thread=None
+        if getattr(self, "_pending_thumbnail_restart", False):
+            self._pending_thumbnail_restart = False
+            QTimer.singleShot(100, self.start_video_thumbnail_generation)
 
     def stop_video_thumbnail_worker(self):
         thread=self.video_thumbnail_thread; worker=self.video_thumbnail_worker
@@ -92,9 +107,13 @@ class MediaBatchMixin:
             except Exception: pass
         if thread and thread.isRunning():
             thread.quit()
-            if not thread.wait(5000):
-                self.log_activity("[WARNING] Video thumbnail worker is still stopping; keeping it tracked to avoid a QThread lifetime crash.", mark_dirty=False)
-                return False
+            if not thread.wait(2000):
+                if worker:
+                    try: worker.cancel()
+                    except Exception: pass
+                if not thread.wait(2000):
+                    self.log_activity("[WARNING] Video thumbnail worker is still stopping; keeping it tracked to avoid a QThread lifetime crash.", mark_dirty=False)
+                    return False
         if hasattr(self, "timeline"):
             try:
                 self.timeline.set_background_generation_active("thumbnails", False)
@@ -102,6 +121,36 @@ class MediaBatchMixin:
                 pass
         self.video_thumbnail_thread=None; self.video_thumbnail_worker=None
         return True
+
+    def regenerate_waveform(self):
+        """Force recalculation of waveform peaks by clearing disk cache and restarting generation."""
+        if not getattr(self, "audio_file", None):
+            return
+        invalidate_waveform_peak_cache(self.audio_file)
+        if hasattr(self, "timeline"):
+            self.timeline.set_waveform_peaks([])
+        self.log_activity("[WAVEFORM] Manually regenerating waveform from audio source...")
+        is_es = getattr(self, "language", "en") == "es"
+        self.statusBar().showMessage("Regenerando forma de onda..." if is_es else "Regenerating waveform...")
+        self.load_waveform_async()
+
+    def regenerate_video_thumbnails(self):
+        """Force regeneration of video filmstrip thumbnails."""
+        if not getattr(self, "audio_file", None) or not getattr(self, "current_media_is_video", False):
+            return
+        self.stop_video_thumbnail_worker()
+        if hasattr(self, "timeline"):
+            self.timeline.set_video_thumbnails([])
+        if getattr(self, "video_thumbnail_dir", None) and Path(self.video_thumbnail_dir).exists():
+            try:
+                shutil.rmtree(self.video_thumbnail_dir, ignore_errors=True)
+            except Exception:
+                pass
+            self.video_thumbnail_dir = None
+        self.log_activity("[MEDIA] Manually regenerating video thumbnails...")
+        is_es = getattr(self, "language", "en") == "es"
+        self.statusBar().showMessage("Regenerando miniaturas de video..." if is_es else "Regenerating video thumbnails...")
+        self.start_video_thumbnail_generation()
 
     def load_waveform_async(self):
         if not self.audio_file:
@@ -794,6 +843,7 @@ class MediaBatchMixin:
             "Set Story Start": "Fijar inicio de historia", "Set Story End": "Fijar fin de historia",
             "Add Story": "Agregar historia", "Split Story": "Dividir historia", "Merge Stories": "Combinar historias", "Delete Story": "Eliminar historia",
             "Update Selected Story": "Actualizar historia seleccionada", "Delete Selected Story": "Eliminar historia seleccionada",
+            "&Regenerate Waveform": "&Regenerar forma de onda", "Regenerate Video &Thumbnails": "Regenerar minia&turas de video",
             "Cancel Process": "Cancelar proceso", "Export Activity Log": "Exportar registro de actividad", "Clear Log": "Borrar registro", "Speaker Sensitivity": "Sensibilidad de hablantes",
             "▶ Play": "▶ Reproducir", "❚❚ Pause": "❚❚ Pausa", "■ Stop": "■ Detener",
         }
@@ -814,6 +864,113 @@ class MediaBatchMixin:
                 w.setTitle(active[w.title()])
         if hasattr(self, "transcript_search_input"):
             self.transcript_search_input.setPlaceholderText("Buscar en la transcripción..." if self.language == "es" else "Find in transcript...")
+        self.update_story_segment_terminology()
+
+    def update_story_segment_terminology(self):
+        """Update all user-facing labels and tooltips to use 'Segment' in Music mode and 'Story' in Voice mode."""
+        is_music = (getattr(self, "story_detection_mode", "voice") == "music")
+        is_es = (getattr(self, "language", "en") == "es")
+
+        # Header: "Stories" vs "Segments" (or "Historias" vs "Segmentos")
+        if hasattr(self, "stories_header") and self.stories_header is not None:
+            if is_music:
+                self.stories_header.setText("Segmentos" if is_es else "Segments")
+            else:
+                self.stories_header.setText("Historias" if is_es else "Stories")
+
+        # Add Story / Segment Button
+        if hasattr(self, "add_story_btn") and self.add_story_btn is not None:
+            if is_music:
+                self.add_story_btn.setText("Agregar segmento" if is_es else "Add Segment")
+                self.add_story_btn.setToolTip(
+                    "Agregar segmento desde la selección activa de la línea de tiempo o transcripción" if is_es
+                    else "Add segment from active timeline selection or highlighted transcript text"
+                )
+            else:
+                self.add_story_btn.setText("Agregar historia" if is_es else "Add Story")
+                self.add_story_btn.setToolTip(
+                    "Agregar historia desde la selección activa de la línea de tiempo o transcripción" if is_es
+                    else "Add story from active timeline selection or highlighted transcript text"
+                )
+
+        # Set Story / Segment Start Button
+        if hasattr(self, "set_story_start_btn") and self.set_story_start_btn is not None:
+            if is_music:
+                self.set_story_start_btn.setText("Fijar inicio de segmento" if is_es else "Set Segment Start")
+                self.set_story_start_btn.setToolTip(
+                    "Fijar inicio del segmento seleccionado a la posición actual de transcripción o línea de tiempo" if is_es
+                    else "Set start time of selected segment to current transcript or timeline position"
+                )
+            else:
+                self.set_story_start_btn.setText("Fijar inicio de historia" if is_es else "Set Story Start")
+                self.set_story_start_btn.setToolTip(
+                    "Fijar inicio de la historia seleccionada a la posición actual de transcripción o línea de tiempo" if is_es
+                    else "Set start time of selected story to current transcript or timeline position"
+                )
+
+        # Set Story / Segment End Button
+        if hasattr(self, "set_story_end_btn") and self.set_story_end_btn is not None:
+            if is_music:
+                self.set_story_end_btn.setText("Fijar fin de segmento" if is_es else "Set Segment End")
+                self.set_story_end_btn.setToolTip(
+                    "Fijar fin del segmento seleccionado a la posición actual de transcripción o línea de tiempo" if is_es
+                    else "Set end time of selected segment to current transcript or timeline position"
+                )
+            else:
+                self.set_story_end_btn.setText("Fijar fin de historia" if is_es else "Set Story End")
+                self.set_story_end_btn.setToolTip(
+                    "Fijar fin de la historia seleccionada a la posición actual de transcripción o línea de tiempo" if is_es
+                    else "Set end time of selected story to current transcript or timeline position"
+                )
+
+        # Title / Headline input placeholder
+        if hasattr(self, "title_input") and self.title_input is not None:
+            if is_music:
+                self.title_input.setPlaceholderText("Título / titular del segmento" if is_es else "Segment headline / title")
+            else:
+                self.title_input.setPlaceholderText("Título / titular de la historia" if is_es else "Story headline / title")
+
+        # Select All Tooltip
+        if hasattr(self, "select_all_stories_btn") and self.select_all_stories_btn is not None:
+            if is_music:
+                self.select_all_stories_btn.setToolTip("Seleccionar todos los segmentos de la lista" if is_es else "Select all segments in the list")
+            else:
+                self.select_all_stories_btn.setToolTip("Seleccionar todas las historias de la lista" if is_es else "Select all stories in the list")
+
+        # Delete Tooltip
+        if hasattr(self, "delete_story_btn") and self.delete_story_btn is not None:
+            if is_music:
+                self.delete_story_btn.setToolTip("Eliminar segmento(s) seleccionado(s)" if is_es else "Delete selected segment(s)")
+            else:
+                self.delete_story_btn.setToolTip("Eliminar historia(s) seleccionada(s)" if is_es else "Delete selected story/stories")
+
+        # Export Tooltip
+        if hasattr(self, "export_stories_btn") and self.export_stories_btn is not None:
+            if is_music:
+                self.export_stories_btn.setToolTip("Exportar episodio o segmentos seleccionados" if is_es else "Export full episode, selected segments, or draft to WordPress")
+            else:
+                self.export_stories_btn.setToolTip("Exportar episodio o historias seleccionadas" if is_es else "Export full episode, selected stories, or draft to WordPress")
+
+        # Tools Menu: Detect Stories / Detect Segments
+        if hasattr(self, "auto_detect_action") and self.auto_detect_action is not None:
+            has_stories = hasattr(self, "processing_status") and bool(self.processing_status.get("stories"))
+            if is_music:
+                if is_es:
+                    self.auto_detect_action.setText("&Detectar segmentos (Completado)" if has_stories else "&Detectar segmentos...")
+                else:
+                    self.auto_detect_action.setText("Detect Segments (Complete)" if has_stories else "&Detect Segments...")
+            else:
+                if is_es:
+                    self.auto_detect_action.setText("&Detectar historias (Completado)" if has_stories else "&Detectar historias...")
+                else:
+                    self.auto_detect_action.setText("Detect Stories (Complete)" if has_stories else "&Detect Stories...")
+
+        # View Menu: Stories Panel / Segments Panel
+        if hasattr(self, "toggle_stories_action") and self.toggle_stories_action is not None:
+            if is_music:
+                self.toggle_stories_action.setText("&Panel de segmentos" if is_es else "&Segments Panel")
+            else:
+                self.toggle_stories_action.setText("&Panel de historias" if is_es else "&Stories Panel")
 
     def open_document(self):
         filters = (
@@ -1058,6 +1215,10 @@ class MediaBatchMixin:
             self.auto_detect_action.setEnabled(True)
             self.transcribe_diarize_action.setEnabled(True)
             self.transcribe_diarize_detect_action.setEnabled(True)
+            if hasattr(self, "regen_waveform_action"):
+                self.regen_waveform_action.setEnabled(True)
+            if hasattr(self, "regen_thumbnails_action"):
+                self.regen_thumbnails_action.setEnabled(bool(self.current_media_is_video))
             self.save_action.setEnabled(True)
             if hasattr(self, "quick_save_button"):
                 self.quick_save_button.setEnabled(True)

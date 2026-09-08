@@ -265,7 +265,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "2.4.3"
+PROJECT_VERSION = "2.4.4"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -805,13 +805,16 @@ class StoryListWidget(QListWidget):
         item = self.itemAt(pos)
         if not item:
             return
+        win = self.window()
+        is_music = getattr(win, "story_detection_mode", "voice") == "music"
+        term = "Segment" if is_music else "Story"
         menu = QMenu(self)
-        export_action = menu.addAction("Export Story...")
+        export_action = menu.addAction(f"Export {term}...")
         export_action.triggered.connect(self.exportRequested.emit)
         wp_action = menu.addAction("Export Draft to WordPress...")
         wp_action.triggered.connect(self.exportStoryWordPressRequested.emit)
         menu.addSeparator()
-        delete_action = menu.addAction("Delete Story")
+        delete_action = menu.addAction(f"Delete {term}")
         delete_action.triggered.connect(self.deleteRequested.emit)
         menu.exec(self.mapToGlobal(pos))
 
@@ -1842,13 +1845,17 @@ class StoryAutoDetectWorker(QObject):
                 # Try Neural Silero VAD (ONNX or Torch)
                 try:
                     import torch
+                    import numpy as np
                     from silero_vad import load_silero_vad, get_speech_timestamps
                     try:
+                        if isinstance(audio_data, np.ndarray):
+                            if not audio_data.flags.writeable or not audio_data.flags.c_contiguous:
+                                audio_data = np.ascontiguousarray(audio_data, dtype=np.float32).copy()
                         wav = torch.from_numpy(audio_data)
-                    except (RuntimeError, UserWarning, AttributeError):
+                    except (RuntimeError, UserWarning, AttributeError, Exception):
                         try:
                             wav = torch.as_tensor(audio_data, dtype=torch.float32)
-                        except (RuntimeError, UserWarning, AttributeError):
+                        except (RuntimeError, UserWarning, AttributeError, Exception):
                             wav = torch.tensor(audio_data.tolist(), dtype=torch.float32)
                     try:
                         vad_model = load_silero_vad(onnx=True)
@@ -2041,7 +2048,7 @@ class StoryAutoDetectWorker(QObject):
                         detected_stories.append(Story(
                             start=round(st, 2),
                             end=round(et, 2),
-                            title=f"Song {len(detected_stories) + 1}"
+                            title=f"Segment {len(detected_stories) + 1}"
                         ))
 
             # Voice Mode or fallback if no music intervals detected
@@ -2221,6 +2228,18 @@ def write_waveform_peak_cache(audio_file, peaks, points_per_second=WAVEFORM_POIN
         os.replace(tmp_path, cache_path)
     except Exception:
         pass
+
+
+def invalidate_waveform_peak_cache(audio_file):
+    """Delete any cached waveform peak binary file for audio_file."""
+    try:
+        cache_path = get_waveform_peak_cache_path(audio_file)
+        if cache_path and cache_path.exists():
+            cache_path.unlink(missing_ok=True)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 class WaveformWorker(QObject):
@@ -2555,6 +2574,7 @@ class TimelineCanvas(QWidget):
     mediaDropped = Signal(str)
     selectionRangeChanged = Signal(object, object)
     storyCreatedFromSelection = Signal(float, float)
+    storyClicked = Signal(int)
 
     RULER_HEIGHT = 24
     EDGE_HANDLE_THRESHOLD = 8
@@ -2788,6 +2808,17 @@ class TimelineCanvas(QWidget):
                 return (index, 'end')
         return None
 
+    def find_story_at_time(self, time):
+        """Return the index of the story enclosing `time`, picking the most specific (shortest) if overlapping."""
+        candidates = []
+        for index, story in enumerate(self.stories):
+            if story.start <= time <= story.end:
+                candidates.append((story.end - story.start, index))
+        if candidates:
+            candidates.sort()
+            return candidates[0][1]
+        return None
+
     def is_near_playhead(self, pos_x, width):
         cursor_x = self.time_to_x(self.position, width)
         return abs(pos_x - cursor_x) <= self.CURSOR_GRAB_THRESHOLD
@@ -2899,6 +2930,9 @@ class TimelineCanvas(QWidget):
             self.is_scrubbing = True
             self.positionClicked.emit(time)
             self.scrubPositionChanged.emit(time)
+            story_idx = self.find_story_at_time(time)
+            if story_idx is not None:
+                self.storyClicked.emit(story_idx)
             event.accept()
             return
 
@@ -2992,6 +3026,11 @@ class TimelineCanvas(QWidget):
                         self.selection_start = None
                         self.selection_end = None
                         self.selectionRangeChanged.emit(None, None)
+                        self.update()
+                        gpos = event.globalPosition().toPoint() if hasattr(event, "globalPosition") else event.globalPos()
+                        self._show_timeline_context_menu(gpos, event.position().x())
+                        event.accept()
+                        return
                     else:
                         s = min(self.selection_start, self.selection_end)
                         e = max(self.selection_start, self.selection_end)
@@ -3018,14 +3057,84 @@ class TimelineCanvas(QWidget):
 
         super().mouseReleaseEvent(event)
 
+    def _show_timeline_context_menu(self, global_pos, pos_x):
+        win = self.window()
+        menu = QMenu(self)
+        width = self.width()
+        time = max(0, min(self.duration, self.x_to_time(pos_x, width)))
+        story_idx = self.find_story_at_time(time)
+
+        is_music = getattr(win, "story_detection_mode", "voice") == "music"
+        is_es = getattr(win, "language", "en") == "es"
+        term = ("Segmento" if is_es else "Segment") if is_music else ("Historia" if is_es else "Story")
+
+        select_action = None
+        delete_action = None
+        if story_idx is not None and 0 <= story_idx < len(self.stories):
+            select_action = menu.addAction(f"{('Seleccionar' if is_es else 'Select')} {term} #{story_idx + 1}")
+            delete_action = menu.addAction(f"{('Eliminar' if is_es else 'Delete')} {term} #{story_idx + 1}")
+            menu.addSeparator()
+
+        has_audio = bool(getattr(win, "audio_file", None))
+        has_video = bool(getattr(win, "current_media_is_video", False))
+
+        regen_wf_act = None
+        regen_th_act = None
+        if hasattr(win, "regenerate_waveform"):
+            label = "Regenerar forma de onda" if is_es else "Regenerate Waveform"
+            regen_wf_act = menu.addAction(label)
+            regen_wf_act.setEnabled(has_audio)
+
+        if hasattr(win, "regenerate_video_thumbnails"):
+            label = "Regenerar miniaturas de video" if is_es else "Regenerate Video Thumbnails"
+            regen_th_act = menu.addAction(label)
+            regen_th_act.setEnabled(has_audio and has_video)
+
+        if not menu.actions():
+            return
+
+        selected = menu.exec(global_pos)
+        if story_idx is not None and 0 <= story_idx < len(self.stories):
+            if select_action and selected == select_action:
+                self.storyClicked.emit(story_idx)
+            elif delete_action and selected == delete_action:
+                if hasattr(win, "apply_story_selection_indices") and hasattr(win, "delete_selected_story"):
+                    win.apply_story_selection_indices([story_idx], seek=False)
+                    win.delete_selected_story()
+        if regen_wf_act and selected == regen_wf_act:
+            win.regenerate_waveform()
+        elif regen_th_act and selected == regen_th_act:
+            win.regenerate_video_thumbnails()
+
     def _show_selection_context_menu(self, global_pos):
         if self.selection_start is None or self.selection_end is None:
             return
         s = min(self.selection_start, self.selection_end)
         e = max(self.selection_start, self.selection_end)
+        win = self.window()
+        is_music = getattr(win, "story_detection_mode", "voice") == "music"
+        is_es = getattr(win, "language", "en") == "es"
+        term = ("Segmento" if is_es else "Segment") if is_music else ("Historia" if is_es else "Story")
         menu = QMenu(self)
-        add_action = menu.addAction("Add Story from Selection")
-        clear_action = menu.addAction("Clear Selection")
+        add_action = menu.addAction(f"{('Agregar' if is_es else 'Add')} {term} {('desde la selección' if is_es else 'from Selection')}")
+        clear_action = menu.addAction("Borrar selección" if is_es else "Clear Selection")
+
+        menu.addSeparator()
+        has_audio = bool(getattr(win, "audio_file", None))
+        has_video = bool(getattr(win, "current_media_is_video", False))
+
+        regen_wf_act = None
+        regen_th_act = None
+        if hasattr(win, "regenerate_waveform"):
+            label = "Regenerar forma de onda" if is_es else "Regenerate Waveform"
+            regen_wf_act = menu.addAction(label)
+            regen_wf_act.setEnabled(has_audio)
+
+        if hasattr(win, "regenerate_video_thumbnails"):
+            label = "Regenerar miniaturas de video" if is_es else "Regenerate Video Thumbnails"
+            regen_th_act = menu.addAction(label)
+            regen_th_act.setEnabled(has_audio and has_video)
+
         selected = menu.exec(global_pos)
         if selected == add_action:
             self.storyCreatedFromSelection.emit(s, e)
@@ -3034,6 +3143,10 @@ class TimelineCanvas(QWidget):
             self.selection_end = None
             self.selectionRangeChanged.emit(None, None)
             self.update()
+        elif regen_wf_act and selected == regen_wf_act:
+            win.regenerate_waveform()
+        elif regen_th_act and selected == regen_th_act:
+            win.regenerate_video_thumbnails()
 
     def keyPressEvent(self, event):
         if event.matches(QKeySequence.StandardKey.Undo):
@@ -3443,6 +3556,7 @@ class TimelineWidget(QWidget):
 
         self.selectionRangeChanged = self.canvas.selectionRangeChanged
         self.storyCreatedFromSelection = self.canvas.storyCreatedFromSelection
+        self.storyClicked = self.canvas.storyClicked
 
         self.is_internal_scrollbar_update = False
         self.update_scrollbar_range()

@@ -146,16 +146,20 @@ _setup_windows_dll_directories()
 def _safe_tensor_from_numpy(arr):
     """Safely convert a numpy float32 array into a PyTorch tensor.
     Works even if PyTorch's native C-extension numpy bridge fails to locate
-    the NumPy C-API symbols ('numpy.core._multiarray_umath').
+    the NumPy C-API symbols ('numpy.core._multiarray_umath') or if the array is read-only.
     """
     import torch
+    import numpy as np
     try:
+        if isinstance(arr, np.ndarray):
+            if not arr.flags.writeable or not arr.flags.c_contiguous:
+                arr = np.ascontiguousarray(arr, dtype=np.float32).copy()
         return torch.from_numpy(arr)
-    except (RuntimeError, UserWarning, AttributeError):
+    except (RuntimeError, UserWarning, AttributeError, Exception):
         pass
     try:
         return torch.as_tensor(arr, dtype=torch.float32)
-    except (RuntimeError, UserWarning, AttributeError):
+    except (RuntimeError, UserWarning, AttributeError, Exception):
         pass
     return torch.tensor(arr.tolist(), dtype=torch.float32)
 
