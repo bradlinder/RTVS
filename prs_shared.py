@@ -20,6 +20,9 @@ import tempfile
 from pathlib import Path
 
 from theme_tokens import ThemeTokens
+from bootstrap import setup_windows_dll_directories
+
+setup_windows_dll_directories()
 
 from docx import Document
 from docx.shared import Pt, RGBColor
@@ -239,7 +242,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "2.1.1"
+PROJECT_VERSION = "2.1.2"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -1761,38 +1764,55 @@ class StoryAutoDetectWorker(QObject):
             if not self.audio_file or not os.path.isfile(self.audio_file):
                 raise FileNotFoundError(f"Audio file not found: {self.audio_file}")
 
-            self._emit_progress("[Step 1/2] Detecting speech activity with Silero VAD...", 25)
+            self._emit_progress("[Step 1/2] Detecting speech activity...", 25)
 
-            import soundfile as sf
-            import torch
-            from silero_vad import load_silero_vad, get_speech_timestamps
+            speech_timestamps = None
+            total_dur = self.audio_duration
 
-            audio_data, sample_rate = sf.read(str(self.audio_file), dtype="float32")
-            wav = torch.from_numpy(audio_data)
-            if wav.ndim > 1:
-                wav = wav.mean(dim=-1)
+            try:
+                setup_windows_dll_directories()
+                import soundfile as sf
+                import torch
+                from silero_vad import load_silero_vad, get_speech_timestamps
 
-            if sample_rate != 16000:
-                import torchaudio
-                resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
-                wav = resampler(wav)
-                sample_rate = 16000
+                audio_data, sample_rate = sf.read(str(self.audio_file), dtype="float32")
+                wav = torch.from_numpy(audio_data)
+                if wav.ndim > 1:
+                    wav = wav.mean(dim=-1)
 
-            vad_model = load_silero_vad()
-            
-            # Use the user's silence threshold from Preferences to define story breaks
-            min_silence_ms = max(800, int(self.silence_threshold * 800))
-            
-            speech_timestamps = get_speech_timestamps(
-                wav,
-                vad_model,
-                sampling_rate=16000,
-                min_speech_duration_ms=300,
-                min_silence_duration_ms=min_silence_ms,
-                return_seconds=True
-            )
+                if sample_rate != 16000:
+                    import torchaudio
+                    resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
+                    wav = resampler(wav)
+                    sample_rate = 16000
 
-            total_dur = max(float(len(wav)) / 16000.0, self.audio_duration)
+                vad_model = load_silero_vad()
+                
+                # Use the user's silence threshold from Preferences to define story breaks
+                min_silence_ms = max(800, int(self.silence_threshold * 800))
+                
+                speech_timestamps = get_speech_timestamps(
+                    wav,
+                    vad_model,
+                    sampling_rate=16000,
+                    min_speech_duration_ms=300,
+                    min_silence_duration_ms=min_silence_ms,
+                    return_seconds=True
+                )
+                total_dur = max(float(len(wav)) / 16000.0, self.audio_duration)
+            except Exception as vad_err:
+                # If VAD fails or neural dependencies fail to load, fallback to transcript timestamps if available
+                if self.transcript_segments:
+                    speech_timestamps = []
+                    for seg in self.transcript_segments:
+                        text = seg.get("text", "")
+                        if self._is_real_speech(text):
+                            speech_timestamps.append({
+                                "start": float(seg.get("start", 0.0)),
+                                "end": float(seg.get("end", 0.0)),
+                            })
+                else:
+                    raise vad_err
 
             if speech_timestamps:
                 self._emit_progress("[Step 2/2] Assembling stories from vocal intervals...", 85)
@@ -2001,10 +2021,12 @@ class WaveformWorker(QObject):
             # envelope is retained in memory.
             effective_pps = int(self.points_per_second)
             try:
+                creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                 probe = subprocess.run(
                     [ffprobe_path() or "ffprobe", "-v", "error", "-show_entries", "format=duration",
                      "-of", "default=noprint_wrappers=1:nokey=1", self.audio_file],
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=10, check=True,
+                    creationflags=creationflags,
                 )
                 duration = float(probe.stdout.strip() or 0)
                 max_points = 800_000
@@ -2024,6 +2046,7 @@ class WaveformWorker(QObject):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 bufsize=1024 * 1024,
+                creationflags=creationflags,
             )
             self._process = process
 
@@ -2259,7 +2282,8 @@ class VideoThumbnailWorker(QObject):
             vf = f"fps={fps:.8f},scale=180:-2:force_original_aspect_ratio=decrease"
             pattern = str(self.output_dir / "thumb_%03d.jpg")
             cmd = [ffmpeg_path() or "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(self.media_path), "-vf", vf, "-q:v", "4", pattern]
-            self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
             _stdout, stderr = self._process.communicate()
             returncode = self._process.returncode
             if self._cancelled:
@@ -3468,6 +3492,7 @@ class TranslationWorker(QObject):
 
         # Convert HF model to CTranslate2 INT8 model
         self.progress.emit(7, "Optimizing translation engine for fast CPU execution…")
+        setup_windows_dll_directories()
         import ctranslate2
         from ctranslate2.converters import TransformersConverter
 
@@ -3499,6 +3524,8 @@ class TranslationWorker(QObject):
 
         model_dir = Path(self.model_dir(self.from_code, self.to_code, self.model_variant))
         self.model_dir_path = model_dir
+
+        setup_windows_dll_directories()
 
         # Try fast CTranslate2 engine first
         try:
@@ -3822,7 +3849,7 @@ class BatchProcessingDialog(QDialog):
         self.batch_gap_spin.setRange(0.5, 30.0)
         self.batch_gap_spin.setSingleStep(0.5)
         self.batch_gap_spin.setSuffix(" sec")
-        self.batch_gap_spin.setValue(1.5)
+        self.batch_gap_spin.setValue(3.0)
         stories_row.addWidget(self.batch_gap_spin)
         stories_row.addWidget(QLabel("Lead-in:"))
         self.batch_pad_spin = QDoubleSpinBox()
@@ -4004,7 +4031,7 @@ class BatchProcessingDialog(QDialog):
         if idx_exp >= 0:
             self.batch_expected_speakers_combo.setCurrentIndex(idx_exp)
         try:
-            self.batch_gap_spin.setValue(float(settings.value("batch_opt_story_gap", 1.5) or 1.5))
+            self.batch_gap_spin.setValue(float(settings.value("batch_opt_story_gap", 3.0) or 3.0))
             self.batch_pad_spin.setValue(float(settings.value("batch_opt_story_pad", 0.2) or 0.2))
         except (TypeError, ValueError):
             pass
@@ -4073,7 +4100,7 @@ class BatchProcessingDialog(QDialog):
         idx_exp = self.batch_expected_speakers_combo.findData("auto")
         if idx_exp >= 0:
             self.batch_expected_speakers_combo.setCurrentIndex(idx_exp)
-        self.batch_gap_spin.setValue(1.5)
+        self.batch_gap_spin.setValue(3.0)
         self.batch_pad_spin.setValue(0.2)
         idx_dir = self.batch_translate_direction_combo.findData("auto")
         if idx_dir >= 0:

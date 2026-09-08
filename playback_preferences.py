@@ -774,7 +774,8 @@ class PlaybackPreferencesMixin:
                 try:
                     os.startfile(str(folder))
                 except Exception:
-                    subprocess.Popen(['explorer', str(folder)])
+                    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    subprocess.Popen(['explorer', str(folder)], creationflags=creationflags)
             elif sys.platform == "darwin":
                 subprocess.Popen(["open", str(folder)])
             else:
@@ -2705,6 +2706,9 @@ class PlaybackPreferencesMixin:
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.silence_threshold = thresh_box.value()
             self.lead_in_padding = pad_box.value()
+            if hasattr(self, "settings_store") and self.settings_store is not None:
+                self.settings_store.setValue("silence_threshold", self.silence_threshold)
+                self.settings_store.setValue("lead_in_padding", self.lead_in_padding)
             self.log_activity(f"[SETTINGS] Thresholds set: Gap={self.silence_threshold}s, Padding={self.lead_in_padding}s.")
             self.statusBar().showMessage(f"Thresholds updated: {self.silence_threshold}s silence gap, {self.lead_in_padding}s padding.")
 

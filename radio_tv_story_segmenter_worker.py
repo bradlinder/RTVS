@@ -42,16 +42,96 @@ def _clamp_diarization_thread_env():
 
 _clamp_diarization_thread_env()
 
-if sys.platform == "win32":
-    # Ensure Windows locates torch C-runtime dependencies (_C.pyd, torch_cpu.dll)
+def _setup_windows_dll_directories():
+    """Register native DLL directories (PyTorch, CTranslate2, ONNX Runtime, etc.)
+    on Windows before importing C-extensions or ML frameworks.
+    """
+    if sys.platform != "win32":
+        return
+
+    candidate_dirs = set()
+
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            meipass_path = Path(meipass)
+            candidate_dirs.add(meipass_path)
+            candidate_dirs.add(meipass_path / "torch" / "lib")
+            candidate_dirs.add(meipass_path / "torch")
+            candidate_dirs.add(meipass_path / "torchaudio" / "lib")
+            candidate_dirs.add(meipass_path / "ctranslate2")
+            candidate_dirs.add(meipass_path / "onnxruntime" / "capi")
+            candidate_dirs.add(meipass_path / "sherpa_onnx" / "lib")
+            candidate_dirs.add(meipass_path / "sherpa_onnx")
+
+        exe_dir = Path(sys.executable).parent
+        candidate_dirs.add(exe_dir)
+        candidate_dirs.add(exe_dir / "_internal")
+        candidate_dirs.add(exe_dir / "_internal" / "torch" / "lib")
+        candidate_dirs.add(exe_dir / "_internal" / "torch")
+        candidate_dirs.add(exe_dir / "_internal" / "torchaudio" / "lib")
+        candidate_dirs.add(exe_dir / "torch" / "lib")
+        candidate_dirs.add(exe_dir / "torch")
+
+    for entry in list(sys.path):
+        if not entry:
+            continue
+        try:
+            p = Path(entry)
+            if not p.is_dir():
+                continue
+            candidate_dirs.add(p)
+            candidate_dirs.add(p / "torch" / "lib")
+            candidate_dirs.add(p / "torch")
+            candidate_dirs.add(p / "torchaudio" / "lib")
+            candidate_dirs.add(p / "ctranslate2")
+            candidate_dirs.add(p / "onnxruntime" / "capi")
+            candidate_dirs.add(p / "sherpa_onnx" / "lib")
+            candidate_dirs.add(p / "sherpa_onnx")
+        except Exception:
+            continue
+
     try:
-        import torch
-        if hasattr(os, "add_dll_directory"):
-            torch_lib = Path(torch.__file__).parent / "lib"
-            if torch_lib.is_dir():
-                os.add_dll_directory(str(torch_lib))
+        prefix = Path(sys.prefix)
+        candidate_dirs.add(prefix / "bin")
+        candidate_dirs.add(prefix / "Library" / "bin")
+        candidate_dirs.add(prefix / "Lib" / "site-packages" / "torch" / "lib")
+        candidate_dirs.add(prefix / "Lib" / "site-packages" / "torchaudio" / "lib")
+        candidate_dirs.add(prefix / "Lib" / "site-packages" / "ctranslate2")
+        candidate_dirs.add(prefix / "Lib" / "site-packages" / "onnxruntime" / "capi")
     except Exception:
         pass
+
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("torch")
+        if spec and spec.origin:
+            torch_root = Path(spec.origin).parent
+            candidate_dirs.add(torch_root / "lib")
+            candidate_dirs.add(torch_root)
+    except Exception:
+        pass
+
+    added_paths = []
+    for d in candidate_dirs:
+        try:
+            resolved = d.resolve()
+            if resolved.is_dir():
+                str_path = str(resolved)
+                if hasattr(os, "add_dll_directory"):
+                    try:
+                        os.add_dll_directory(str_path)
+                    except Exception:
+                        pass
+                added_paths.append(str_path)
+        except Exception:
+            continue
+
+    if added_paths:
+        current_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = os.pathsep.join(added_paths) + os.pathsep + current_path
+
+_setup_windows_dll_directories()
 
 PROTOCOL_VERSION = "1.0"
 CAPABILITIES = ["transcribe", "diarize"]
@@ -229,8 +309,11 @@ def transcribe_parakeet_onnx(audio_file):
             chunk_indices.append((start_idx, cut_point))
             start_idx = cut_point
 
-        token_list = []
-        timestamp_list = []
+        def is_word_boundary(token_str):
+            return str(token_str).startswith(("▁", " ", "\t", "\n"))
+
+        all_segments = []
+        all_words = []
         text_parts = []
         total_chunks = len(chunk_indices)
 
@@ -255,89 +338,113 @@ def transcribe_parakeet_onnx(audio_file):
             if c_text:
                 text_parts.append(c_text)
 
+            chunk_words = []
             if c_tokens and c_timestamps and len(c_tokens) == len(c_timestamps):
                 # Ensure the first token of a new chunk is parsed as a word boundary
-                if token_list and not str(c_tokens[0]).startswith(("▁", " ", "\t", "\n")):
+                if not is_word_boundary(c_tokens[0]):
                     c_tokens[0] = " " + str(c_tokens[0])
 
+                token_groups = []
+                current = []
                 for tok, ts in zip(c_tokens, c_timestamps):
-                    token_list.append(tok)
-                    timestamp_list.append(round(chunk_start_sec + max(0.0, float(ts)), 2))
-
-        text = " ".join(text_parts).strip() or "(silence)"
-
-        segments = []
-        words = []
-        if token_list and timestamp_list and len(token_list) == len(timestamp_list):
-            normalized_tokens = [str(t) for t in token_list]
-            token_times = [max(0.0, float(t)) for t in timestamp_list]
-
-            def is_word_boundary(token):
-                return token.startswith(("▁", " ", "\t", "\n"))
-
-            token_groups = []
-            current = []
-            for token, ts in zip(normalized_tokens, token_times):
-                if is_word_boundary(token) and current:
+                    s_tok = str(tok)
+                    abs_ts = round(chunk_start_sec + max(0.0, float(ts)), 2)
+                    if is_word_boundary(s_tok) and current:
+                        token_groups.append(current)
+                        current = []
+                    current.append((s_tok.lstrip("▁ \t\n"), abs_ts))
+                if current:
                     token_groups.append(current)
-                    current = []
-                current.append((token.lstrip("▁ \t\n"), ts))
-            if current:
-                token_groups.append(current)
 
-            for group_idx, group in enumerate(token_groups):
-                word_text = "".join(part for part, _ in group).strip()
-                if not word_text:
-                    continue
-                word_start = group[0][1]
-                if group_idx + 1 < len(token_groups):
-                    word_end = token_groups[group_idx + 1][0][1]
-                else:
-                    word_end = min(duration_sec, word_start + 0.35)
-                if word_end <= word_start:
-                    word_end = min(duration_sec, word_start + 0.05)
-                words.append({
-                    "word": word_text,
-                    "start": round(word_start, 2),
-                    "end": round(word_end, 2),
-                    "probability": 0.95,
-                })
+                for group_idx, group in enumerate(token_groups):
+                    word_text = "".join(part for part, _ in group).strip()
+                    if not word_text:
+                        continue
+                    word_start = group[0][1]
+                    if group_idx + 1 < len(token_groups):
+                        word_end = token_groups[group_idx + 1][0][1]
+                    else:
+                        word_end = min(duration_sec, min(chunk_end_sec, word_start + 0.35))
+                    if word_end <= word_start:
+                        word_end = min(duration_sec, word_start + 0.05)
+                    chunk_words.append({
+                        "word": word_text,
+                        "start": round(word_start, 2),
+                        "end": round(word_end, 2),
+                        "probability": 0.95,
+                    })
+            elif c_text:
+                raw_words = c_text.split()
+                step = max(0.05, (chunk_end_sec - chunk_start_sec) / max(1, len(raw_words)))
+                for i, w in enumerate(raw_words):
+                    w_start = chunk_start_sec + (i * step)
+                    w_end = min(duration_sec, chunk_start_sec + ((i + 1) * step))
+                    chunk_words.append({
+                        "word": w,
+                        "start": round(w_start, 2),
+                        "end": round(w_end, 2),
+                        "probability": 0.95,
+                    })
 
-            current_words = []
-            for word in words:
-                gap = (word["start"] - current_words[-1]["end"]) if current_words else 0.0
-                current_words.append(word)
-                sentence_end = word["word"].rstrip().endswith((".", "?", "!"))
-                too_many = len(current_words) >= 12
-                long_gap = gap >= 1.0 and len(current_words) > 1
-                if sentence_end or too_many or long_gap:
-                    segments.append({
+            if chunk_words:
+                all_words.extend(chunk_words)
+                current_words = []
+                for word in chunk_words:
+                    gap = (word["start"] - current_words[-1]["end"]) if current_words else 0.0
+                    current_words.append(word)
+                    sentence_end = word["word"].rstrip().endswith((".", "?", "!"))
+                    too_many = len(current_words) >= 12
+                    long_gap = gap >= 1.0 and len(current_words) > 1
+                    if sentence_end or too_many or long_gap:
+                        seg_data = {
+                            "start": round(current_words[0]["start"], 2),
+                            "end": round(min(duration_sec, max(current_words[-1]["end"], current_words[0]["start"] + 0.05)), 2),
+                            "text": " ".join(w["word"] for w in current_words),
+                            "words": current_words,
+                        }
+                        all_segments.append(seg_data)
+                        emit("streaming_segment", segment=seg_data)
+                        current_words = []
+                if current_words:
+                    seg_data = {
                         "start": round(current_words[0]["start"], 2),
                         "end": round(min(duration_sec, max(current_words[-1]["end"], current_words[0]["start"] + 0.05)), 2),
                         "text": " ".join(w["word"] for w in current_words),
                         "words": current_words,
-                    })
-                    current_words = []
-            if current_words:
-                segments.append({
-                    "start": round(current_words[0]["start"], 2),
-                    "end": round(min(duration_sec, max(current_words[-1]["end"], current_words[0]["start"] + 0.05)), 2),
-                    "text": " ".join(w["word"] for w in current_words),
-                    "words": current_words,
-                })
+                    }
+                    all_segments.append(seg_data)
+                    emit("streaming_segment", segment=seg_data)
 
-        if not segments:
-            words_raw = text.split(); step = duration_sec / max(1, len(words_raw))
+        text = " ".join(text_parts).strip() or "(silence)"
+
+        if not all_segments:
+            words_raw = text.split()
+            step = duration_sec / max(1, len(words_raw)) if words_raw else 1.0
             words = [{"word": w, "start": round(i * step, 2), "end": round(min(duration_sec, (i + 1) * step), 2), "probability": 0.95}
                      for i, w in enumerate(words_raw)]
-            for off in range(0, len(words), 12):
-                group = words[off:off + 12]
-                segments.append({"start": group[0]["start"], "end": group[-1]["end"],
-                                 "text": " ".join(w["word"] for w in group), "words": group})
+            if words:
+                for off in range(0, len(words), 12):
+                    group = words[off:off + 12]
+                    seg_data = {
+                        "start": group[0]["start"],
+                        "end": group[-1]["end"],
+                        "text": " ".join(w["word"] for w in group),
+                        "words": group,
+                    }
+                    all_segments.append(seg_data)
+                    emit("streaming_segment", segment=seg_data)
+            else:
+                seg_data = {
+                    "start": 0.0,
+                    "end": round(duration_sec, 2),
+                    "text": "(silence)",
+                    "words": [],
+                }
+                all_segments.append(seg_data)
+                emit("streaming_segment", segment=seg_data)
 
-        for segment in segments: emit("streaming_segment", segment=segment)
         emit("progress", percent=100, message="Parakeet ONNX transcription complete.")
-        emit("finished", result={"text": text, "segments": segments, "language": "en"})
+        emit("finished", result={"text": text, "segments": all_segments, "language": "en"})
         return 0
     except Exception as exc:
         emit("error", message=f"Parakeet ONNX error: {type(exc).__name__}: {exc}\n\n{traceback.format_exc()}")
@@ -504,6 +611,7 @@ def normalize_audio_for_diarization(source_path):
         str(wav_path),
     ]
     try:
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
         result = subprocess.run(
             command,
             stdout=subprocess.PIPE,
@@ -512,6 +620,7 @@ def normalize_audio_for_diarization(source_path):
             encoding="utf-8",
             errors="replace",
             timeout=900,
+            creationflags=creationflags,
         )
     except subprocess.TimeoutExpired as exc:
         temp_dir.cleanup()
@@ -852,11 +961,23 @@ def run_vad_two_pass(
     Merges adjacent VAD speech intervals separated by pauses under 250ms,
     eliminating micro-slicing while preserving natural phrase boundaries.
     """
-    from silero_vad import get_speech_timestamps, load_silero_vad, read_audio
+    import soundfile as sf
+    import torch
+    from silero_vad import get_speech_timestamps, load_silero_vad
     from diarize.utils import SpeechSegment
 
+    data, sample_rate = sf.read(str(audio_path), dtype="float32")
+    wav = torch.from_numpy(data)
+    if wav.ndim > 1:
+        wav = wav.mean(dim=-1)
+
+    if sample_rate != 16000:
+        import torchaudio
+        resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
+        wav = resampler(wav)
+        sample_rate = 16000
+
     vad_model = load_silero_vad()
-    wav = read_audio(str(audio_path))
     speech_timestamps = get_speech_timestamps(
         wav,
         vad_model,
@@ -1165,13 +1286,19 @@ def diarize(audio_file, expected_speakers="auto", transcript_file=None):
         emit("warning", message=f"Could not patch torchaudio.load: {exc}")
 
     try:
-        from diarize import diarize as diarize_fn
+        import diarize
         import diarize.embeddings
         import diarize.vad
+        from diarize import diarize as diarize_fn
 
         apply_clustering_patches()
         diarize.embeddings.extract_embeddings = extract_embeddings_batched
+        diarize.extract_embeddings = extract_embeddings_batched
         diarize.vad.run_vad = run_vad_two_pass
+        diarize.run_vad = run_vad_two_pass
+        if hasattr(diarize_fn, "__globals__"):
+            diarize_fn.__globals__["run_vad"] = run_vad_two_pass
+            diarize_fn.__globals__["extract_embeddings"] = extract_embeddings_batched
     except Exception as exc:
         emit("error", message=f"Could not load the local diarization package: {type(exc).__name__}: {exc}")
         return 3

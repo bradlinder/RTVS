@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -574,7 +575,8 @@ class WordPressExportMixin:
                 if needs_clip:
                     cmd += ["-ss", str(start), "-to", str(end)]
                 cmd += ["-i", str(audio_src), "-vn", "-c:a", "libmp3lame", "-b:a", "128k", str(temp_audio)]
-                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creationflags)
                 if res.returncode != 0 or not temp_audio.is_file() or temp_audio.stat().st_size == 0:
                     detail = res.stderr.decode("utf-8", errors="replace")[-1200:]
                     raise RuntimeError(f"FFmpeg WAV-to-MP3 conversion failed: {detail}")

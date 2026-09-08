@@ -11,10 +11,12 @@ class MediaBatchMixin:
     def probe_media_duration(self, path):
         """Probe duration locally so video timelines can be populated immediately."""
         try:
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             result = subprocess.run(
                 [ffprobe_path() or "ffprobe", "-v", "error", "-show_entries", "format=duration",
                  "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5, check=True,
+                creationflags=creationflags,
             )
             value = float(result.stdout.strip())
             return value if value > 0 else None

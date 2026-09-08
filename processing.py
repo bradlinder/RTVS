@@ -1778,6 +1778,7 @@ class ProcessingMixin:
         if message == "Process canceled by user.":
             self.statusBar().showMessage("Story detection canceled by user.")
         else:
+            self.log_activity(f"[STORY DETECT] Error: {message}")
             self.log_activity(
                 "[AUTOMATION] Story Detection failed. Run All Processing can resume from completed stages after the error is addressed."
             )

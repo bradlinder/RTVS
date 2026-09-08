@@ -136,9 +136,11 @@ def find_tool(name: str) -> str:
 
 def check_cpu_only_torch() -> None:
     try:
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
         result = subprocess.run(
             [sys.executable, "-c", "import torch; print(torch.version.cuda or '')"],
             capture_output=True, text=True, check=True,
+            creationflags=creationflags,
         )
         cuda_version = result.stdout.strip()
     except Exception:
@@ -164,7 +166,8 @@ def check_cpu_only_torch() -> None:
 
 def run(cmd: list[str]) -> None:
     print("[BUILD]", " ".join(map(str, cmd)))
-    subprocess.run(cmd, cwd=ROOT, check=True)
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+    subprocess.run(cmd, cwd=ROOT, check=True, creationflags=creationflags)
 
 
 def provision_optional_runtime_tools(app_root: Path) -> None:
@@ -309,14 +312,16 @@ def main() -> None:
         "--collect-all", "tokenizers",
         "--collect-all", "huggingface_hub",
         "--collect-all", "torch",
-        "--collect-binaries", "torch",      # <--- Add this line
-        "--copy-metadata", "torch",        # <--- Add this line
+        "--collect-binaries", "torch",
+        "--copy-metadata", "torch",
         "--collect-all", "torchaudio",
-        "--collect-binaries", "torchaudio", # <--- Add this line
+        "--collect-binaries", "torchaudio",
         "--collect-all", "sentencepiece",
         "--collect-all", "soundfile",
         "--collect-all", "diarize",
-        "--collect-all", "silero_vad",      # <--- Add this line
+        "--collect-all", "silero_vad",
+        "--collect-all", "wespeakerruntime",
+        "--collect-all", "sklearn",
         "--collect-all", "keyring",
         "--collect-all", "docx",
         "--collect-all", "onnxruntime",

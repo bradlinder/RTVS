@@ -2663,7 +2663,8 @@ class ProjectExportMixin:
 
         ext = output_file.suffix.lower()
         copy_cmd = [ffmpeg_path() or "ffmpeg", "-y", "-ss", str(start), "-i", str(self.audio_file), "-t", str(duration), "-map", "0", "-c", "copy", str(output_file)]
-        result = subprocess.run(copy_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=600)
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        result = subprocess.run(copy_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=600, creationflags=creationflags)
         if result.returncode == 0:
             return
 
@@ -2681,7 +2682,7 @@ class ProjectExportMixin:
         if codec_args is None:
             raise RuntimeError(f"Could not export media in the original format ({ext or 'unknown'}).\n\n{result.stderr}")
         transcode_cmd = [ffmpeg_path() or "ffmpeg", "-y", "-ss", str(start), "-i", str(self.audio_file), "-t", str(duration), "-map", "0"] + codec_args + [str(output_file)]
-        result2 = subprocess.run(transcode_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1800)
+        result2 = subprocess.run(transcode_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1800, creationflags=creationflags)
         if result2.returncode != 0:
             raise RuntimeError(result2.stderr or result.stderr)
 
@@ -2690,12 +2691,14 @@ class ProjectExportMixin:
         duration=end-start
         command=[ffmpeg_path() or "ffmpeg","-y","-ss",str(start),"-i",str(self.audio_file),"-t",str(duration),"-vn","-codec:a","libmp3lame","-q:a","2",str(output_file)]
 
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
         result = subprocess.run(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             timeout=600,
+            creationflags=creationflags,
         )
 
         if result.returncode != 0:

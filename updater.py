@@ -55,7 +55,7 @@ try:
     )
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.1.1"
+    PROJECT_VERSION = "2.1.2"
     DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
     INTERNAL_APP_ID = "RadioTVStorySegmenter"
 
@@ -317,7 +317,8 @@ def launch_and_install(file_path: str, parent: QWidget | None = None) -> bool:
 
     if sys.platform == "win32":
         try:
-            subprocess.Popen([str(path)])
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            subprocess.Popen([str(path)], creationflags=creationflags)
             return True
         except Exception as exc:
             if parent:

@@ -101,8 +101,10 @@ def detect_nvidia_gpu() -> bool:
     if not nvidia_smi:
         return False
     try:
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
         result = subprocess.run(
             [nvidia_smi, "-L"], capture_output=True, text=True, timeout=5,
+            creationflags=creationflags,
         )
         return result.returncode == 0 and "GPU" in result.stdout
     except Exception:
@@ -158,9 +160,11 @@ class RuntimeManager:
             py_launcher = shutil.which("py")
             if py_launcher:
                 try:
+                    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
                     res = subprocess.run(
                         [py_launcher, f"-{target_version}", "-c", "import sys; print(sys.executable)"],
-                        capture_output=True, text=True, check=True
+                        capture_output=True, text=True, check=True,
+                        creationflags=creationflags
                     )
                     exe = res.stdout.strip()
                     if Path(exe).exists():
@@ -210,10 +214,11 @@ class RuntimeManager:
         try:
             if progress_cb:
                 progress_cb(f"Preparing private Python {target_version} runtime…")
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             subprocess.run([str(uv), "python", "install", target_version], check=True, env=env,
-                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=creationflags)
             res = subprocess.run([str(uv), "python", "find", target_version], check=True, env=env,
-                                 capture_output=True, text=True)
+                                 capture_output=True, text=True, creationflags=creationflags)
             exe = res.stdout.strip().splitlines()[-1] if res.stdout.strip() else ""
             return exe if exe and Path(exe).exists() else ""
         except Exception as exc:
@@ -292,15 +297,16 @@ class RuntimeManager:
 
         try:
             uv = self.bundled_uv_path()
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             if uv:
                 # uv creates a venv without requiring pip to be bundled in the managed Python.
-                subprocess.run([str(uv), "venv", "--python", python_binary, str(env_dir)], check=True)
+                subprocess.run([str(uv), "venv", "--python", python_binary, str(env_dir)], check=True, creationflags=creationflags)
                 env_py = str(self._get_raw_executable(feature_name))
                 if progress_cb:
                     progress_cb(f"Installing dependencies for '{feature_name}'…")
                 cmd_pip = [str(uv), "pip", "install", "--python", env_py, "--no-cache", "--upgrade"]
             else:
-                subprocess.run([python_binary, "-m", "venv", str(env_dir)], check=True)
+                subprocess.run([python_binary, "-m", "venv", str(env_dir)], check=True, creationflags=creationflags)
                 env_py = str(self._get_raw_executable(feature_name))
                 if progress_cb:
                     progress_cb(f"Installing dependencies for '{feature_name}'…")
@@ -309,7 +315,7 @@ class RuntimeManager:
             if extra_index_url:
                 cmd_pip += ["--extra-index-url", extra_index_url]
             cmd_pip += config["packages"]
-            subprocess.run(cmd_pip, check=True)
+            subprocess.run(cmd_pip, check=True, creationflags=creationflags)
 
             # Record manifest for future version checks
             self.write_manifest(feature_name, python_binary)

@@ -316,14 +316,7 @@ class TranslationMixin:
         if hasattr(self, "cancel_button") and self.cancel_button is not None:
             self.cancel_button.hide()
 
-        # Switch view to Spanish to show the result
-        self.translation_display_mode = "es"
-        if hasattr(self, "transcript_language_selector") and self.transcript_language_selector is not None:
-            idx = self.transcript_language_selector.findData("es")
-            if idx >= 0:
-                self.transcript_language_selector.blockSignals(True)
-                self.transcript_language_selector.setCurrentIndex(idx)
-                self.transcript_language_selector.blockSignals(False)
+        # Maintain the current language view until the user selects a different view
         self.render_transcript()
 
         if getattr(self, "pipeline_active", False) and getattr(self, "pipeline_queue", []):
