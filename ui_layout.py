@@ -40,6 +40,7 @@ from prs_shared import (
     StoryListWidget,
     TimelineWidget,
     ffmpeg_path,
+    ffprobe_path,
     format_time,
     platform_seq,
     safe_filename,

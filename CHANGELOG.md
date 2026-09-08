@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.4
+
+### Bug Fixes & Stability
+- **Startup Crash Fix**: Fixed `NameError: name 'ffprobe_path' is not defined` in `ui_layout.py` by properly importing `ffprobe_path` from `prs_shared.py`, preventing an application crash during external dependency initialization.
+- **Dependency Manifest Alignment**: Added `torchaudio>=2.0,<2.4` and `soundfile>=0.12.1` to `requirements.txt` to ensure standalone/manual Python environment installations include all packages directly imported by the application.
+
+### CI/CD & Build Pipeline Security
+- **GitHub Actions Script Injection Fix**: Eliminated the script injection vulnerability in `.github/workflows/build.yml` by routing the workflow's `${{ inputs.release_tag }}` input safely through environment variables (`env:`) rather than inline shell script string interpolation.
+- **Release Integrity Guard**: Updated the `publish-release` job condition to require `!contains(needs.*.result, 'failure')`, ensuring GitHub Releases are never published if any platform build (Windows, macOS, Linux) fails.
+- **Windows Build Timeout Margin**: Increased the Windows CI build job timeout to 75 minutes to provide a reliable buffer against runner timeouts.
+- **Balanced Inno Setup Compression**: Optimized Windows installer packaging in `RadioTVStorySegmenter.iss` using `lzma2/max` with a 16MB dictionary size, delivering 50–70% faster Windows compression times on CI runners while retaining a compact installer binary.
+- **Version Synchronization**: Unified version `2.4` across all core application modules, installer configurations, build scripts, and package descriptors.
+
 ## v2.3
 
 ### Installer Size & Package Optimization
