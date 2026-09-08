@@ -1,5 +1,5 @@
 import html
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 import copy
 import gzip
 import io
@@ -12,6 +12,7 @@ import subprocess
 import shutil
 import sys
 import threading
+import time
 from datetime import datetime
 import os
 import warnings
@@ -58,7 +59,9 @@ from PySide6.QtCore import (
     Signal,
     QObject,
     QThread,
+    QRect,
     QRectF,
+    QLineF,
     QPointF,
     QEvent,
     QTimer,
@@ -265,7 +268,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "2.4.4"
+PROJECT_VERSION = "2.5"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -742,11 +745,55 @@ class SetStoriesCommand(QUndoCommand):
     def undo(self):
         self.main_window.stories = [Story.from_dict(s.to_dict()) for s in self.old_stories]
         self.main_window.refresh_story_list()
+        if hasattr(self.main_window, "timeline"):
+            self.main_window.timeline.set_stories(self.main_window.stories, self.main_window.current_selected_story_indices)
+            self.main_window.timeline.update()
         self.main_window.save_project()
 
     def redo(self):
         self.main_window.stories = [Story.from_dict(s.to_dict()) for s in self.new_stories]
         self.main_window.refresh_story_list()
+        if hasattr(self.main_window, "timeline"):
+            self.main_window.timeline.set_stories(self.main_window.stories, self.main_window.current_selected_story_indices)
+            self.main_window.timeline.update()
+        self.main_window.save_project()
+
+
+class StoryBoundaryChangeCommand(QUndoCommand):
+    """Discrete undo/redo command for story boundary adjustments (start/end times)."""
+
+    def __init__(self, main_window, story_index, old_start, old_end, new_start, new_end, description="Adjust Story Boundary"):
+        super().__init__(description)
+        self.main_window = main_window
+        self.story_index = story_index
+        self.old_start = round(float(old_start), 3)
+        self.old_end = round(float(old_end), 3)
+        self.new_start = round(float(new_start), 3)
+        self.new_end = round(float(new_end), 3)
+
+    def undo(self):
+        if 0 <= self.story_index < len(self.main_window.stories):
+            self.main_window.stories[self.story_index].start = self.old_start
+            self.main_window.stories[self.story_index].end = self.old_end
+            self._sync_ui(self.old_start, self.old_end)
+
+    def redo(self):
+        if 0 <= self.story_index < len(self.main_window.stories):
+            self.main_window.stories[self.story_index].start = self.new_start
+            self.main_window.stories[self.story_index].end = self.new_end
+            self._sync_ui(self.new_start, self.new_end)
+
+    def _sync_ui(self, start, end):
+        self.main_window.refresh_story_list()
+        if hasattr(self.main_window, "timeline"):
+            self.main_window.timeline.set_stories(self.main_window.stories, self.main_window.current_selected_story_indices)
+            self.main_window.timeline.update()
+        if getattr(self.main_window, "current_selected_story_indices", []) == [self.story_index]:
+            if hasattr(self.main_window, "start_input"):
+                self.main_window.start_input.setText(format_time(start))
+            if hasattr(self.main_window, "end_input"):
+                self.main_window.end_input.setText(format_time(end))
+        self.main_window.mark_project_dirty(self.text())
         self.main_window.save_project()
 
 
@@ -2258,7 +2305,11 @@ class WaveformWorker(QObject):
         process = self._process
         if process is not None and process.poll() is None:
             try:
-                process.kill()
+                process.terminate()
+                try:
+                    process.wait(timeout=0.3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
             except Exception:
                 pass
 
@@ -2299,6 +2350,7 @@ class WaveformWorker(QObject):
                 creationflags=creationflags,
             )
             self._process = process
+            register_process(process)
 
             peaks = []
             max_possible_val = 32768.0
@@ -2386,6 +2438,8 @@ class WaveformWorker(QObject):
                     pass
             self.finished.emit([], self._cancel_event.is_set())
         finally:
+            if process is not None:
+                unregister_process(process)
             self._process = None
 
 
@@ -2521,7 +2575,11 @@ class VideoThumbnailWorker(QObject):
         process = self._process
         if process is not None and process.poll() is None:
             try:
-                process.kill()
+                process.terminate()
+                try:
+                    process.wait(timeout=0.3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
             except Exception:
                 pass
 
@@ -2534,6 +2592,7 @@ class VideoThumbnailWorker(QObject):
             cmd = [ffmpeg_path() or "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(self.media_path), "-vf", vf, "-q:v", "4", pattern]
             creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
+            register_process(self._process)
             _stdout, stderr = self._process.communicate()
             returncode = self._process.returncode
             if self._cancelled:
@@ -2558,6 +2617,8 @@ class VideoThumbnailWorker(QObject):
             else:
                 self.finished.emit([])
         finally:
+            if self._process is not None:
+                unregister_process(self._process)
             self._process = None
 
 
@@ -3254,20 +3315,32 @@ class TimelineCanvas(QWidget):
 
         if has_thumbs and thumbnail_height > 0:
             thumb_w = max(90, int(width / max(8, len(self.video_thumbnails)) * 0.95))
-            for timestamp, pix in self.video_thumbnails:
+            target_h = max(16, thumbnail_height - 2)
+            vis_dur = max(0.001, self.visible_duration())
+            # Buffer of 1.5x thumbnail time to prevent edge pop-in
+            dt_buffer = (thumb_w / max(1, width)) * vis_dur * 1.5
+            t_min = max(0.0, self.scroll_offset - dt_buffer)
+            t_max = min(self.duration, self.scroll_offset + vis_dur + dt_buffer)
+
+            ts_list = [item[0] for item in self.video_thumbnails]
+            start_idx = max(0, bisect_left(ts_list, t_min) - 1)
+            end_idx = min(len(self.video_thumbnails), bisect_right(ts_list, t_max) + 1)
+
+            for i in range(start_idx, end_idx):
+                timestamp, pix = self.video_thumbnails[i]
                 x = self.time_to_x(timestamp, width)
                 if x + thumb_w < 0 or x - thumb_w > width:
                     continue
                 scaled = pix.scaled(
                     thumb_w,
-                    max(16, thumbnail_height - 2),
+                    target_h,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
                 draw_y = thumbnail_y + (thumbnail_height - scaled.height()) // 2
-                painter.drawPixmap(x - scaled.width() // 2, draw_y, scaled)
+                painter.drawPixmap(int(x - scaled.width() // 2), int(draw_y), scaled)
                 painter.setPen(self.tokens.pen(self.tokens.border_subtle, 1))
-                painter.drawRect(x - scaled.width() // 2, draw_y, scaled.width(), scaled.height())
+                painter.drawRect(int(x - scaled.width() // 2), int(draw_y), scaled.width(), scaled.height())
 
         if self.show_waveform and self.waveform_peaks and waveform_height > 0:
             painter.setPen(self.tokens.pen(self.tokens.waveform_stroke, 1.0))
@@ -3279,6 +3352,7 @@ class TimelineCanvas(QWidget):
             peaks = levels[level_index]
             total_peaks = len(peaks)
             dur = max(0.001, self.duration)
+            waveform_lines = []
             for x in range(width):
                 t0 = self.x_to_time(x, width)
                 t1 = self.x_to_time(x + 1, width)
@@ -3298,10 +3372,11 @@ class TimelineCanvas(QWidget):
                         max_val = float(max(peak_slice))
                     amplitude = max_val * (waveform_height * 0.88)
                     if amplitude > 0.5:
-                        painter.drawLine(
-                            QPointF(x + 0.5, middle_y - amplitude / 2.0),
-                            QPointF(x + 0.5, middle_y + amplitude / 2.0)
+                        waveform_lines.append(
+                            QLineF(x + 0.5, middle_y - amplitude / 2.0, x + 0.5, middle_y + amplitude / 2.0)
                         )
+            if waveform_lines:
+                painter.drawLines(waveform_lines)
         elif self.show_waveform and waveform_height > 0:
             painter.setPen(self.tokens.pen(self.tokens.waveform_baseline, 1))
             painter.drawLine(QPointF(0, middle_y), QPointF(width, middle_y))
@@ -4571,11 +4646,40 @@ def terminate_all_registered_processes():
             # Handle PySide6 QProcess
             if hasattr(proc, "state"):
                 if proc.state() != QProcess.ProcessState.NotRunning:
-                    proc.kill()
-                    proc.waitForFinished(1000)
+                    proc.terminate()
+                    if not proc.waitForFinished(300):
+                        proc.kill()
+                        proc.waitForFinished(300)
             # Handle standard Python subprocess.Popen
             elif hasattr(proc, "poll") and proc.poll() is None:
-                proc.kill()
+                proc.terminate()
+                try:
+                    proc.wait(timeout=0.3)
+                except Exception:
+                    proc.kill()
         except Exception:
             pass
     _REGISTERED_PROCESSES.clear()
+
+
+def cleanup_old_thumbnail_cache(max_age_hours=24):
+    """Purge temporary thumbnail directories older than max_age_hours in a background thread."""
+    def _worker():
+        try:
+            base = Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails"
+            if not base.exists():
+                return
+            cutoff = time.time() - (max_age_hours * 3600)
+            for sub in base.iterdir():
+                if sub.is_dir():
+                    try:
+                        mtime = sub.stat().st_mtime
+                        if mtime < cutoff:
+                            shutil.rmtree(sub, ignore_errors=True)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()

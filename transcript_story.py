@@ -1071,11 +1071,34 @@ class TranscriptStoryMixin:
     def handle_drag_finished(self):
         if self.pre_drag_stories_snapshot:
             old_stories = self.pre_drag_stories_snapshot
-            new_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
             self.pre_drag_stories_snapshot = []
-            self.commit_story_change(old_stories, new_stories, "Adjust Story Selection")
-            self.refresh_story_list()
-            self.save_project()
+
+            # Identify which story boundary changed
+            changed_idx = None
+            for i in range(min(len(old_stories), len(self.stories))):
+                if (
+                    abs(old_stories[i].start - self.stories[i].start) > 0.001
+                    or abs(old_stories[i].end - self.stories[i].end) > 0.001
+                ):
+                    changed_idx = i
+                    break
+
+            if changed_idx is not None and hasattr(self, "undo_stack"):
+                old_start = old_stories[changed_idx].start
+                old_end = old_stories[changed_idx].end
+                new_start = self.stories[changed_idx].start
+                new_end = self.stories[changed_idx].end
+                desc = f"Adjust Story #{changed_idx + 1} Boundary"
+                # Temporarily revert so push() executes redo() cleanly
+                self.stories[changed_idx].start = old_start
+                self.stories[changed_idx].end = old_end
+                cmd = StoryBoundaryChangeCommand(self, changed_idx, old_start, old_end, new_start, new_end, desc)
+                self.undo_stack.push(cmd)
+            else:
+                new_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
+                self.commit_story_change(old_stories, new_stories, "Adjust Story Selection")
+                self.refresh_story_list()
+                self.save_project()
 
     def update_selected_story(self):
         selected_rows = list(self.current_selected_story_indices)
@@ -1105,11 +1128,21 @@ class TranscriptStoryMixin:
         new_stories[index].end = end
         new_stories[index].title = self.title_input.text().strip() or "Untitled Story"
 
-        if (
-            abs(new_stories[index].start - old_stories[index].start) < 0.001
-            and abs(new_stories[index].end - old_stories[index].end) < 0.001
-            and new_stories[index].title == old_stories[index].title
-        ):
+        start_changed = abs(new_stories[index].start - old_stories[index].start) >= 0.001
+        end_changed = abs(new_stories[index].end - old_stories[index].end) >= 0.001
+        title_changed = new_stories[index].title != old_stories[index].title
+
+        if not start_changed and not end_changed and not title_changed:
+            return
+
+        if (start_changed or end_changed) and not title_changed and hasattr(self, "undo_stack"):
+            desc = f"Adjust Story #{index + 1} Boundary"
+            cmd = StoryBoundaryChangeCommand(
+                self, index, old_stories[index].start, old_stories[index].end,
+                new_stories[index].start, new_stories[index].end, desc
+            )
+            self.undo_stack.push(cmd)
+            self.apply_story_selection_indices([index], seek=False)
             return
 
         self.commit_story_change(old_stories, new_stories, "Update Story Details")
@@ -1192,16 +1225,23 @@ class TranscriptStoryMixin:
             canvas.selection_end = None
             canvas.update()
 
-        old_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
-        new_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
-        new_stories[index].start = target_time
-
         desc = f"Set Story #{index + 1} Start Time to {format_time(target_time)}"
-        self.commit_story_change(old_stories, new_stories, desc)
-        self.refresh_story_list()
-        self.apply_story_selection_indices([index], seek=True)
-        self.mark_project_dirty(desc)
-        self.save_project()
+        if hasattr(self, "undo_stack"):
+            cmd = StoryBoundaryChangeCommand(
+                self, index, current_story.start, current_story.end,
+                target_time, current_story.end, desc
+            )
+            self.undo_stack.push(cmd)
+            self.apply_story_selection_indices([index], seek=True)
+        else:
+            old_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
+            new_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
+            new_stories[index].start = target_time
+            self.commit_story_change(old_stories, new_stories, desc)
+            self.refresh_story_list()
+            self.apply_story_selection_indices([index], seek=True)
+            self.mark_project_dirty(desc)
+            self.save_project()
 
     def set_selected_story_end(self):
         """Update the end boundary of the currently selected story to match the current transcript/timeline position."""
@@ -1238,16 +1278,23 @@ class TranscriptStoryMixin:
             canvas.selection_end = None
             canvas.update()
 
-        old_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
-        new_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
-        new_stories[index].end = target_time
-
         desc = f"Set Story #{index + 1} End Time to {format_time(target_time)}"
-        self.commit_story_change(old_stories, new_stories, desc)
-        self.refresh_story_list()
-        self.apply_story_selection_indices([index], seek=False)
-        self.mark_project_dirty(desc)
-        self.save_project()
+        if hasattr(self, "undo_stack"):
+            cmd = StoryBoundaryChangeCommand(
+                self, index, current_story.start, current_story.end,
+                current_story.start, target_time, desc
+            )
+            self.undo_stack.push(cmd)
+            self.apply_story_selection_indices([index], seek=False)
+        else:
+            old_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
+            new_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
+            new_stories[index].end = target_time
+            self.commit_story_change(old_stories, new_stories, desc)
+            self.refresh_story_list()
+            self.apply_story_selection_indices([index], seek=False)
+            self.mark_project_dirty(desc)
+            self.save_project()
 	
     def add_selection_to_story(self):
         """Create a new story segment spanning the selected transcript text."""

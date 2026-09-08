@@ -8,6 +8,66 @@ from prs_shared import *
 from wordpress_export import generate_wp_excerpt, WordPressSettingsDialog, _get_wp_password
 
 
+def seconds_to_cue_time(seconds: float) -> str:
+    """Format seconds into standard CUE sheet MM:SS:FF (75 frames per second)."""
+    total_secs = max(0.0, float(seconds or 0.0))
+    minutes = int(total_secs // 60)
+    secs = int(total_secs % 60)
+    frames = int(round((total_secs - int(total_secs)) * 75))
+    if frames >= 75:
+        frames = 0
+        secs += 1
+        if secs >= 60:
+            secs = 0
+            minutes += 1
+    return f"{minutes:02d}:{secs:02d}:{frames:02d}"
+
+
+def generate_cue_sheet(stories: list, media_filename: str = "", album_title: str = "Album") -> str:
+    """Generate a standard red-book compatible .cue sheet from story segments."""
+    lines = []
+    clean_title = album_title.replace('"', "'")
+    lines.append(f'TITLE "{clean_title}"')
+    if media_filename:
+        ext = Path(media_filename).suffix.lower()
+        file_type = "MP3" if ext == ".mp3" else ("AIFF" if ext in (".aif", ".aiff") else "WAVE")
+        lines.append(f'FILE "{Path(media_filename).name}" {file_type}')
+    else:
+        lines.append('FILE "audio.wav" WAVE')
+
+    sorted_stories = sorted(stories, key=lambda s: getattr(s, "start", 0.0))
+    for i, story in enumerate(sorted_stories, 1):
+        title = (getattr(story, "title", "") or f"Track {i}").strip().replace('"', "'")
+        cue_time = seconds_to_cue_time(getattr(story, "start", 0.0))
+        lines.append(f'  TRACK {i:02d} AUDIO')
+        lines.append(f'    TITLE "{title}"')
+        lines.append(f'    INDEX 01 {cue_time}')
+    return "\n".join(lines) + "\n"
+
+
+def generate_youtube_chapters(stories: list, ensure_zero_start: bool = True) -> str:
+    """Generate YouTube chapter markers / tracklist (e.g. 00:00 - Intro, 03:45 - Track 1)."""
+    lines = []
+    if not stories:
+        return ""
+    sorted_stories = sorted(stories, key=lambda s: getattr(s, "start", 0.0))
+    first_start = getattr(sorted_stories[0], "start", 0.0)
+    if ensure_zero_start and first_start > 0.5:
+        lines.append("00:00 - Intro")
+    for story in sorted_stories:
+        t = max(0.0, float(getattr(story, "start", 0.0)))
+        h = int(t // 3600)
+        m = int((t % 3600) // 60)
+        s = int(t % 60)
+        if h > 0:
+            ts_str = f"{h:02d}:{m:02d}:{s:02d}"
+        else:
+            ts_str = f"{m:02d}:{s:02d}"
+        title = (getattr(story, "title", "") or "Untitled Segment").strip()
+        lines.append(f"{ts_str} - {title}")
+    return "\n".join(lines) + "\n"
+
+
 class UnifiedExportDialog(QDialog):
     """Unified Export Center supporting Local Files and WordPress Draft Posts."""
 
@@ -84,13 +144,18 @@ class UnifiedExportDialog(QDialog):
         self.cb_docx = QCheckBox("Word document (.docx)")
         self.cb_srt = QCheckBox("SubRip subtitles (.srt)")
         self.cb_vtt = QCheckBox("WebVTT subtitles (.vtt)")
+        self.cb_cue = QCheckBox("CUE sheet (.cue)")
+        self.cb_tracklist = QCheckBox("Tracklist / YouTube Chapters (.txt)")
         
         audio_file = getattr(self.main_window, "audio_file", None)
         media_ext = audio_file.suffix.lower() if audio_file else "media"
         self.cb_media = QCheckBox(f"Media clip ({media_ext})")
         
-        self.cb_txt.setChecked(True)
-        self.cb_docx.setChecked(True)
+        is_music_mode = getattr(self.main_window, "story_detection_mode", "") == "music"
+        self.cb_txt.setChecked(not is_music_mode)
+        self.cb_docx.setChecked(not is_music_mode)
+        self.cb_cue.setChecked(is_music_mode)
+        self.cb_tracklist.setChecked(is_music_mode)
         self.cb_media.setChecked(audio_file is not None)
         self.cb_media.setEnabled(audio_file is not None)
 
@@ -98,6 +163,8 @@ class UnifiedExportDialog(QDialog):
         formats_layout.addWidget(self.cb_docx)
         formats_layout.addWidget(self.cb_srt)
         formats_layout.addWidget(self.cb_vtt)
+        formats_layout.addWidget(self.cb_cue)
+        formats_layout.addWidget(self.cb_tracklist)
         formats_layout.addWidget(self.cb_media)
         local_layout.addWidget(formats_group)
 
@@ -1011,6 +1078,8 @@ class UnifiedExportDialog(QDialog):
                 "srt": self.cb_srt.isChecked(),
                 "vtt": self.cb_vtt.isChecked(),
                 "media": self.cb_media.isChecked(),
+                "cue": self.cb_cue.isChecked(),
+                "tracklist": self.cb_tracklist.isChecked(),
             }
             options = {
                 "include_speakers": self.cb_speakers.isChecked(),
@@ -1114,6 +1183,10 @@ class ProjectExportMixin:
         self.video_thumbnail_dir = None
 
         self.update_window_title()
+        try:
+            cleanup_old_thumbnail_cache(24)
+        except Exception:
+            pass
         self.log_activity("[FILE] Project closed.", mark_dirty=False)
         self.statusBar().showMessage("Project closed.")
         return True
@@ -2034,6 +2107,23 @@ class ProjectExportMixin:
                 media_file = media_out / f"{story_base}{self.audio_file.suffix.lower()}"
                 self.extract_media(story.start, story.end, media_file)
 
+        # Export CUE sheet and tracklist if requested
+        if formats.get("cue") and stories_with_indices:
+            stories_subset = [s for _, s in stories_with_indices]
+            cue_file = transcripts_out / f"{base}.cue"
+            album_title = base
+            media_name = self.audio_file.name if self.audio_file else ""
+            cue_text = generate_cue_sheet(stories_subset, media_name, album_title)
+            with open(cue_file, "w", encoding="utf-8") as f:
+                f.write(cue_text)
+
+        if formats.get("tracklist") and stories_with_indices:
+            stories_subset = [s for _, s in stories_with_indices]
+            chapters_file = transcripts_out / f"{base}_chapters.txt"
+            chapters_text = generate_youtube_chapters(stories_subset)
+            with open(chapters_file, "w", encoding="utf-8") as f:
+                f.write(chapters_text)
+
         return True
 
     def export_selected_stories(self, custom_formats=None, custom_base=None, custom_options=None, directory=None, is_custom_location=False):
@@ -2499,6 +2589,21 @@ class ProjectExportMixin:
                     raise RuntimeError("Media export is unavailable because this project has no imported media file.")
                 media_file = media_out / f"{base}{self.audio_file.suffix.lower()}"
                 self.extract_media(0, self.duration, media_file)
+
+            # Export CUE sheet and Tracklist/Chapters if requested
+            if formats.get("cue") and getattr(self, "stories", None):
+                cue_file = transcripts_out / f"{base}.cue"
+                album_title = base
+                media_name = self.audio_file.name if self.audio_file else ""
+                cue_text = generate_cue_sheet(self.stories, media_name, album_title)
+                with open(cue_file, "w", encoding="utf-8") as f:
+                    f.write(cue_text)
+
+            if formats.get("tracklist") and getattr(self, "stories", None):
+                chapters_file = transcripts_out / f"{base}_chapters.txt"
+                chapters_text = generate_youtube_chapters(self.stories)
+                with open(chapters_file, "w", encoding="utf-8") as f:
+                    f.write(chapters_text)
 
             if progress_dialog is not None and created_local_dialog:
                 progress_dialog.setValue(1)
@@ -2983,6 +3088,16 @@ class ProjectExportMixin:
         except Exception:
             pass
 
+        try:
+            terminate_all_registered_processes()
+        except Exception:
+            pass
+
+        try:
+            cleanup_old_thumbnail_cache(24)
+        except Exception:
+            pass
+
         # QSettings writes made during this session (a project just saved,
         # a Preferences change) are not guaranteed to reach disk on their
         # own during interpreter shutdown -- force a flush now, while the
@@ -2995,6 +3110,58 @@ class ProjectExportMixin:
 
         self.log_activity("[SYSTEM] Application shutdown cleanup complete.")
         event.accept()
+
+    def export_cue_sheet(self, destination_path=None):
+        """Export story/music segments to a standard .cue sheet."""
+        if not getattr(self, "stories", []):
+            QMessageBox.warning(self, "No Stories", "There are no story or music segments to export.")
+            return False
+        base = safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "project"))
+        album_title = self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "Album")
+        if not destination_path:
+            save_path, _ = QFileDialog.getSaveFileName(
+                self, "Export CUE Sheet",
+                str(Path(self._dialog_directory()) / f"{base}.cue"),
+                "CUE Sheet (*.cue)"
+            )
+            if not save_path:
+                return False
+        else:
+            save_path = destination_path
+
+        media_name = self.audio_file.name if getattr(self, "audio_file", None) else ""
+        content = generate_cue_sheet(self.stories, media_name, album_title)
+        with open(save_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        self.log_activity(f"[EXPORT] Exported CUE sheet to {save_path}")
+        if not destination_path:
+            QMessageBox.information(self, "Export Complete", f"CUE sheet exported successfully to:\n{save_path}")
+        return True
+
+    def export_tracklist(self, destination_path=None):
+        """Export story/music segments as YouTube chapters / tracklist formatted text."""
+        if not getattr(self, "stories", []):
+            QMessageBox.warning(self, "No Stories", "There are no story or music segments to export.")
+            return False
+        base = safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "project"))
+        if not destination_path:
+            save_path, _ = QFileDialog.getSaveFileName(
+                self, "Export Tracklist / Chapters",
+                str(Path(self._dialog_directory()) / f"{base}_chapters.txt"),
+                "Text File (*.txt)"
+            )
+            if not save_path:
+                return False
+        else:
+            save_path = destination_path
+
+        content = generate_youtube_chapters(self.stories)
+        with open(save_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        self.log_activity(f"[EXPORT] Exported tracklist / chapters to {save_path}")
+        if not destination_path:
+            QMessageBox.information(self, "Export Complete", f"Tracklist / Chapters exported successfully to:\n{save_path}")
+        return True
 
     def perform_stories_export(
         self,
