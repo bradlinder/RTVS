@@ -81,7 +81,24 @@ jobs:
         run: python build_installer.py
 
       - name: Compile Inno Setup Installer
-        run: iscc /DMyAppVersion="${{ steps.get_version.outputs.version }}" installer\Windows\RadioTVStorySegmenter.iss
+        shell: pwsh
+        run: |
+          $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
+          if (-not $iscc) {
+            if (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
+              $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+            } elseif (Test-Path "C:\Program Files\Inno Setup 6\ISCC.exe") {
+              $isccPath = "C:\Program Files\Inno Setup 6\ISCC.exe"
+            } elseif (Test-Path "C:\ProgramData\chocolatey\bin\iscc.exe") {
+              $isccPath = "C:\ProgramData\chocolatey\bin\iscc.exe"
+            } else {
+              throw "Inno Setup compiler (ISCC.exe) not found!"
+            }
+          } else {
+            $isccPath = $iscc.Source
+          }
+          Write-Host "Using Inno Setup compiler: $isccPath"
+          & "$isccPath" /DMyAppVersion="${{ steps.get_version.outputs.version }}" installer\Windows\RadioTVStorySegmenter.iss
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4

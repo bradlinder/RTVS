@@ -183,6 +183,7 @@ def provision_optional_runtime_tools(app_root: Path) -> None:
     if uv_dest.exists():
         return
 
+    BUILD.mkdir(parents=True, exist_ok=True)
     archive = BUILD / "uv.zip"
     print(f"[BUILD] Downloading uv {UV_VERSION} for optional runtime provisioning...")
     urllib.request.urlretrieve(url, archive)
