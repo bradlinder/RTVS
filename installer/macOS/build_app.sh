@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 APP_NAME="RadioTVSegmenter"
-VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.2")
+VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.3")
 DIST="$ROOT/dist"
 APP="$DIST/${APP_NAME}.app"
 DMG="$DIST/${APP_NAME}-${VERSION}-macOS.dmg"
@@ -31,7 +31,7 @@ fi
 
 rm -f "$DMG"
 hdiutil create -volname "Radio & TV Segmenter $VERSION" \
-  -srcfolder "$APP" -ov -format UDZO "$DMG"
+  -srcfolder "$APP" -ov -format UDZO -imagekey zlib-level=9 "$DMG"
 
 echo "Created: $DMG"
 

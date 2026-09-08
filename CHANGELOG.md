@@ -1,5 +1,25 @@
 # Changelog
 
+## v2.3
+
+### Installer Size & Package Optimization
+- **Shared Runtime Architecture**: Eliminated the duplicate `_internal` distribution previously bundled inside `workers/`, deduplicating hundreds of megabytes of identical PyTorch, Transformers, CTranslate2, and ONNX Runtime runtimes into a unified application core shared seamlessly by both the GUI application and the AI worker (`prs_worker`).
+- **Enhanced Pruning Pipeline**:
+  - Removed unneeded C/C++ development headers, build artifacts, and package metadata (`torch/include`, `torchaudio/include`, `scipy/include`, `PySide6/include`, `onnxruntime/include`, etc.).
+  - Stripped unused PySide6 runtime plugins (e.g., `sqldrivers`, `sensorgestures`, `qmltooling`, `geometryloaders`, `position`, `scenegraph`) and translation tables.
+  - Purged `.pdb`, `.pyi`, `.c`, `.cpp`, `.h`, `.hpp`, `.pyx`, `.pxd` source and debug files, along with internal test and benchmark suites across all bundled packages.
+  - Enabled binary symbol stripping on Linux (`strip --strip-unneeded`) and macOS (`strip -x`).
+- **Maximum Installer Compression**:
+  - **Windows**: Upgraded Inno Setup packaging to `lzma2/ultra64` compression with separate 64-bit multi-threaded compression process and maximum dictionary size (64MB).
+  - **Linux**: Upgraded Debian packaging (`build_deb.sh`) to `dpkg-deb -z9` (maximum XZ compression) and distributable tarball packaging to `GZIP=-9`.
+  - **macOS**: Upgraded DMG image generation (`build_app.sh`) with `hdiutil` maximum compression (`-imagekey zlib-level=9`).
+
+### Codebase Cleanup & Conflict Prevention
+- **Eliminated Duplicate Methods**: Removed the redundant `_check_external_dependencies` implementation in `RadioTVSegmenter.py` and unified dependency validation in `ui_layout.py`.
+- **Dynamic Application Metadata**: Refactored the "About" dialog to use dynamic version and application name constants (`APP_DISPLAY_NAME`, `PROJECT_VERSION`) from `prs_shared.py` instead of hardcoded strings.
+- **Dependency Manifest Cleanup**: Removed duplicate `keyring` package declaration from `requirements.txt`.
+- **Version Synchronization**: Unified v2.3 versioning across `prs_shared.py`, `RadioTVSegmenter.py`, `transcript_story.py`, `updater.py`, `build_installer.py`, `build_windows.bat`, `build_linux.sh`, `installer/Windows/RadioTVStorySegmenter.iss`, `installer/Linux/build_deb.sh`, `installer/macOS/build_app.sh`, and `.github/workflows/build.yml`.
+
 ## v2.2
 
 ### Enhancements

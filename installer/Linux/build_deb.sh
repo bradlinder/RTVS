@@ -9,7 +9,7 @@ APP_NAME="RadioTVSegmenter"
 PKG_NAME="radiotvsegmenter"
 
 # Extract project version from single source of truth (prs_shared.py)
-VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.2")
+VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.3")
 DIST="$ROOT/dist"
 SOURCE_APP="$DIST/$APP_NAME"
 DEB_FILENAME="RadioTVSegmenter-${VERSION}-Linux-amd64.deb"
@@ -145,9 +145,9 @@ EOF
 chmod 755 "$STAGING/DEBIAN/postrm"
 
 # 5. Build .deb package using high-efficiency XZ compression
-echo "[5/5] Building .deb archive using XZ compression..."
+echo "[5/5] Building .deb archive using maximum XZ compression..."
 rm -f "$DEB_OUTPUT"
-dpkg-deb --build --root-owner-group -Zxz "$STAGING" "$DEB_OUTPUT"
+dpkg-deb --build --root-owner-group -Zxz -z9 "$STAGING" "$DEB_OUTPUT"
 
 # Cleanup staging directory
 rm -rf "$STAGING"

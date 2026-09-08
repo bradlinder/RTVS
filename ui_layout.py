@@ -680,13 +680,20 @@ class UiLayoutMixin:
             self.recent_menu.addAction(act)
 
     def _check_external_dependencies(self):
-        """Verify presence of FFmpeg and log guidance if missing."""
-        ff = ffmpeg_path()
-        if not ff:
+        """Check bundled media tools and record actionable diagnostics."""
+        missing = []
+        if ffmpeg_path() is None:
+            missing.append("ffmpeg")
+        if ffprobe_path() is None:
+            missing.append("ffprobe")
+        if missing:
             self.log_activity(
-                "[WARNING] FFmpeg binary was not found. Please install FFmpeg for full audio and waveform support.",
+                "[DEPENDENCIES] Missing bundled media tool(s): " + ", ".join(missing) +
+                ". Install media runtime components or place them in the application's runtime/bin folder.",
                 mark_dirty=False,
             )
+        else:
+            self.log_activity("[DEPENDENCIES] FFmpeg and ffprobe detected.", mark_dirty=False)
 
     def _sync_undo_redo_actions(self):
         """Synchronize undo/redo action states with QUndoStack."""
@@ -938,8 +945,8 @@ class UiLayoutMixin:
 
         # Main content (header, version, description, open-source attribution)
         content_label = QLabel(
-            "<h2 style='margin: 0 0 6px 0;'>Radio &amp; TV Segmenter</h2>"
-            "<p style='margin: 0 0 10px 0;'><b>Version 2.2</b></p>"
+            f"<h2 style='margin: 0 0 6px 0;'>{APP_DISPLAY_NAME}</h2>"
+            f"<p style='margin: 0 0 10px 0;'><b>Version {PROJECT_VERSION}</b></p>"
             "<p style='margin: 0 0 14px 0; color: #b0b0b0;'>"
             "An automated broadcast audio segmentation, transcription, and speaker detection platform built for radio production."
             "</p>"

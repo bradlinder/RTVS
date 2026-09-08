@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter — v2.2
+"""Radio & TV Segmenter — v2.3
 
 This is the thin application composition root. UI/processing responsibilities
 are implemented in focused mixins so future changes can target smaller files
@@ -253,22 +253,6 @@ class MainWindow(
         self.statusBar().showMessage("Open a media file or create a new project to begin.")
         QTimer.singleShot(0, lambda: self.check_translation_models_async())
         QTimer.singleShot(3000, lambda: self.trigger_silent_update_check())
-
-    def _check_external_dependencies(self):
-        """Check bundled media tools and record actionable diagnostics."""
-        missing = []
-        if ffmpeg_path() is None:
-            missing.append("ffmpeg")
-        if ffprobe_path() is None:
-            missing.append("ffprobe")
-        if missing:
-            self.log_activity(
-                "[DEPENDENCIES] Missing bundled media tool(s): " + ", ".join(missing) +
-                ". Install media runtime components or place them in the application's runtime/bin folder.",
-                mark_dirty=False,
-            )
-        else:
-            self.log_activity("[DEPENDENCIES] FFmpeg and ffprobe detected.", mark_dirty=False)
 
 def main():
     if sys.platform == "win32":

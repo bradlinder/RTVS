@@ -85,7 +85,7 @@ jobs:
         id: get_version
         shell: bash
         run: |
-          VERSION=$(python -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.2")
+          VERSION=$(python -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.3")
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Run PyInstaller build
@@ -229,9 +229,9 @@ jobs:
       - name: Package Debian (.deb) & Distributable Tarball (.tar.gz)
         run: |
           bash installer/Linux/build_deb.sh
-          VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.2")
+          VERSION=$(python3 -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2>/dev/null || echo "2.3")
           cd dist
-          tar -czvf "RadioTVSegmenter-${VERSION}-Linux-x86_64.tar.gz" RadioTVSegmenter/
+          GZIP=-9 tar -czvf "RadioTVSegmenter-${VERSION}-Linux-x86_64.tar.gz" RadioTVSegmenter/
           cd ..
 
       - name: Verify Asset Sizes (<2GB GitHub Release Limit)
@@ -287,7 +287,7 @@ jobs:
           elif [ -n "${{ inputs.release_tag }}" ]; then
             echo "tag=${{ inputs.release_tag }}" >> $GITHUB_OUTPUT
           else
-            echo "tag=v2.2" >> $GITHUB_OUTPUT
+            echo "tag=v2.3" >> $GITHUB_OUTPUT
           fi
 
       - name: Create GitHub Release & Upload Binaries

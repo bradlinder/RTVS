@@ -38,7 +38,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.2"
+    PROJECT_VERSION = "2.3"
 
 # Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]
@@ -256,6 +256,7 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
         "libnvrtc", "nvrtc", "libcudnn", "cudnn",
         "libcublas", "cublas", "libcusolver", "cusolver", "libcurand", "curand",
         "libcufft", "cufft", "libnccl", "nccl", "libnvJitLink", "libnvblas",
+        "nvjitlink", "cusparse", "nvjpeg",
     )
     for base in internal_dirs:
         if not base.exists():
@@ -268,27 +269,34 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
         for item in list(base.rglob("*")):
             if "workers" in item.parts:
                 continue
-            if item.is_file() and any(item.name.startswith(p) for p in cuda_lib_prefixes):
+            if item.is_file() and any(item.name.lower().startswith(p.lower()) for p in cuda_lib_prefixes):
                 item.unlink(missing_ok=True)
                 cuda_purged += 1
 
     if cuda_purged:
         print(f"[BUILD] Purged {cuda_purged} accidental CUDA files/directories from bundle.")
 
-    header_patterns = [
+    unneeded_dirs = [
         "torch/include", "torch/share", "torchaudio/include", "scipy/include",
         "PySide6/include", "PySide6/glue", "PySide6/typesystems", "PySide6/scripts",
+        "PySide6/translations",
+        "PySide6/plugins/generic", "PySide6/plugins/sqldrivers",
+        "PySide6/plugins/sensorgestures", "PySide6/plugins/position",
+        "PySide6/plugins/scenegraph", "PySide6/plugins/qmltooling",
+        "PySide6/plugins/networkinformation", "PySide6/plugins/geometryloaders",
+        "onnxruntime/include", "sentencepiece/include", "tokenizers/include",
     ]
     for base in internal_dirs:
         if not base.exists():
             continue
-        for hp in header_patterns:
+        for hp in unneeded_dirs:
             target = base / Path(hp)
             if target.is_dir() and "workers" not in target.parts:
                 print(f"[BUILD] Removing unneeded directory: {target}")
                 shutil.rmtree(target, ignore_errors=True)
 
     pruned_files = 0
+    test_dir_names = {"tests", "testing", "test", "benchmark", "benchmarks", "docs", "doc"}
     for base in internal_dirs:
         if not base.exists():
             continue
@@ -296,15 +304,16 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
             if "workers" in item.parts:
                 continue
             if item.is_file():
-                if item.suffix in (".pdb", ".pyi"):
+                if item.suffix in (".pdb", ".pyi", ".c", ".cpp", ".h", ".hpp", ".pyx", ".pxd"):
                     item.unlink(missing_ok=True)
                     pruned_files += 1
-            elif item.is_dir() and item.name in ("tests", "testing", "test") and any(k in str(item).lower() for k in ("torch", "scipy", "transformers", "ctranslate2", "pyside6", "sympy", "jinja2")):
+            elif item.is_dir() and item.name.lower() in test_dir_names:
                 shutil.rmtree(item, ignore_errors=True)
 
     if pruned_files:
-        print(f"[BUILD] Pruned {pruned_files} debug/stub files from bundle.")
+        print(f"[BUILD] Pruned {pruned_files} debug/stub/source files from bundle.")
 
+    # Binary symbol stripping for Linux and macOS
     if sys.platform.startswith("linux") and shutil.which("strip"):
         stripped_count = 0
         for base in internal_dirs:
@@ -328,6 +337,28 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
                             pass
         if stripped_count:
             print(f"[BUILD] Stripped unneeded symbols from {stripped_count} Linux binaries/libraries.")
+    elif sys.platform == "darwin" and shutil.which("strip"):
+        stripped_count = 0
+        for base in internal_dirs:
+            if not base.exists():
+                continue
+            for item in list(base.rglob("*")):
+                if "workers" in item.parts:
+                    continue
+                if item.is_file() and not item.is_symlink() and item.suffix in (".dylib", ".so"):
+                    try:
+                        res = subprocess.run(
+                            ["strip", "-x", str(item)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            check=False,
+                        )
+                        if res.returncode == 0:
+                            stripped_count += 1
+                    except Exception:
+                        pass
+        if stripped_count:
+            print(f"[BUILD] Stripped unneeded symbols from {stripped_count} macOS dynamic libraries.")
 
 
 def main() -> None:
@@ -357,38 +388,19 @@ def main() -> None:
     for module in general_excludes:
         exclude_flags += ["--exclude-module", module]
 
-    # Optimized UI pass: collect general UI & translation components.
-    # Worker-only stacks (diarize, sherpa_onnx, wespeakerruntime) are excluded here
-    # to avoid duplicating hundreds of megabytes in RadioTVSegmenter.exe.
-    collect_main = [
-        *pyside6_flags,
-        *exclude_flags,
-        "--collect-all", "numpy",
-        "--copy-metadata", "numpy",
-        "--collect-all", "faster_whisper",
-        "--collect-all", "ctranslate2",
-        "--collect-all", "transformers",
-        "--collect-all", "tokenizers",
-        "--collect-all", "huggingface_hub",
-        "--collect-all", "torch",
-        "--collect-binaries", "torch",
-        "--hidden-import", "torch._C",
-        "--copy-metadata", "torch",
-        "--collect-all", "torchaudio",
-        "--collect-binaries", "torchaudio",
-        "--copy-metadata", "torchaudio",
-        "--collect-all", "sentencepiece",
-        "--collect-all", "soundfile",
-        "--collect-all", "silero_vad",
-        "--copy-metadata", "silero_vad",
-        "--collect-all", "sklearn",
-        "--collect-all", "keyring",
-        "--collect-all", "docx",
-        "--collect-all", "onnxruntime",
-        "--copy-metadata", "onnxruntime",
-        "--collect-all", "psutil",
-        "--collect-all", "scipy",
+    collect_all_packages = [
+        "numpy", "faster_whisper", "ctranslate2", "transformers", "tokenizers",
+        "huggingface_hub", "torch", "torchaudio", "sentencepiece", "soundfile",
+        "diarize", "silero_vad", "wespeakerruntime", "onnxruntime", "sherpa_onnx",
+        "scipy", "sklearn", "psutil", "keyring", "docx", "pypdf", "sacremoses",
+        "requests", "cryptography",
     ]
+    collect_flags = []
+    for pkg in collect_all_packages:
+        collect_flags.extend(["--collect-all", pkg])
+    for meta in ["numpy", "torch", "torchaudio", "silero_vad", "onnxruntime"]:
+        collect_flags.extend(["--copy-metadata", meta])
+    collect_flags.extend(["--hidden-import", "torch._C"])
 
     icon_file = ROOT / "resources" / ("icon.ico" if sys.platform == "win32" else "icon.png")
     icon_flags = ["--icon", str(icon_file)] if icon_file.exists() else []
@@ -399,15 +411,19 @@ def main() -> None:
         if doc_file.exists():
             doc_flags.extend(["--add-data", f"{doc_file}{os.pathsep}."])
 
-    print("[BUILD] Compiling single unified application binary with PyInstaller...")
+    runtime_hook = ROOT / "installer" / "pyinstaller" / "torch_dll_hook.py"
+
+    print("[BUILD] Compiling unified application with PyInstaller (shared ML & GUI runtime)...")
     run([
         "pyinstaller", "--noconfirm", "--onedir", "--windowed",
         "--name", APP_NAME,
-        "--runtime-hook", str(ROOT / "installer" / "pyinstaller" / "torch_dll_hook.py"),
+        "--runtime-hook", str(runtime_hook),
         *torch_binary_flags,
         *icon_flags,
         *doc_flags,
-        *collect_main,
+        *pyside6_flags,
+        *exclude_flags,
+        *collect_flags,
         str(ROOT / ENTRY_POINT),
     ])
 
@@ -460,88 +476,54 @@ def main() -> None:
                 resources_bundle.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(doc_file, resources_bundle / doc)
 
-    # Compile the AI worker. PySide6 is excluded from the worker to minimize footprint.
-    worker_dist = DIST / "_worker_dist"
-    worker_build = BUILD / "worker"
-    worker_spec = BUILD / "worker_spec"
-    shutil.rmtree(worker_dist, ignore_errors=True)
+    # Build dedicated worker binary sharing the same runtime
+    print("[BUILD] Generating dedicated AI worker entry point within the shared runtime...")
+    worker_target_exe = exe_name("prs_worker")
+    worker_dest = app_root / worker_target_exe
+    worker_in_subdir = workers_dir / worker_target_exe
+
+    # Compile prs_worker console executable with PyInstaller pointing to the shared onedir
+    worker_build = BUILD / "worker_entry"
+    worker_dist = BUILD / "worker_dist"
     shutil.rmtree(worker_build, ignore_errors=True)
-    shutil.rmtree(worker_spec, ignore_errors=True)
-
-    worker_collect = [
-        "--collect-all", "numpy",
-        "--copy-metadata", "numpy",
-        "--collect-all", "faster_whisper",
-        "--collect-all", "ctranslate2",
-        "--collect-all", "transformers",
-        "--collect-all", "tokenizers",
-        "--collect-all", "huggingface_hub",
-        "--collect-all", "torch",
-        "--collect-binaries", "torch",
-        "--hidden-import", "torch._C",
-        "--copy-metadata", "torch",
-        "--collect-all", "torchaudio",
-        "--collect-binaries", "torchaudio",
-        "--copy-metadata", "torchaudio",
-        "--collect-all", "sentencepiece",
-        "--collect-all", "soundfile",
-        "--collect-all", "diarize",
-        "--collect-all", "silero_vad",
-        "--copy-metadata", "silero_vad",
-        "--collect-all", "wespeakerruntime",
-        "--collect-all", "onnxruntime",
-        "--copy-metadata", "onnxruntime",
-        "--collect-all", "sherpa_onnx",
-        "--collect-all", "scipy",
-        "--collect-all", "sklearn",
-        "--collect-all", "psutil",
-    ]
-    worker_excludes = [
-        "PySide6",
-        *TEST_AND_BENCHMARK_EXCLUDES,
-    ]
-    worker_exclude_flags = []
-    for module in worker_excludes:
-        worker_exclude_flags += ["--exclude-module", module]
-
-    runtime_hook = ROOT / "installer" / "pyinstaller" / "torch_dll_hook.py"
-    worker_icon_flags = ["--icon", str(icon_file)] if icon_file.exists() else []
-    print("[BUILD] Compiling dedicated AI worker executable...")
+    shutil.rmtree(worker_dist, ignore_errors=True)
+    
     run([
         "pyinstaller", "--noconfirm", "--onedir", "--console",
         "--name", "prs_worker",
         "--distpath", str(worker_dist),
         "--workpath", str(worker_build),
-        "--specpath", str(worker_spec),
         "--runtime-hook", str(runtime_hook),
         *torch_binary_flags,
-        *worker_icon_flags,
-        *worker_collect,
-        *worker_exclude_flags,
+        *icon_flags,
+        *exclude_flags,
+        *collect_flags,
         str(ROOT / "radio_tv_story_segmenter_worker.py"),
     ])
 
-    worker_root = worker_dist / "prs_worker"
-    if not (worker_root / exe_name("prs_worker")).is_file():
-        raise SystemExit("[FATAL BUILD ERROR] PyInstaller did not produce workers/prs_worker executable.")
-
-    # Copy the compiled worker into the application bundle
-    final_worker_root = workers_dir
-    for item in worker_root.iterdir():
-        target = final_worker_root / item.name
-        if item.is_dir():
-            shutil.copytree(item, target, dirs_exist_ok=True)
+    # Copy the compiled standalone prs_worker binary into app_root and create worker shim
+    generated_worker = worker_dist / "prs_worker" / worker_target_exe
+    if generated_worker.exists():
+        shutil.copy2(generated_worker, worker_dest)
+        if sys.platform == "win32":
+            shutil.copy2(generated_worker, worker_in_subdir)
         else:
-            shutil.copy2(item, target)
+            try:
+                if worker_in_subdir.exists() or worker_in_subdir.is_symlink():
+                    worker_in_subdir.unlink()
+                worker_in_subdir.symlink_to(f"../{worker_target_exe}")
+            except Exception:
+                shutil.copy2(generated_worker, worker_in_subdir)
     shutil.rmtree(worker_dist, ignore_errors=True)
 
     provision_optional_runtime_tools(app_root)
     prune_unneeded_bundled_files(app_root)
 
     print("[BUILD] Running frozen AI worker self-test...")
+    test_target = worker_dest if worker_dest.exists() else worker_in_subdir
     smoke = subprocess.run(
-        [str(final_worker_root / exe_name("prs_worker")), "--self-test"],
-        cwd=final_worker_root, capture_output=True, text=True,
+        [str(test_target), "--self-test"],
+        cwd=app_root, capture_output=True, text=True,
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
     if smoke.stdout:
@@ -573,6 +555,10 @@ def main() -> None:
     if os.name != "nt":
         for item in runtime_bin.iterdir():
             item.chmod(0o755)
+        if worker_dest.exists():
+            worker_dest.chmod(0o755)
+        if worker_in_subdir.exists() and not worker_in_subdir.is_symlink():
+            worker_in_subdir.chmod(0o755)
 
     print(f"\n[BUILD] {APP_DISPLAY_NAME} v{PROJECT_VERSION} build complete: {app_root.parent if sys.platform == 'darwin' else app_root}")
 
