@@ -40,7 +40,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.1.5"
+    PROJECT_VERSION = "2.1.6"
 
 # Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]
@@ -177,6 +177,46 @@ def check_cpu_only_torch() -> None:
         print("[BUILD] torch in the build environment is CPU-only. Good.")
 
 
+
+def torch_windows_binary_flags() -> list[str]:
+    """Explicitly add PyTorch's Windows native DLLs to every frozen build.
+
+    PyInstaller can collect torch's binaries, but the _C extension has native
+    dependencies (notably torch_python.dll, torch_cpu.dll, c10.dll and the
+    OpenMP runtime) that may not be discoverable during analysis.  Supplying
+    the torch/lib directory explicitly makes those dependencies deterministic
+    and prevents the frozen build from ending up with a Python-level torch
+    package but a non-loadable torch._C extension.
+    """
+    if sys.platform != "win32":
+        return []
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("torch")
+        if not spec or not spec.origin:
+            raise RuntimeError("could not locate the build environment's torch package")
+        torch_root = Path(spec.origin).resolve().parent
+        lib_dir = torch_root / "lib"
+    except Exception as exc:
+        raise SystemExit(f"[FATAL BUILD ERROR] Could not locate torch/lib for PyInstaller: {exc}") from exc
+    if not lib_dir.is_dir():
+        raise SystemExit(f"[FATAL BUILD ERROR] Expected PyTorch native library directory was not found: {lib_dir}")
+
+    flags: list[str] = ["--paths", str(lib_dir)]
+    dlls = sorted(lib_dir.glob("*.dll"))
+    required = {"c10.dll", "torch_cpu.dll", "torch_python.dll"}
+    present = {p.name.lower() for p in dlls}
+    missing = sorted(name for name in required if name.lower() not in present)
+    if missing:
+        raise SystemExit(
+            "[FATAL BUILD ERROR] The CPU PyTorch wheel is missing required native DLLs in "
+            f"{lib_dir}: {', '.join(missing)}"
+        )
+    for dll in dlls:
+        flags += ["--add-binary", f"{dll}{os.pathsep}torch/lib"]
+    print(f"[BUILD] Explicitly packaging {len(dlls)} PyTorch native DLLs from {lib_dir}")
+    return flags
+
 def run(cmd: list[str]) -> None:
     print("[BUILD]", " ".join(map(str, cmd)))
     creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
@@ -303,9 +343,11 @@ def main() -> None:
     for module in PYSIDE6_USED_SUBMODULES:
         pyside6_flags += ["--collect-submodules", f"PySide6.{module}"]
 
+    torch_binary_flags = torch_windows_binary_flags()
+
     general_excludes = [
         *PYSIDE6_EXCLUDES,
-        "torch.testing", "torch.utils.benchmark", "torch.utils.tensorboard",
+        "torch.utils.benchmark", "torch.utils.tensorboard",
         "triton", "nvidia",
         "scipy.spatial.tests", "scipy.stats.tests", "scipy.optimize.tests",
         "scipy.linalg.tests", "scipy.sparse.tests", "scipy.ndimage.tests",
@@ -361,6 +403,7 @@ def main() -> None:
         "pyinstaller", "--noconfirm", "--clean", "--onedir", "--windowed",
         "--name", APP_NAME,
         "--runtime-hook", str(ROOT / "installer" / "pyinstaller" / "torch_dll_hook.py"),
+        *torch_binary_flags,
         *icon_flags,
         *doc_flags,
         *collect_main,
@@ -455,7 +498,7 @@ def main() -> None:
     ]
     worker_excludes = [
         "PySide6", "tkinter", "tcl", "pytest", "unittest.test",
-        "torch.testing", "torch.utils.benchmark", "torch.utils.tensorboard",
+        "torch.utils.benchmark", "torch.utils.tensorboard",
         "triton", "nvidia", "scipy.spatial.tests", "scipy.stats.tests",
         "scipy.optimize.tests", "scipy.linalg.tests", "scipy.sparse.tests",
         "tests", "test",
@@ -474,6 +517,7 @@ def main() -> None:
         "--workpath", str(worker_build),
         "--specpath", str(worker_spec),
         "--runtime-hook", str(runtime_hook),
+        *torch_binary_flags,
         *worker_icon_flags,
         *worker_collect,
         *worker_exclude_flags,

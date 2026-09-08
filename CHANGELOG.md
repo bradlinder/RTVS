@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.1.5
+## v2.1.6
 
 ### Windows packaging/runtime reliability
 - Build a dedicated `prs_worker` PyInstaller executable instead of falling back to the GUI executable for local AI processing.

@@ -46,15 +46,7 @@ if sys.platform == "win32":
     if paths:
         os.environ["PATH"] = os.pathsep.join(paths) + os.pathsep + os.environ.get("PATH", "")
 
-    # Preload the core PyTorch DLL chain in dependency order when present.
-    # Failure is deliberately non-fatal; Python will report the real import
-    # error if a required dependency is absent.
-    for dll_name in ("c10.dll", "torch_cpu.dll", "fbgemm.dll", "libiomp5md.dll", "ctranslate2.dll", "onnxruntime.dll"):
-        for directory in paths:
-            candidate = Path(directory) / dll_name
-            if candidate.is_file():
-                try:
-                    ctypes.CDLL(str(candidate))
-                    break
-                except OSError:
-                    continue
+    # Do not eagerly ctypes-load PyTorch DLLs here.  Loading torch_cpu/torch_python
+    # manually before Python imports torch can change initialization order.  The
+    # explicit DLL directories above are sufficient; torch._C will load its
+    # native dependency chain normally.

@@ -138,17 +138,7 @@ def _setup_windows_dll_directories():
         current_path = os.environ.get("PATH", "")
         os.environ["PATH"] = os.pathsep.join(added_paths) + os.pathsep + current_path
 
-    # Preload core Windows runtime DLLs if present
-    import ctypes
-    for dll_name in ("libiomp5md.dll", "c10.dll", "torch_cpu.dll", "fbgemm.dll", "ctranslate2.dll", "onnxruntime.dll"):
-        for base in added_paths:
-            candidate = Path(base) / dll_name
-            if candidate.is_file():
-                try:
-                    ctypes.CDLL(str(candidate))
-                    break
-                except Exception:
-                    pass
+    # Native libraries are made discoverable through os.add_dll_directory/PATH above.
 
 _setup_windows_dll_directories()
 
@@ -1552,8 +1542,14 @@ def main(argv=None):
             except Exception as exc:
                 failures.append((label, exc))
                 checks.append(f"[SELF-TEST] {label}: FAIL: {type(exc).__name__}: {exc}")
+        def _torch_location_diagnostic():
+            import importlib.util
+            spec = importlib.util.find_spec("torch._C")
+            return str(spec.origin if spec and spec.origin else "not-found")
+        _check("PyTorch _C module discovery", _torch_location_diagnostic)
         _check("PyTorch", lambda: __import__("torch").__version__)
         _check("PyTorch C extension", lambda: str(__import__("torch")._C))
+        _check("PyTorch tensor operation", lambda: str(__import__("torch").tensor([1, 2, 3]).tolist()))
         _check("torchaudio", lambda: __import__("torchaudio").__version__)
         _check("CTranslate2", lambda: __import__("ctranslate2").__version__)
         _check("Transformers", lambda: __import__("transformers").__version__)

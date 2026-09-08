@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter — v2.1.5
+"""Radio & TV Segmenter — v2.1.6
 
 This is the thin application composition root. UI/processing responsibilities
 are implemented in focused mixins so future changes can target smaller files
@@ -32,6 +32,11 @@ if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
         except Exception as exc:
             failures.append((label, exc))
             checks.append(f"[SELF-TEST] {label}: FAIL: {type(exc).__name__}: {exc}")
+    def _torch_location_diagnostic():
+        import importlib.util
+        spec = importlib.util.find_spec("torch._C")
+        return str(spec.origin if spec and spec.origin else "not-found")
+    _check("PyTorch _C module discovery", _torch_location_diagnostic)
     _check("PyTorch", lambda: __import__("torch").__version__)
     _check("PyTorch C extension", lambda: str(__import__("torch")._C))
     _check("CTranslate2", lambda: __import__("ctranslate2").__version__)

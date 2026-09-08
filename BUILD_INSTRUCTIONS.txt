@@ -1,4 +1,4 @@
-Radio & TV Segmenter v2.1.5 Build Notes
+Radio & TV Segmenter v2.1.6 Build Notes
 
 Windows builds now produce two frozen executables: the main GUI and a dedicated
 workers\prs_worker.exe AI worker. The build also runs PyTorch/torch._C,
