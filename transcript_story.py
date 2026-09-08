@@ -1061,9 +1061,12 @@ class TranscriptStoryMixin:
             story.start = start_time
             story.end = end_time
 
-            self.start_input.setText(format_time(story.start))
-            self.end_input.setText(format_time(story.end))
-            self.refresh_story_list()
+            if self.current_selected_story_indices != [index]:
+                self.apply_story_selection_indices([index], seek=False)
+            else:
+                self.start_input.setText(format_time(story.start))
+                self.end_input.setText(format_time(story.end))
+                self.refresh_story_list()
 
     def handle_drag_finished(self):
         if self.pre_drag_stories_snapshot:
@@ -1071,6 +1074,8 @@ class TranscriptStoryMixin:
             new_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
             self.pre_drag_stories_snapshot = []
             self.commit_story_change(old_stories, new_stories, "Adjust Story Selection")
+            self.refresh_story_list()
+            self.save_project()
 
     def update_selected_story(self):
         selected_rows = list(self.current_selected_story_indices)
@@ -1090,6 +1095,9 @@ class TranscriptStoryMixin:
             return
 
         index = selected_rows[0]
+        if not (0 <= index < len(self.stories)):
+            return
+
         old_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
         new_stories = [Story.from_dict(s.to_dict()) for s in self.stories]
 
@@ -1097,7 +1105,15 @@ class TranscriptStoryMixin:
         new_stories[index].end = end
         new_stories[index].title = self.title_input.text().strip() or "Untitled Story"
 
+        if (
+            abs(new_stories[index].start - old_stories[index].start) < 0.001
+            and abs(new_stories[index].end - old_stories[index].end) < 0.001
+            and new_stories[index].title == old_stories[index].title
+        ):
+            return
+
         self.commit_story_change(old_stories, new_stories, "Update Story Details")
+        self.apply_story_selection_indices([index], seek=False)
 
     def delete_selected_story(self):
         selected_rows = sorted(list(self.current_selected_story_indices), reverse=True)

@@ -448,6 +448,7 @@ class MediaBatchMixin:
             self.silence_threshold = float(self.settings_store.value("silence_threshold", 3.0) or 3.0)
             self.lead_in_padding = float(self.settings_store.value("lead_in_padding", 0.5) or 0.5)
             self.expected_speakers = str(self.settings_store.value("default_expected_speakers", "auto") or "auto")
+            self.story_detection_mode = str(self.settings_store.value("story_detection_mode", "voice") or "voice")
         except Exception:
             pass
 
@@ -766,35 +767,53 @@ class MediaBatchMixin:
 
     def set_language(self, language, persist=True):
         self.language = "es" if language == "es" else "en"
-        if persist: self.settings_store.setValue("language", self.language)
+        if persist:
+            self.settings_store.setValue("language", self.language)
+        if hasattr(self, "lang_en_action"):
+            self.lang_en_action.blockSignals(True)
+            self.lang_en_action.setChecked(self.language != "es")
+            self.lang_en_action.blockSignals(False)
+        if hasattr(self, "lang_es_action"):
+            self.lang_es_action.blockSignals(True)
+            self.lang_es_action.setChecked(self.language == "es")
+            self.lang_es_action.blockSignals(False)
         self._apply_localization()
 
     def _apply_localization(self):
-        mapping={
-            "&File":"&Archivo","&Edit":"&Editar","&View":"&Ver","&Tools":"&Herramientas","&Settings":"&Configuración","&Help":"&Ayuda",
-            "&New Project":"&Nuevo proyecto","&Load Project...":"&Cargar proyecto...","&Save Project":"&Guardar proyecto","Save &As...":"Guardar &como...","&Close Project":"&Cerrar proyecto",
-            "&Open Media...":"&Abrir medio...","Open Document...":"Abrir documento...","&Export...":"&Exportar...","E&xit":"&Salir","&Undo":"&Deshacer","&Redo":"&Rehacer",
-            "Find and Replace...":"Buscar y reemplazar...","Video Preview":"Vista previa de video","Timeline":"Línea de tiempo","Transcript":"Transcripción","Stories":"Historias","Activity Log":"Registro de actividad",
-            "&Transcribe":"&Transcribir","&Detect Speakers":"&Detectar hablantes","&Detect Stories":"&Detectar historias","&Translate Transcript...":"&Traducir transcripción...","Manage Models...":"Administrar modelos...",
-            "Run Processing…":"Ejecutar procesamiento…","Custom Vocabulary / Glossary...":"Vocabulario personalizado / glosario...","Batch Processing...":"Procesamiento por lotes...",
-            "Speaker Labels":"Etiquetas de hablantes","Timestamps":"Marcas de tiempo","Language":"Idioma","English":"Inglés","Spanish":"Español",
-            "Search:":"Buscar:","View:":"Vista:","Translate…":"Traducir…","Edit Transcript":"Editar transcripción","Export Transcript":"Exportar transcripción",
-            "Start:":"Inicio:","End:":"Fin:","Title:":"Título:","Update Selected Story":"Actualizar historia seleccionada","Delete Selected Story":"Eliminar historia seleccionada",
-            "Cancel Process":"Cancelar proceso","Export Activity Log":"Exportar registro de actividad","Clear Log":"Borrar registro","Speaker Sensitivity":"Sensibilidad de hablantes",
+        mapping = {
+            "&File": "&Archivo", "&Edit": "&Editar", "&View": "&Ver", "&Tools": "&Herramientas", "&Settings": "&Configuración", "&Help": "&Ayuda",
+            "&New Project": "&Nuevo proyecto", "&Load Project...": "&Cargar proyecto...", "&Save Project": "&Guardar proyecto", "Save &As...": "Guardar &como...", "&Close Project": "&Cerrar proyecto",
+            "&Open Media...": "&Abrir medio...", "Open Document...": "Abrir documento...", "&Export...": "&Exportar...", "E&xit": "&Salir", "&Undo": "&Deshacer", "&Redo": "&Rehacer",
+            "&Preferences...": "&Preferencias...", "&Language / Idioma": "&Idioma / Language",
+            "Find and Replace...": "Buscar y reemplazar...", "Video Preview": "Vista previa de video", "Timeline": "Línea de tiempo", "Transcript": "Transcripción", "Stories": "Historias", "Activity Log": "Registro de actividad",
+            "&Transcribe": "&Transcribir", "&Detect Speakers": "&Detectar hablantes", "&Detect Stories": "&Detectar historias", "&Translate Transcript...": "&Traducir transcripción...", "Manage Models...": "Administrar modelos...",
+            "Run Processing…": "Ejecutar procesamiento…", "Custom Vocabulary / Glossary...": "Vocabulario personalizado / glosario...", "Batch Processing...": "Procesamiento por lotes...",
+            "Speaker Labels": "Etiquetas de hablantes", "Timestamps": "Marcas de tiempo", "Language": "Idioma", "English": "Inglés", "Spanish": "Español",
+            "Search:": "Buscar:", "View:": "Vista:", "Translate…": "Traducir…", "Edit Transcript": "Editar transcripción", "Export Transcript": "Exportar transcripción",
+            "Start:": "Inicio:", "End:": "Fin:", "Title:": "Título:", "Range:": "Rango:",
+            "Set Story Start": "Fijar inicio de historia", "Set Story End": "Fijar fin de historia",
+            "Add Story": "Agregar historia", "Split Story": "Dividir historia", "Merge Stories": "Combinar historias", "Delete Story": "Eliminar historia",
+            "Update Selected Story": "Actualizar historia seleccionada", "Delete Selected Story": "Eliminar historia seleccionada",
+            "Cancel Process": "Cancelar proceso", "Export Activity Log": "Exportar registro de actividad", "Clear Log": "Borrar registro", "Speaker Sensitivity": "Sensibilidad de hablantes",
+            "▶ Play": "▶ Reproducir", "❚❚ Pause": "❚❚ Pausa", "■ Stop": "■ Detener",
         }
-        reverse={v:k for k,v in mapping.items()}
+        reverse = {v: k for k, v in mapping.items()}
         active = mapping if self.language == "es" else reverse
         for action in self.findChildren(QAction):
-            txt=action.text()
-            if txt in active: action.setText(active[txt])
+            txt = action.text()
+            if txt in active:
+                action.setText(active[txt])
         for w in self.findChildren(QLabel):
-            if w.text() in active: w.setText(active[w.text()])
+            if w.text() in active:
+                w.setText(active[w.text()])
         for w in self.findChildren(QPushButton):
-            if w.text() in active: w.setText(active[w.text()])
+            if w.text() in active:
+                w.setText(active[w.text()])
         for w in self.findChildren(QGroupBox):
-            if w.title() in active: w.setTitle(active[w.title()])
-        if hasattr(self,"transcript_search_input"):
-            self.transcript_search_input.setPlaceholderText("Buscar en la transcripción..." if self.language=="es" else "Find in transcript...")
+            if w.title() in active:
+                w.setTitle(active[w.title()])
+        if hasattr(self, "transcript_search_input"):
+            self.transcript_search_input.setPlaceholderText("Buscar en la transcripción..." if self.language == "es" else "Find in transcript...")
 
     def open_document(self):
         filters = (

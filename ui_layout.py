@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, QTimer, QSize
-from PySide6.QtGui import QAction, QIcon, QKeySequence, QTextCursor, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QIcon, QKeySequence, QTextCursor, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -468,7 +468,7 @@ class UiLayoutMixin:
         edit_menu.addAction(self.undo_action)
 
         self.redo_action = self.undo_stack.createRedoAction(self, "&Redo")
-        self.redo_action.setShortcut(QKeySequence.Redo)
+        self.redo_action.setShortcuts([QKeySequence.Redo, QKeySequence("Ctrl+Y")])
         edit_menu.addAction(self.redo_action)
 
         edit_menu.addSeparator()
@@ -639,6 +639,23 @@ class UiLayoutMixin:
         glossary_act.setShortcut(platform_seq("Ctrl+Shift+G"))
         glossary_act.triggered.connect(self.open_glossary_dialog)
         settings_menu.addAction(glossary_act)
+
+        # Language submenu in Settings menu
+        self.language_menu = settings_menu.addMenu("&Language / Idioma")
+        self.lang_action_group = QActionGroup(self)
+        self.lang_action_group.setExclusive(True)
+
+        self.lang_en_action = QAction("English", self, checkable=True)
+        self.lang_en_action.setChecked(getattr(self, "language", "en") != "es")
+        self.lang_en_action.triggered.connect(lambda: self.set_language("en"))
+        self.lang_action_group.addAction(self.lang_en_action)
+        self.language_menu.addAction(self.lang_en_action)
+
+        self.lang_es_action = QAction("Español (Spanish)", self, checkable=True)
+        self.lang_es_action.setChecked(getattr(self, "language", "en") == "es")
+        self.lang_es_action.triggered.connect(lambda: self.set_language("es"))
+        self.lang_action_group.addAction(self.lang_es_action)
+        self.language_menu.addAction(self.lang_es_action)
 
         settings_menu.addSeparator()
 

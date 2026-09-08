@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.4.2
+
+### Timeline Interaction & Boundary Protection
+- **Protected Timeline Boundary Handles**: Disabled accidental boundary modifications caused by left-clicking and dragging story edge handles in the timeline. Left-clicks across the timeline now exclusively handle playback seeking and audio scrubbing.
+- **Explicit Right-Click & Button Boundary Adjustments**: Timeline boundary adjustments now require deliberate user actions:
+  - Right-clicking and dragging a story's boundary handle directly resizes that boundary with undo/redo snapshotting.
+  - Right-clicking and dragging across any timeline segment creates a selection region that can be quickly assigned with "Set Story Start" or "Set Story End".
+  - Hovering over a story boundary handle displays an informative tooltip (`Right-click and drag to adjust`).
+- **Version Synchronization**: Bumped version to `2.4.2` across `prs_shared.py`, `RadioTVSegmenter.py`, `build_installer.py`, `updater.py`, `package.json`, Windows Inno Setup, Linux Debian packaging, macOS bundling, and GitHub Actions CI workflows.
+
 ## v2.4.1
 
 ### Features & Story Boundary Controls

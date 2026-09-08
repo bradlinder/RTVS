@@ -9,7 +9,7 @@ APP_NAME="RadioTVSegmenter"
 PKG_NAME="radiotvsegmenter"
 
 # Extract project version from single source of truth (prs_shared.py)
-VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text()).group(1))" 2>/dev/null || echo "2.4.1")
+VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text()).group(1))" 2>/dev/null || echo "2.4.2")
 DIST="$ROOT/dist"
 SOURCE_APP="$DIST/$APP_NAME"
 DEB_FILENAME="RadioTVSegmenter-${VERSION}-Linux-amd64.deb"

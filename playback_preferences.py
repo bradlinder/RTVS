@@ -1208,6 +1208,17 @@ class PlaybackPreferencesMixin:
             theme_combo.setCurrentIndex(idx)
         gen_form.addRow("Theme Mode:", theme_combo)
 
+        lang_combo = QComboBox()
+        lang_combo.addItem("English", "en")
+        lang_combo.addItem("Español (Spanish)", "es")
+        curr_lang = getattr(self, "language", "en") or "en"
+        idx = lang_combo.findData(curr_lang)
+        if idx >= 0:
+            lang_combo.setCurrentIndex(idx)
+        else:
+            lang_combo.setCurrentIndex(0)
+        gen_form.addRow("UI Language / Idioma:", lang_combo)
+
         startup_combo = QComboBox()
         startup_combo.addItem("Open last project", "last")
         startup_combo.addItem("Start new project", "new")
@@ -1478,6 +1489,22 @@ class PlaybackPreferencesMixin:
         page_detect = QWidget()
         det_layout = QVBoxLayout(page_detect)
         det_form = QFormLayout()
+
+        det_mode_combo = QComboBox()
+        det_mode_combo.addItem("Voice / Speech (Standard Dialog Pauses)", "voice")
+        det_mode_combo.addItem("Music / Songs (Music Programs & Song Breaks)", "music")
+        curr_det_mode = str(getattr(self, "story_detection_mode", "voice") or "voice")
+        idx = det_mode_combo.findData(curr_det_mode)
+        if idx >= 0:
+            det_mode_combo.setCurrentIndex(idx)
+        else:
+            det_mode_combo.setCurrentIndex(0)
+        det_mode_combo.setToolTip(
+            "Detection Basis:\n"
+            "• Voice Mode: Segments audio based on silences and pauses in spoken dialogue.\n"
+            "• Music Mode: Designed for music programs. Detects song segments; sets story dividers when a song ends and there is silence, dialog only, or non-musical sounds for the threshold duration."
+        )
+        det_form.addRow("Detection Basis / Mode:", det_mode_combo)
 
         gap_spin = QDoubleSpinBox()
         gap_spin.setRange(0.5, 30.0)
@@ -1772,6 +1799,10 @@ class PlaybackPreferencesMixin:
             self.settings_store.setValue("theme_mode", new_theme)
             self.set_theme(new_theme)
 
+            new_lang = lang_combo.currentData()
+            if new_lang and new_lang != getattr(self, "language", "en"):
+                self.set_language(new_lang, persist=True)
+
             new_startup = startup_combo.currentData()
             if hasattr(self, "set_startup_project_mode"):
                 self.set_startup_project_mode(new_startup)
@@ -1850,6 +1881,8 @@ class PlaybackPreferencesMixin:
                 self.transcript_view.set_selection_mode(new_sel_mode)
 
             # Save Detection
+            self.story_detection_mode = str(det_mode_combo.currentData() or "voice")
+            self.settings_store.setValue("story_detection_mode", self.story_detection_mode)
             self.silence_threshold = gap_spin.value()
             self.lead_in_padding = pad_spin.value()
             self.expected_speakers = str(expected_speakers_combo.currentData() or "auto")
@@ -2009,6 +2042,30 @@ class PlaybackPreferencesMixin:
                     self.seek_to(max(0, self.current_position - self.skip_seconds))
                 event.accept()
                 return True
+
+            if (event.modifiers() & Qt.KeyboardModifier.ControlModifier) and key in (Qt.Key.Key_Z, Qt.Key.Key_Y):
+                focused_widget = QApplication.focusWidget()
+                story_inputs = (
+                    getattr(self, "start_input", None),
+                    getattr(self, "end_input", None),
+                    getattr(self, "title_input", None),
+                )
+                if focused_widget in story_inputs and focused_widget is not None:
+                    if hasattr(focused_widget, "isModified") and focused_widget.isModified():
+                        self.update_selected_story()
+                    is_redo = bool(
+                        key == Qt.Key.Key_Y or (event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+                    )
+                    if is_redo:
+                        if hasattr(self, "undo_stack") and self.undo_stack.canRedo():
+                            self.undo_stack.redo()
+                            event.accept()
+                            return True
+                    else:
+                        if hasattr(self, "undo_stack") and self.undo_stack.canUndo():
+                            self.undo_stack.undo()
+                            event.accept()
+                            return True
 
             if key == Qt.Key.Key_Space:
                 focused_widget = QApplication.focusWidget()
@@ -2671,11 +2728,21 @@ class PlaybackPreferencesMixin:
 
     def prompt_set_auto_detect_thresholds(self):
         dialog = QDialog(self)
-        dialog.setWindowTitle("Story Detection Threshold")
-        dialog.setFixedWidth(360)
+        dialog.setWindowTitle("Story Detection Settings")
+        dialog.setFixedWidth(380)
 
         layout = QVBoxLayout(dialog)
         form = QFormLayout()
+
+        mode_box = QComboBox()
+        mode_box.addItem("Voice / Speech (Dialog Pauses)", "voice")
+        mode_box.addItem("Music / Songs (Music Programs)", "music")
+        curr_det_mode = str(getattr(self, "story_detection_mode", "voice") or "voice")
+        idx = mode_box.findData(curr_det_mode)
+        if idx >= 0:
+            mode_box.setCurrentIndex(idx)
+        else:
+            mode_box.setCurrentIndex(0)
 
         thresh_box = QDoubleSpinBox()
         thresh_box.setRange(0.5, 30.0)
@@ -2689,6 +2756,7 @@ class PlaybackPreferencesMixin:
         pad_box.setValue(self.lead_in_padding)
         pad_box.setSuffix(" sec")
 
+        form.addRow("Detection Basis:", mode_box)
         form.addRow("Silence Gap Threshold:", thresh_box)
         form.addRow("Lead-In Padding:", pad_box)
 
@@ -2705,13 +2773,15 @@ class PlaybackPreferencesMixin:
         cancel_btn.clicked.connect(dialog.reject)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.story_detection_mode = str(mode_box.currentData() or "voice")
             self.silence_threshold = thresh_box.value()
             self.lead_in_padding = pad_box.value()
             if hasattr(self, "settings_store") and self.settings_store is not None:
+                self.settings_store.setValue("story_detection_mode", self.story_detection_mode)
                 self.settings_store.setValue("silence_threshold", self.silence_threshold)
                 self.settings_store.setValue("lead_in_padding", self.lead_in_padding)
-            self.log_activity(f"[SETTINGS] Thresholds set: Gap={self.silence_threshold}s, Padding={self.lead_in_padding}s.")
-            self.statusBar().showMessage(f"Thresholds updated: {self.silence_threshold}s silence gap, {self.lead_in_padding}s padding.")
+            self.log_activity(f"[SETTINGS] Thresholds set: Mode={self.story_detection_mode.capitalize()}, Gap={self.silence_threshold}s, Padding={self.lead_in_padding}s.")
+            self.statusBar().showMessage(f"Detection updated: Mode={self.story_detection_mode.capitalize()}, Gap={self.silence_threshold}s, Padding={self.lead_in_padding}s.")
 
     def prompt_set_auto_save(self):
         val, accepted = QInputDialog.getInt(

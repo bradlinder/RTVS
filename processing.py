@@ -255,13 +255,18 @@ class ProcessingMixin:
 
     def commit_story_change(self, old_stories, new_stories, description="Modify Story"):
         # Story changes are part of the same complete project-state undo
-        # history as transcript/speaker edits.  Capture the state before the
+        # history as transcript/speaker edits. Capture the state before the
         # caller's mutation and construct the after-state with the new stories.
         before_state = self._capture_project_state()
-        after_state = json.loads(json.dumps(before_state, ensure_ascii=False))
-        after_state["stories"] = [s.to_dict() for s in new_stories]
+        if old_stories is not None:
+            before_state["stories"] = [s.to_dict() for s in old_stories]
         self.stories = [Story.from_dict(s.to_dict()) for s in new_stories]
         self._commit_project_state_change(before_state, description)
+        self.refresh_story_list()
+        if hasattr(self, "timeline"):
+            self.timeline.set_stories(self.stories, self.current_selected_story_indices)
+        self.mark_project_dirty(description)
+        self.save_project()
         if not self.is_restoring_snapshot:
             self.log_activity(f"[STORY] {description} ({len(new_stories)} story/stories total)")
 
@@ -309,7 +314,6 @@ class ProcessingMixin:
         selected_rows = sorted([item.row() for item in self.story_list.selectedIndexes()])
 
         if selected_rows != self.current_selected_story_indices:
-            old_sel = list(self.current_selected_story_indices)
             new_sel = list(selected_rows)
 
             desc = "Cleared Story Selection"
@@ -317,9 +321,6 @@ class ProcessingMixin:
                 desc = f"Selected Story #{new_sel[0] + 1}: '{self.stories[new_sel[0]].title}'"
             elif len(new_sel) > 1:
                 desc = f"Selected {len(new_sel)} Stories"
-
-            command = SelectStoriesCommand(self, old_sel, new_sel, desc)
-            self.undo_stack.push(command)
 
             self.apply_story_selection_indices(new_sel)
             if not self.is_restoring_snapshot:
@@ -331,13 +332,9 @@ class ProcessingMixin:
 
         selected_rows = sorted(selected_indices)
         if selected_rows != self.current_selected_story_indices:
-            old_sel = list(self.current_selected_story_indices)
             new_sel = list(selected_rows)
 
             desc = f"Box Selected {len(new_sel)} Stories" if len(new_sel) > 1 else "Timeline Selected Story"
-            command = SelectStoriesCommand(self, old_sel, new_sel, desc)
-            self.undo_stack.push(command)
-
             self.apply_story_selection_indices(new_sel)
             if not self.is_restoring_snapshot:
                 self.log_activity(f"[STORY SELECT] {desc}")
@@ -1698,8 +1695,9 @@ class ProcessingMixin:
         self.progress.setValue(0)
         self.progress.show()
         self.cancel_button.show()
+        mode_str = str(getattr(self, "story_detection_mode", "voice") or "voice").capitalize()
         self.log_activity(
-            f"[STORY DETECT] Started story detection (Pause Threshold: {self.silence_threshold}s)"
+            f"[STORY DETECT] Started story detection (Mode: {mode_str}, Threshold: {self.silence_threshold}s)"
         )
 
         self.story_job_token += 1
@@ -1719,6 +1717,7 @@ class ProcessingMixin:
             audio_duration=getattr(self, "duration", 0),
             transcript_segments=transcript_segments,
             whisper_model=getattr(self, "whisper_model", "tiny"),
+            detection_mode=getattr(self, "story_detection_mode", "voice"),
         )
         self.worker.moveToThread(self.thread)
         self.worker._job_token = job_token

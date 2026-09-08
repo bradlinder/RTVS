@@ -265,7 +265,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "2.4.1"
+PROJECT_VERSION = "2.4.3"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -1738,6 +1738,7 @@ class StoryAutoDetectWorker(QObject):
         audio_duration=0,
         transcript_segments=None,
         whisper_model="tiny",
+        detection_mode="voice",
         **kwargs,
     ):
         super().__init__()
@@ -1747,6 +1748,7 @@ class StoryAutoDetectWorker(QObject):
         self.audio_duration = float(audio_duration or 0.0)
         self.transcript_segments = transcript_segments or []
         self.whisper_model = whisper_model or "tiny"
+        self.detection_mode = str(detection_mode or "voice").strip().lower()
         self._is_cancelled = False
 
     def cancel(self):
@@ -1912,7 +1914,138 @@ class StoryAutoDetectWorker(QObject):
                             "end": float(seg.get("end", 0.0)),
                         })
 
-            if speech_timestamps:
+            if self.detection_mode == "music":
+                self._emit_progress("[Step 2/2] Detecting music segments and song boundaries...", 80)
+                # Music Mode: Detect song segments separated by non-musical transitions
+                # (silence, dialog-only speech, or non-musical sounds lasting >= silence_threshold).
+                music_hint_intervals = []
+                if self.transcript_segments:
+                    for seg in self.transcript_segments:
+                        txt = seg.get("text", "")
+                        st = float(seg.get("start", 0.0))
+                        et = float(seg.get("end", 0.0))
+                        if not self._is_real_speech(txt):
+                            music_hint_intervals.append((st, et))
+
+                frame_dur = 0.5
+                num_frames = int(max(1, math.ceil(total_dur / frame_dur))) if total_dur > 0 else 0
+                frame_is_music = [False] * num_frames
+
+                if audio_data is not None and len(audio_data) > 0 and sample_rate > 0:
+                    samples_per_frame = int(sample_rate * frame_dur)
+                    rms_list = []
+                    try:
+                        import numpy as np
+                        has_np = isinstance(audio_data, np.ndarray)
+                    except Exception:
+                        has_np = False
+
+                    for f in range(num_frames):
+                        s_idx = f * samples_per_frame
+                        e_idx = min(len(audio_data), (f + 1) * samples_per_frame)
+                        chunk = audio_data[s_idx:e_idx]
+                        if len(chunk) > 0:
+                            if has_np:
+                                rms_val = float(np.sqrt(np.mean(chunk ** 2) + 1e-12))
+                            else:
+                                rms_val = math.sqrt(sum(float(x) ** 2 for x in chunk) / len(chunk) + 1e-12)
+                            rms_list.append(rms_val)
+                        else:
+                            rms_list.append(0.0)
+
+                    sorted_rms = sorted(rms_list)
+                    silence_rms = sorted_rms[int(len(sorted_rms) * 0.12)] if sorted_rms else 0.001
+                    silence_rms = max(silence_rms, 0.002)
+
+                    window_radius = 2  # +/- 2 frames = 2.0s rolling window
+                    for f in range(num_frames):
+                        f_start = f * frame_dur
+                        f_end = (f + 1) * frame_dur
+                        f_rms = rms_list[f] if f < len(rms_list) else 0.0
+
+                        if f_rms < silence_rms:
+                            frame_is_music[f] = False
+                            continue
+
+                        in_speech = False
+                        if speech_timestamps:
+                            in_speech = any(
+                                not (f_end <= sp["start"] or f_start >= sp["end"])
+                                for sp in speech_timestamps
+                            )
+
+                        w_start = max(0, f - window_radius)
+                        w_end = min(num_frames, f + window_radius + 1)
+                        w_vals = rms_list[w_start:w_end]
+                        min_w = min(w_vals) if w_vals else 0.0
+                        max_w = max(w_vals) if w_vals else 1.0
+                        valley_ratio = min_w / (max_w + 1e-6)
+
+                        has_music_hint = any(
+                            not (f_end <= mh[0] or f_start >= mh[1])
+                            for mh in music_hint_intervals
+                        )
+
+                        if has_music_hint:
+                            frame_is_music[f] = True
+                        elif not in_speech:
+                            # Sustained non-speech acoustic energy -> music instrumental/song
+                            frame_is_music[f] = True
+                        else:
+                            # Speech active: check if accompanied by continuous musical rhythm
+                            frame_is_music[f] = bool(valley_ratio >= 0.22)
+
+                elif music_hint_intervals:
+                    for f in range(num_frames):
+                        f_start = f * frame_dur
+                        f_end = (f + 1) * frame_dur
+                        frame_is_music[f] = any(
+                            not (f_end <= mh[0] or f_start >= mh[1])
+                            for mh in music_hint_intervals
+                        )
+
+                min_break_frames = max(2, int(round(float(self.silence_threshold) / frame_dur)))
+                music_intervals = []
+                in_music = False
+                seg_start_f = 0
+                non_music_gap_count = 0
+
+                for f_idx, is_mus in enumerate(frame_is_music):
+                    if is_mus:
+                        if not in_music:
+                            in_music = True
+                            seg_start_f = f_idx
+                        non_music_gap_count = 0
+                    else:
+                        if in_music:
+                            non_music_gap_count += 1
+                            if non_music_gap_count >= min_break_frames:
+                                seg_end_f = f_idx - non_music_gap_count + 1
+                                music_intervals.append((
+                                    round(seg_start_f * frame_dur, 2),
+                                    round(seg_end_f * frame_dur, 2)
+                                ))
+                                in_music = False
+                                non_music_gap_count = 0
+
+                if in_music:
+                    music_intervals.append((
+                        round(seg_start_f * frame_dur, 2),
+                        round(len(frame_is_music) * frame_dur, 2)
+                    ))
+
+                for idx, (mst, met) in enumerate(music_intervals):
+                    st = max(0.0, mst - self.lead_in_padding)
+                    et = min(total_dur, met + min(0.3, self.lead_in_padding))
+                    if et - st >= 5.0:
+                        detected_stories.append(Story(
+                            start=round(st, 2),
+                            end=round(et, 2),
+                            title=f"Song {len(detected_stories) + 1}"
+                        ))
+
+            # Voice Mode or fallback if no music intervals detected
+            if not detected_stories and speech_timestamps:
                 self._emit_progress("[Step 2/2] Assembling stories from vocal intervals...", 85)
                 story_starts = [max(0.0, speech_timestamps[0]["start"] - self.lead_in_padding)]
                 story_ends = []
@@ -2757,15 +2890,10 @@ class TimelineCanvas(QWidget):
             event.accept()
             return
 
-        # --- LEFT-CLICK: Check for Story Boundary Handles First, Else Scrub ---
+        # --- LEFT-CLICK: Continuous Audio Scrubbing & Playhead Navigation ---
+        # Story boundaries cannot be moved by left-clicking/dragging handles.
+        # Use right-click + drag on handles or the Set Story Start/End buttons.
         if event.button() == Qt.MouseButton.LeftButton:
-            edge_hit = self.find_edge_at_pos(pos_x, width)
-            if edge_hit:
-                self.active_edge_target = edge_hit
-                self.setCursor(Qt.CursorShape.SizeHorCursor)
-                event.accept()
-                return
-
             time = max(0, min(self.duration, self.x_to_time(pos_x, width)))
             self.is_left_down = True
             self.is_scrubbing = True
@@ -2830,13 +2958,18 @@ class TimelineCanvas(QWidget):
         else:
             self.unsetCursor()
 
-        if not (self.is_panning or self.is_left_down or self.is_right_dragging):
+        if not (self.is_panning or self.is_left_down or self.is_right_dragging or self.active_edge_target):
             hover_time = max(0, min(self.duration, self.x_to_time(pos_x, width)))
             mins = int(hover_time // 60)
             secs = int(hover_time % 60)
             millis = int((hover_time - int(hover_time)) * 1000)
 
             tooltip_text = f"{mins:02d}:{secs:02d}.{millis:03d}"
+            edge_hit = self.find_edge_at_pos(pos_x, width)
+            if edge_hit:
+                idx, edge_type = edge_hit
+                title = self.stories[idx].title if 0 <= idx < len(self.stories) else f"Story #{idx+1}"
+                tooltip_text += f"\n{title} ({edge_type.capitalize()} Boundary)\nRight-click and drag to adjust"
             QToolTip.showText(event.globalPosition().toPoint(), tooltip_text, self)
 
         super().mouseMoveEvent(event)
@@ -2870,19 +3003,13 @@ class TimelineCanvas(QWidget):
 
             if self.active_edge_target:
                 self.active_edge_target = None
-                self.dragOperationFinished.emit()
-                event.accept()
-                return
-
-        # --- LEFT-CLICK RELEASE: Finalize Edge Adjustment or End Scrubbing ---
-        if event.button() == Qt.MouseButton.LeftButton:
-            if self.active_edge_target:
-                self.active_edge_target = None
                 self.unsetCursor()
                 self.dragOperationFinished.emit()
                 event.accept()
                 return
 
+        # --- LEFT-CLICK RELEASE: Finalize Audio Scrubbing ---
+        if event.button() == Qt.MouseButton.LeftButton:
             if self.is_left_down:
                 self.is_left_down = False
                 self.is_scrubbing = False
