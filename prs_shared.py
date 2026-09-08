@@ -1833,6 +1833,12 @@ class StoryAutoDetectWorker(QObject):
                         return_seconds=True,
                     )
                 except Exception as vad_err:
+                    self._emit_progress(
+                        f"[Step 1/2] Neural voice detection unavailable ({type(vad_err).__name__}: {vad_err}); "
+                        "falling back to a lower-accuracy volume-based detector for this file. "
+                        "Background music or noise may prevent story breaks from being detected correctly.",
+                        30,
+                    )
                     # Pure NumPy / SciPy acoustic energy envelope fallback (no neural deps needed)
                     try:
                         import numpy as np
