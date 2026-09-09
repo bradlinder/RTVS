@@ -6,26 +6,6 @@ on:
       - 'v*' # Triggers on semantic version tag pushes (e.g., v2.1)
   workflow_dispatch:
     inputs:
-      build_target:
-        description: 'Build Target'
-        type: choice
-        options:
-          - 'Core App + Selected Plugins'
-          - 'Core App Only'
-          - 'Plugins Only'
-        default: 'Core App + Selected Plugins'
-      plugin_wordpress:
-        description: 'Include Plugin: WordPress Publisher'
-        type: boolean
-        default: true
-      plugin_youtube:
-        description: 'Include Plugin: YouTube Publisher'
-        type: boolean
-        default: true
-      plugin_translation:
-        description: 'Include Plugin: Language Translation'
-        type: boolean
-        default: true
       build_windows:
         description: 'Build Windows Installer (.exe)'
         type: boolean
@@ -36,6 +16,18 @@ on:
         default: true
       build_linux:
         description: 'Build Linux Package (.deb & .tar.gz)'
+        type: boolean
+        default: true
+      plugin_wordpress:
+        description: 'Include Plugin: WordPress Publisher'
+        type: boolean
+        default: true
+      plugin_youtube:
+        description: 'Include Plugin: YouTube Publisher'
+        type: boolean
+        default: true
+      plugin_translation:
+        description: 'Include Plugin: Language Translation'
         type: boolean
         default: true
       create_release:
@@ -63,9 +55,9 @@ jobs:
     name: Package Standalone Plugins
     if: >-
       github.event_name == 'push' ||
-      inputs.build_target == 'Plugins Only' ||
-      inputs.build_target == 'Core App + Selected Plugins' ||
-      inputs.build_target == ''
+      inputs.plugin_wordpress ||
+      inputs.plugin_youtube ||
+      inputs.plugin_translation
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -98,9 +90,7 @@ jobs:
   # =========================================================================
   build-windows:
     name: Build Windows
-    if: >-
-      (github.event_name == 'push' || inputs.build_windows) &&
-      inputs.build_target != 'Plugins Only'
+    if: github.event_name == 'push' || inputs.build_windows
     runs-on: windows-latest
     timeout-minutes: 75
     steps:
@@ -153,7 +143,7 @@ jobs:
 
       - name: Run PyInstaller build
         env:
-          BUILD_TARGET: ${{ inputs.build_target || 'all' }}
+          BUILD_TARGET: 'all'
           BUILD_PLUGIN_WORDPRESS: ${{ inputs.plugin_wordpress != false }}
           BUILD_PLUGIN_YOUTUBE: ${{ inputs.plugin_youtube != false }}
           BUILD_PLUGIN_TRANSLATION: ${{ inputs.plugin_translation != false }}
@@ -194,9 +184,7 @@ jobs:
   # =========================================================================
   build-macos:
     name: Build macOS
-    if: >-
-      (github.event_name == 'push' || inputs.build_macos) &&
-      inputs.build_target != 'Plugins Only'
+    if: github.event_name == 'push' || inputs.build_macos
     runs-on: macos-latest
     timeout-minutes: 45
     env:
@@ -258,7 +246,7 @@ jobs:
 
       - name: Run PyInstaller build
         env:
-          BUILD_TARGET: ${{ inputs.build_target || 'all' }}
+          BUILD_TARGET: 'all'
           BUILD_PLUGIN_WORDPRESS: ${{ inputs.plugin_wordpress != false }}
           BUILD_PLUGIN_YOUTUBE: ${{ inputs.plugin_youtube != false }}
           BUILD_PLUGIN_TRANSLATION: ${{ inputs.plugin_translation != false }}
@@ -282,9 +270,7 @@ jobs:
   # =========================================================================
   build-linux:
     name: Build Linux
-    if: >-
-      (github.event_name == 'push' || inputs.build_linux) &&
-      inputs.build_target != 'Plugins Only'
+    if: github.event_name == 'push' || inputs.build_linux
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -314,7 +300,7 @@ jobs:
 
       - name: Run PyInstaller build
         env:
-          BUILD_TARGET: ${{ inputs.build_target || 'all' }}
+          BUILD_TARGET: 'all'
           BUILD_PLUGIN_WORDPRESS: ${{ inputs.plugin_wordpress != false }}
           BUILD_PLUGIN_YOUTUBE: ${{ inputs.plugin_youtube != false }}
           BUILD_PLUGIN_TRANSLATION: ${{ inputs.plugin_translation != false }}
