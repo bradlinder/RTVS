@@ -848,6 +848,8 @@ class PlaybackPreferencesMixin:
 
             repo = get_github_repo()
             worker = CheckUpdateWorker(repo, self)
+            if hasattr(self, "_track_worker_thread"):
+                self._track_worker_thread(worker)
 
             def on_update(release_info, asset_info, is_newer):
                 if is_newer:
@@ -1185,7 +1187,14 @@ class PlaybackPreferencesMixin:
         # Left category tree / list
         cat_list = QListWidget(dialog)
         cat_list.setFixedWidth(160)
-        categories = ["General", "Audio Hardware", "Updates & GitHub", "AI Models", "Playback & Timeline", "Detection", "Batch Processing", "WordPress"]
+        categories = ["General", "Audio Hardware", "Updates & GitHub", "AI Models", "Playback & Timeline", "Detection", "Batch Processing"]
+        show_wp = hasattr(self, "plugin_manager") and self.plugin_manager.is_plugin_enabled("wordpress")
+        show_yt = hasattr(self, "plugin_manager") and self.plugin_manager.is_plugin_enabled("youtube")
+        if show_wp:
+            categories.append("WordPress")
+        if show_yt:
+            categories.append("YouTube")
+
         for cat in categories:
             cat_list.addItem(QListWidgetItem(cat))
         content_layout.addWidget(cat_list)
@@ -1727,7 +1736,99 @@ class PlaybackPreferencesMixin:
         wp_layout.addWidget(wp_test_btn)
         _add_custom_defaults_btn(wp_layout, "WordPress Connection")
         wp_layout.addStretch()
-        stack.addWidget(page_wp)
+        if show_wp:
+            stack.addWidget(page_wp)
+
+        # 9. YouTube Page
+        yt_cat_combo = None
+        yt_priv_combo = None
+        yt_tags_input = None
+        yt_cb_copy_input = None
+        yt_cb_browser_input = None
+        yt_cb_subs_input = None
+        yt_cb_folder_input = None
+        if show_yt:
+            try:
+                page_yt = QWidget()
+                yt_layout = QVBoxLayout(page_yt)
+                yt_desc = QLabel(
+                    "<b>YouTube Studio Assisted Upload (Zero-API Publishing)</b><br>"
+                    "<span style='color: #64748b; font-size: 12px;'>"
+                    "Radio & TV Segmenter formats video clips with interactive chapter markers, generates thumbnails, "
+                    "and exports subtitles (.srt), then opens YouTube Studio in your web browser with metadata pre-copied "
+                    "to the clipboard for immediate manual upload. No Google Cloud project or API credentials required.</span>"
+                )
+                yt_desc.setWordWrap(True)
+                yt_layout.addWidget(yt_desc)
+
+                yt_form_group = QGroupBox("Default Video Metadata")
+                yt_form = QFormLayout(yt_form_group)
+
+                yt_settings = QSettings(INTERNAL_APP_ID, INTERNAL_APP_ID)
+
+                yt_cat_combo = QComboBox()
+                yt_categories = [
+                    ("News & Politics", "25"),
+                    ("Entertainment", "24"),
+                    ("Education", "27"),
+                    ("People & Blogs", "22"),
+                    ("Music", "10"),
+                    ("Film & Animation", "1"),
+                    ("Science & Technology", "28"),
+                    ("Howto & Style", "26"),
+                    ("Travel & Events", "19"),
+                    ("Sports", "17"),
+                ]
+                for name, cid in yt_categories:
+                    yt_cat_combo.addItem(name, cid)
+                saved_cat = str(yt_settings.value("export_yt_category", "25"))
+                c_idx = yt_cat_combo.findData(saved_cat)
+                if c_idx >= 0:
+                    yt_cat_combo.setCurrentIndex(c_idx)
+                yt_form.addRow("Default Category:", yt_cat_combo)
+
+                yt_priv_combo = QComboBox()
+                yt_priv_combo.addItem("Unlisted (Recommended)", "unlisted")
+                yt_priv_combo.addItem("Public", "public")
+                yt_priv_combo.addItem("Private", "private")
+                saved_priv = str(yt_settings.value("export_yt_privacy", "unlisted"))
+                p_idx = yt_priv_combo.findData(saved_priv)
+                if p_idx >= 0:
+                    yt_priv_combo.setCurrentIndex(p_idx)
+                yt_form.addRow("Default Privacy:", yt_priv_combo)
+
+                yt_tags_input = QLineEdit()
+                yt_tags_input.setPlaceholderText("news, broadcast, interview, segment")
+                yt_tags_input.setText(str(yt_settings.value("export_yt_tags", "news, broadcast, segment")))
+                yt_form.addRow("Default Tags:", yt_tags_input)
+                yt_layout.addWidget(yt_form_group)
+
+                yt_auto_group = QGroupBox("Workflow Automation Defaults")
+                yt_auto_layout = QVBoxLayout(yt_auto_group)
+
+                yt_cb_copy_input = QCheckBox("Automatically copy Title, Description & Chapters to clipboard")
+                yt_cb_copy_input.setChecked(yt_settings.value("export_yt_copy_clipboard", True, type=bool))
+                yt_auto_layout.addWidget(yt_cb_copy_input)
+
+                yt_cb_browser_input = QCheckBox("Automatically launch YouTube Studio upload page in browser")
+                yt_cb_browser_input.setChecked(yt_settings.value("export_yt_open_browser", True, type=bool))
+                yt_auto_layout.addWidget(yt_cb_browser_input)
+
+                yt_cb_subs_input = QCheckBox("Automatically generate Closed Captions (.srt) for YouTube")
+                yt_cb_subs_input.setChecked(yt_settings.value("export_yt_subtitles", True, type=bool))
+                yt_auto_layout.addWidget(yt_cb_subs_input)
+
+                yt_cb_folder_input = QCheckBox("Open export directory in file explorer after packaging")
+                yt_cb_folder_input.setChecked(yt_settings.value("export_yt_open_folder", True, type=bool))
+                yt_auto_layout.addWidget(yt_cb_folder_input)
+
+                yt_layout.addWidget(yt_auto_group)
+
+                _add_custom_defaults_btn(yt_layout, "YouTube Defaults")
+                yt_layout.addStretch()
+                stack.addWidget(page_yt)
+            except Exception as exc:
+                print(f"[PREFERENCES] Failed to load YouTube settings page: {exc}")
 
         content_layout.addWidget(stack, 1)
         main_layout.addLayout(content_layout)
@@ -1793,7 +1894,8 @@ class PlaybackPreferencesMixin:
 
         btn_box = QDialogButtonBox(dialog)
         save_btn = btn_box.addButton("Save", QDialogButtonBox.ButtonRole.AcceptRole)
-        cancel_btn = btn_box.addButton("Cancel", QDialogButtonBox.ButtonRole.RejectRole)
+        apply_btn = btn_box.addButton("Apply", QDialogButtonBox.ButtonRole.ApplyRole)
+        close_btn = btn_box.addButton("Close", QDialogButtonBox.ButtonRole.RejectRole)
         bottom_bar.addWidget(btn_box)
 
         main_layout.addLayout(bottom_bar)
@@ -1960,6 +2062,27 @@ class PlaybackPreferencesMixin:
                     )
             
 
+            if show_yt and yt_cat_combo:
+                try:
+                    yt_settings = QSettings(INTERNAL_APP_ID, INTERNAL_APP_ID)
+                    if yt_cat_combo.currentData():
+                        yt_settings.setValue("export_yt_category", yt_cat_combo.currentData())
+                    if yt_priv_combo and yt_priv_combo.currentData():
+                        yt_settings.setValue("export_yt_privacy", yt_priv_combo.currentData())
+                    if yt_tags_input:
+                        yt_settings.setValue("export_yt_tags", yt_tags_input.text().strip())
+                    if yt_cb_copy_input:
+                        yt_settings.setValue("export_yt_copy_clipboard", yt_cb_copy_input.isChecked())
+                    if yt_cb_browser_input:
+                        yt_settings.setValue("export_yt_open_browser", yt_cb_browser_input.isChecked())
+                    if yt_cb_subs_input:
+                        yt_settings.setValue("export_yt_subtitles", yt_cb_subs_input.isChecked())
+                    if yt_cb_folder_input:
+                        yt_settings.setValue("export_yt_open_folder", yt_cb_folder_input.isChecked())
+                    yt_settings.sync()
+                except Exception as exc:
+                    print(f"[PREFERENCES] Failed to save YouTube settings: {exc}")
+
             # Force these writes to disk now rather than relying on
             # QSettings' own flush timing, so a Preferences change is
             # durable even if the app is closed or killed shortly after.
@@ -1974,6 +2097,7 @@ class PlaybackPreferencesMixin:
 
         btn_box.accepted.connect(lambda: _save_preferences(close_dialog=True))
         btn_box.rejected.connect(dialog.reject)
+        apply_btn.clicked.connect(lambda: _save_preferences(close_dialog=False))
 
         dialog.exec()
 
@@ -2164,8 +2288,14 @@ class PlaybackPreferencesMixin:
             try:
                 import qdarktheme
                 from theme_qss import TARGETED_QSS
-                qdarktheme.setup_theme("dark", corner_shape="rounded", additional_qss=TARGETED_QSS)
-                used_qdarktheme = True
+                if hasattr(qdarktheme, "setup_theme"):
+                    qdarktheme.setup_theme("dark", corner_shape="rounded", additional_qss=TARGETED_QSS)
+                    used_qdarktheme = True
+                elif hasattr(qdarktheme, "load_stylesheet"):
+                    QApplication.instance().setStyleSheet(qdarktheme.load_stylesheet("dark") + "\n" + TARGETED_QSS)
+                    used_qdarktheme = True
+                else:
+                    used_qdarktheme = False
             except Exception:
                 used_qdarktheme = False
 
@@ -2299,24 +2429,24 @@ class PlaybackPreferencesMixin:
                     height: 16px;
                     border: 1.5px solid #6b7280;
                     border-radius: 3px;
-                    background-color: #1e222b;
+                    background-color: transparent;
                 }
                 QCheckBox::indicator:hover, QListWidget::indicator:hover, QListView::indicator:hover, QTreeView::indicator:hover, QTableView::indicator:hover, QAbstractItemView::indicator:hover {
-                    border-color: #58a6ff;
+                    border-color: #00e5ff;
                 }
                 QCheckBox::indicator:checked, QListWidget::indicator:checked, QListView::indicator:checked, QTreeView::indicator:checked, QAbstractItemView::indicator:checked {
-                    border-color: #58a6ff;
-                    background-color: #1f6feb;
-                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M2.5 6.5l2.5 2.5 4.5-5.5'/></svg>");
+                    border-color: #00e5ff;
+                    background-color: #00e5ff;
+                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path fill='none' stroke='%23081018' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round' d='M2.5 7.5l3.2 3.5 5.8-7'/></svg>");
                 }
                 QCheckBox::indicator:disabled, QListWidget::indicator:disabled, QListView::indicator:disabled, QTreeView::indicator:disabled, QAbstractItemView::indicator:disabled {
                     border-color: #374151;
-                    background-color: #16181d;
+                    background-color: transparent;
                 }
                 QCheckBox::indicator:checked:disabled, QListWidget::indicator:checked:disabled, QListView::indicator:checked:disabled, QTreeView::indicator:checked:disabled, QAbstractItemView::indicator:checked:disabled {
-                    background-color: #4b5563;
                     border-color: #4b5563;
-                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M2.5 6.5l2.5 2.5 4.5-5.5'/></svg>");
+                    background-color: #4b5563;
+                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path fill='none' stroke='%231f242d' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round' d='M2.5 7.5l3.2 3.5 5.8-7'/></svg>");
                 }
                 QRadioButton { color: #f0f0f0; spacing: 8px; font-size: 13px; }
                 QRadioButton::indicator { width: 16px; height: 16px; border: 1.5px solid #6b7280; border-radius: 8px; background-color: #1e222b; }
@@ -2473,24 +2603,24 @@ class PlaybackPreferencesMixin:
                     height: 16px;
                     border: 1.5px solid #6b7280;
                     border-radius: 3px;
-                    background-color: #ffffff;
+                    background-color: transparent;
                 }
                 QCheckBox::indicator:hover, QListWidget::indicator:hover, QListView::indicator:hover, QTreeView::indicator:hover, QTableView::indicator:hover, QAbstractItemView::indicator:hover {
-                    border-color: #1971c2;
+                    border-color: #0891b2;
                 }
                 QCheckBox::indicator:checked, QListWidget::indicator:checked, QListView::indicator:checked, QTreeView::indicator:checked, QAbstractItemView::indicator:checked {
-                    border-color: #1971c2;
-                    background-color: #1971c2;
-                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M2.5 6.5l2.5 2.5 4.5-5.5'/></svg>");
+                    border-color: #0891b2;
+                    background-color: #0891b2;
+                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round' d='M2.5 7.5l3.2 3.5 5.8-7'/></svg>");
                 }
                 QCheckBox::indicator:disabled, QListWidget::indicator:disabled, QListView::indicator:disabled, QTreeView::indicator:disabled, QAbstractItemView::indicator:disabled {
                     border-color: #d1d5db;
-                    background-color: #f3f4f6;
+                    background-color: transparent;
                 }
                 QCheckBox::indicator:checked:disabled, QListWidget::indicator:checked:disabled, QListView::indicator:checked:disabled, QTreeView::indicator:checked:disabled, QAbstractItemView::indicator:checked:disabled {
-                    background-color: #9ca3af;
                     border-color: #9ca3af;
-                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='none' stroke='%23f3f4f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M2.5 6.5l2.5 2.5 4.5-5.5'/></svg>");
+                    background-color: #9ca3af;
+                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round' d='M2.5 7.5l3.2 3.5 5.8-7'/></svg>");
                 }
                 QRadioButton { color: #111111; spacing: 8px; font-size: 13px; }
                 QRadioButton::indicator { width: 16px; height: 16px; border: 1.5px solid #6b7280; border-radius: 8px; background-color: #ffffff; }
@@ -2645,9 +2775,9 @@ class PlaybackPreferencesMixin:
                     border-color: #ffff00;
                 }
                 QCheckBox::indicator:checked, QListWidget::indicator:checked, QListView::indicator:checked, QTreeView::indicator:checked, QAbstractItemView::indicator:checked {
-                    border-color: #ffff00;
-                    background-color: #ffff00;
-                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path fill='none' stroke='%23000000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' d='M2.5 6.5l2.5 2.5 4.5-5.5'/></svg>");
+                    border-color: #00ffff;
+                    background-color: #00ffff;
+                    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'><path fill='none' stroke='%23000000' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round' d='M2.5 7.5l3.2 3.5 5.8-7'/></svg>");
                 }
                 QCheckBox::indicator:disabled, QListWidget::indicator:disabled, QListView::indicator:disabled, QTreeView::indicator:disabled, QAbstractItemView::indicator:disabled {
                     background-color: #222222;

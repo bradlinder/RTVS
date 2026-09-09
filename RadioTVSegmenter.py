@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter — v2.6.0
+"""Radio & TV Segmenter — v2.7.0
 
 This is the thin application composition root. UI/processing responsibilities
 are implemented in focused mixins so future changes can target smaller files
@@ -228,6 +228,7 @@ class MainWindow(
         self.video_thumbnail_thread = None
         self.video_thumbnail_worker = None
         self.video_thumbnail_dir = None
+        self._active_worker_threads = set()
         self.show_speaker_labels = True
         self.show_timestamps = True
         self.glossary = []
@@ -277,7 +278,12 @@ def main():
 
     try:
         import qdarktheme
-        qdarktheme.setup_theme("dark", corner_shape="rounded", additional_qss=TARGETED_QSS)
+        if hasattr(qdarktheme, "setup_theme"):
+            qdarktheme.setup_theme("dark", corner_shape="rounded", additional_qss=TARGETED_QSS)
+        elif hasattr(qdarktheme, "load_stylesheet"):
+            app.setStyleSheet(qdarktheme.load_stylesheet("dark") + "\n" + TARGETED_QSS)
+        else:
+            app.setStyleSheet(TARGETED_QSS)
     except ImportError:
         print("[THEME] Note: 'pyqtdarktheme' is not installed in this environment. Run 'pip install pyqtdarktheme pywinstyles' to enable modern dark theme styling.")
     except Exception as e:

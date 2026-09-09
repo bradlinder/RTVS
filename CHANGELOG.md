@@ -1,5 +1,38 @@
 # Changelog
 
+## v2.7.0
+
+### Video Thumbnail Caching & Instant Project Reloading
+- **Persistent Disk Thumbnail Caching**: Added deterministic, media-hash-keyed thumbnail disk caching (`get_video_thumbnail_cache_dir`, `read_video_thumbnail_cache`, `invalidate_video_thumbnail_cache`) in `prs_shared.py`.
+- **Instant Project Restoration**: Opening a video file or reloading an existing `.rtvs` project now instantly reads cached filmstrip thumbnails directly from disk without re-extracting frames via FFmpeg.
+- **Immediate Generation Preview & Track Placeholder**: Restored immediate visual feedback during thumbnail extraction, rendering a filmstrip track placeholder along with centered "Generating video thumbnails..." preview text and status banner.
+- **Cache Invalidation & Manual Refresh**: Thumbnail cache automatically validates file modification timestamps (`st_mtime`) against the source video, ensuring stale frames are evicted if media is modified. Manual regeneration (**Media > Regenerate Video Thumbnails**) clears cache and re-extracts cleanly.
+- **Extended Cache Retention**: Extended default background cache retention (`cleanup_old_thumbnail_cache`) from 24 hours to 7 days (168 hours) to ensure work-in-progress desktop video projects retain cached filmstrips across sessions.
+
+### GitHub Actions Workflow Optimizations
+- **All-Build Defaults**: Updated the GitHub Actions release workflow (`.github/workflows/build.yml`) `workflow_dispatch` configuration so all build checkboxes (`build_windows`, `build_macos`, `build_linux`, `plugin_wordpress`, `plugin_youtube`, `plugin_translation`, `create_release`) default to `true` (`checked`), allowing release managers to deselect targets rather than checking each one manually.
+
+### Ecosystem Version Alignment
+- **Global v2.7.0 Synchronization**: Bumped project and plugin versions to `2.7.0` across `prs_shared.py`, `package.json`, `RadioTVSegmenter.py`, `transcript_story.py`, `updater.py`, `build_installer.py`, `installer/Windows/RadioTVStorySegmenter.iss`, `build_windows.bat`, `build_linux.sh`, `installer/Linux/build_deb.sh`, `installer/macOS/build_app.sh`, `.github/workflows/build.yml`, and all plugin manifests (`plugins/wordpress/manifest.json`, `plugins/youtube/manifest.json`, `plugins/translation/manifest.json`).
+
+## v2.6.5
+
+### In-Dialog Video Frame Scrubber & Thumbnail Controls
+- **Interactive In-Dialog Timeline Scrubber**: Added an interactive horizontal slider, precision step buttons (`◀ -1s`, `◀ -1f`, `+1f ▶`, `+1s ▶`), live timestamp readout (`hh:mm:ss.zzz`), and a `⟳ Playhead` synchronization button directly inside both WordPress and YouTube export panels in `UnifiedExportDialog`.
+- **Debounced Frame Previews**: Enabled responsive thumbnail capture with a 120ms debounce timer for smooth in-dialog scrubbing without freezing the UI.
+- **Audio-Only Project Protection**: Automatically detects audio-only projects and disables "Grab frame from video" with helpful guidance tooltips, defaulting gracefully to "None", "Automatic", or custom image browse modes.
+
+### Process Hardening & Temporary Asset Cleanup
+- **FFmpeg Subprocess Timeouts**: Added 5-second timeouts and `TimeoutExpired` exception handling to all FFmpeg thumbnail extraction calls in `project_export.py`, preventing freezes on corrupted or unresponsive media.
+- **Temporary Preview File Lifecycle**: Added automated tracking and purging of temporary preview files (`rtvs_wp_frame_*.jpg`, `rtvs_yt_frame_*.jpg`) on dialog cancellation or closure.
+
+### Timeline Thumbnail Density Optimization
+- **Increased Frame Extraction Density**: Increased `VideoThumbnailWorker` extraction count ceiling from 48 to 80 frames for richer visual coverage across long media files.
+- **Aspect-Ratio-Preserving Density Tuning**: Optimized timeline thumbnail rendering dimensions with reduced horizontal scaling minimums and a 2.0px minimum gap, displaying more visual frames simultaneously without cropping images.
+
+### Version Synchronization
+- **Ecosystem Version Alignment**: Bumped project and plugin versions to `2.6.5` across `prs_shared.py`, `package.json`, `RadioTVSegmenter.py`, `transcript_story.py`, `updater.py`, `build_installer.py`, `installer/Windows/RadioTVStorySegmenter.iss`, `plugins/wordpress/manifest.json`, `plugins/youtube/manifest.json`, and `plugins/translation/manifest.json`.
+
 ## v2.6.0
 
 ### Modular Plugin System

@@ -211,6 +211,15 @@ class TranslationMixin:
 
     def start_translation(self, from_code: str = "en", to_code: str = "es", install_if_missing: bool = True):
         """Start local translation worker in a background QThread."""
+        if hasattr(self, "plugin_manager") and not self.plugin_manager.is_plugin_enabled("translation"):
+            QMessageBox.warning(
+                self,
+                "Plugin Disabled",
+                "The Language Translation plugin is currently disabled.\n"
+                "You can enable it in Settings > Manage Plugins & Add-ons."
+            )
+            return
+
         if getattr(self, "translation_thread", None) is not None:
             QMessageBox.information(self, "Translation Busy", "A translation task is already running.")
             return
@@ -268,6 +277,8 @@ class TranslationMixin:
 
         self.translation_worker = worker
         self.translation_thread = thread
+        if hasattr(self, "_track_worker_thread"):
+            self._track_worker_thread(thread)
 
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_translation_progress)
@@ -278,7 +289,6 @@ class TranslationMixin:
         worker.finished.connect(thread.quit)
         worker.cancelled.connect(thread.quit)
         worker.error.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
         thread.finished.connect(self._on_translation_thread_finished)
 
         thread.start()

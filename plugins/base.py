@@ -21,7 +21,7 @@ class PluginManifest:
     entry_point: str = "plugin:Plugin"
     dependencies: List[str] = field(default_factory=list)
     icon: Optional[str] = None
-    enabled_by_default: bool = True
+    enabled_by_default: bool = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> PluginManifest:
@@ -37,7 +37,7 @@ class PluginManifest:
             entry_point=str(data.get("entry_point", "plugin:Plugin")),
             dependencies=list(data.get("dependencies", [])),
             icon=data.get("icon"),
-            enabled_by_default=bool(data.get("enabled_by_default", True)),
+            enabled_by_default=bool(data.get("enabled_by_default", False)),
         )
 
     @classmethod
@@ -79,7 +79,11 @@ class BasePlugin:
     def version(self) -> str:
         return self.manifest.version
 
+    @property
     def is_enabled(self) -> bool:
+        return self._enabled
+
+    def get_enabled(self) -> bool:
         return self._enabled
 
     def set_enabled(self, enabled: bool) -> None:

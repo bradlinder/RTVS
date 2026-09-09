@@ -1730,7 +1730,8 @@ class ProcessingMixin:
 
         self.story_job_token += 1
         job_token = self.story_job_token
-        self.thread = QThread()
+        self.thread = QThread(self)
+        self._track_worker_thread(self.thread)
 
         transcript_segments = []
         if isinstance(self.transcript, dict):
@@ -1758,8 +1759,6 @@ class ProcessingMixin:
 
         self.worker.finished.connect(self.thread.quit)
         self.worker.error.connect(self.thread.quit)
-        self.thread.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
         self.thread.finished.connect(self.worker_thread_finished)
 
         self.thread.start()

@@ -1119,7 +1119,7 @@ class UiLayoutMixin:
         self.refresh_plugin_menus()
 
     def refresh_plugin_menus(self):
-        """Dynamically populate plugin export actions and tools menu actions."""
+        """Dynamically populate plugin export actions, tools menu actions, and core UI controls."""
         if not hasattr(self, "plugin_manager"):
             return
 
@@ -1128,7 +1128,10 @@ class UiLayoutMixin:
             self.plugins_export_menu.clear()
             has_export_actions = False
             for p in self.plugin_manager.plugins.values():
-                if p.is_enabled:
+                is_p_enabled = getattr(p, "is_enabled", True)
+                if callable(is_p_enabled):
+                    is_p_enabled = is_p_enabled()
+                if is_p_enabled and self.plugin_manager.is_plugin_enabled(p.id):
                     for label, callback in p.get_export_actions():
                         act = self.plugins_export_menu.addAction(label)
                         act.triggered.connect(callback)
@@ -1142,10 +1145,71 @@ class UiLayoutMixin:
             self.plugin_tools_actions.clear()
 
             for p in self.plugin_manager.plugins.values():
-                if p.is_enabled:
+                is_p_enabled = getattr(p, "is_enabled", True)
+                if callable(is_p_enabled):
+                    is_p_enabled = is_p_enabled()
+                if is_p_enabled and self.plugin_manager.is_plugin_enabled(p.id):
                     for label, callback in p.get_tools_actions():
                         act = QAction(label, self)
                         act.triggered.connect(callback)
                         self.tools_menu.addAction(act)
                         self.plugin_tools_actions.append(act)
+
+        # 3. Synchronize core UI elements according to plugin enabled state
+        is_translation_enabled = self.plugin_manager.is_plugin_enabled("translation")
+        if hasattr(self, "translate_button"):
+            self.translate_button.setVisible(is_translation_enabled)
+        if hasattr(self, "transcript_language_selector"):
+            self.transcript_language_selector.setVisible(is_translation_enabled)
+        if hasattr(self, "translation_model_action"):
+            self.translation_model_action.setVisible(is_translation_enabled)
+        if hasattr(self, "tools_translate_action"):
+            self.tools_translate_action.setVisible(is_translation_enabled)
+
+    def open_youtube_publish_dialog(self, story=None):
+        """Open the YouTube video publishing dialog or export view from the YouTube plugin."""
+        if hasattr(self, "plugin_manager") and self.plugin_manager.is_plugin_enabled("youtube"):
+            if hasattr(self, "open_unified_export_dialog"):
+                initial_scope = "selected_stories" if story is not None else None
+                self.open_unified_export_dialog(initial_scope=initial_scope, initial_dest="youtube")
+                return
+            plugin = self.plugin_manager.plugins.get("youtube")
+            if plugin:
+                from plugins.youtube.plugin import YouTubePublishDialog
+                # If no story was explicitly passed, check selected story in UI
+                if story is None and hasattr(self, "stories") and hasattr(self, "current_selected_story_indices"):
+                    sel = getattr(self, "current_selected_story_indices", [])
+                    if sel and 0 <= sel[0] < len(self.stories):
+                        story = self.stories[sel[0]]
+                dlg = YouTubePublishDialog(plugin, parent=self, story=story)
+                dlg.exec()
+                return
+        QMessageBox.information(
+            self,
+            "YouTube Plugin Required",
+            "The YouTube Video Publisher plugin is not enabled or not loaded.\n"
+            "You can enable it under Settings > Manage Plugins & Add-ons.",
+        )
+
+    def open_wordpress_publish_dialog(self, story=None):
+        """Open the WordPress direct publish dialog from the WordPress plugin."""
+        if hasattr(self, "plugin_manager") and self.plugin_manager.is_plugin_enabled("wordpress"):
+            plugin = self.plugin_manager.plugins.get("wordpress")
+            if plugin:
+                from plugins.wordpress.plugin import WordPressPublishDialog
+                if story is None and hasattr(self, "stories") and hasattr(self, "current_selected_story_indices"):
+                    sel = getattr(self, "current_selected_story_indices", [])
+                    if sel and 0 <= sel[0] < len(self.stories):
+                        story = self.stories[sel[0]]
+                dlg = WordPressPublishDialog(plugin, parent=self, story=story)
+                dlg.exec()
+                return
+        QMessageBox.information(
+            self,
+            "WordPress Plugin Required",
+            "The WordPress Publisher plugin is not enabled or not loaded.\n"
+            "You can enable it under Settings > Manage Plugins & Add-ons.",
+        )
+
+
 

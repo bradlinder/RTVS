@@ -466,10 +466,11 @@ class ModelManagementMixin:
         self._model_install_qthread = QThread(self)
         self._model_install_worker = WhisperModelInstallWorker(model_name)
         self._model_install_worker.moveToThread(self._model_install_qthread)
+        if hasattr(self, "_track_worker_thread"):
+            self._track_worker_thread(self._model_install_qthread)
         self._model_install_qthread.started.connect(self._model_install_worker.run)
         self._model_install_worker.finished.connect(self._model_install_finished)
         self._model_install_worker.finished.connect(self._model_install_qthread.quit)
-        self._model_install_qthread.finished.connect(self._model_install_worker.deleteLater)
         self._model_install_qthread.finished.connect(self._model_install_thread_finished)
         self._model_install_thread = self._model_install_qthread
         self._model_install_qthread.start()
@@ -582,6 +583,8 @@ class ModelManagementMixin:
         )
 
         self.translation_worker.moveToThread(self.translation_thread)
+        if hasattr(self, "_track_worker_thread"):
+            self._track_worker_thread(self.translation_thread)
 
         self.translation_thread.started.connect(self.translation_worker.run)
 
@@ -603,7 +606,6 @@ class ModelManagementMixin:
 
         self.translation_worker.finished.connect(self.translation_thread.quit)
         self.translation_worker.error.connect(self.translation_thread.quit)
-        self.translation_thread.finished.connect(self.translation_worker.deleteLater)
         cleanup_fn = getattr(self, "_on_translation_thread_finished", getattr(self, "_translation_thread_finished", None))
         if cleanup_fn:
             self.translation_thread.finished.connect(cleanup_fn)

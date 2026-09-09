@@ -1,12 +1,12 @@
 {
   "id": "youtube",
   "name": "YouTube Video Publisher",
-  "version": "2.6.0",
-  "description": "Publishes broadcast video stories directly to YouTube with automated chapter timestamps, custom thumbnails (or video frame grabs), tags, and privacy controls via YouTube Data API v3.",
+  "version": "2.7.0",
+  "description": "Publishes broadcast video stories to YouTube Studio (Zero-API Assisted upload) with automated chapter timestamps, custom thumbnails, captions (.srt), and tags.",
   "author": "Radio & TV Segmenter Team",
   "website": "https://github.com/bradlinder/RTVS",
   "min_app_version": "2.6.0",
   "category": "export",
   "entry_point": "plugin:Plugin",
-  "enabled_by_default": true
+  "enabled_by_default": false
 }

@@ -117,10 +117,12 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QAbstractItemView,
     QTextEdit,
+    QPlainTextEdit,
     QTextBrowser,
     QLineEdit,
     QHBoxLayout,
     QVBoxLayout,
+    QGridLayout,
     QSplitter,
     QGroupBox,
     QFormLayout,
@@ -268,7 +270,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "2.6.0"
+PROJECT_VERSION = "2.7.0"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -870,8 +872,18 @@ class StoryListWidget(QListWidget):
         menu = QMenu(self)
         export_action = menu.addAction(f"Export {term}...")
         export_action.triggered.connect(self.exportRequested.emit)
-        wp_action = menu.addAction("Export Draft to WordPress...")
-        wp_action.triggered.connect(self.exportStoryWordPressRequested.emit)
+
+        pm = getattr(win, "plugin_manager", None)
+        wp_enabled = pm and pm.is_plugin_enabled("wordpress")
+        if wp_enabled:
+            wp_action = menu.addAction("Export Draft to WordPress...")
+            wp_action.triggered.connect(self.exportStoryWordPressRequested.emit)
+
+        yt_enabled = pm and pm.is_plugin_enabled("youtube")
+        if yt_enabled and hasattr(win, "open_youtube_publish_dialog"):
+            yt_action = menu.addAction("Publish to YouTube...")
+            yt_action.triggered.connect(win.open_youtube_publish_dialog)
+
         menu.addSeparator()
         delete_action = menu.addAction(f"Delete {term}")
         delete_action.triggered.connect(self.deleteRequested.emit)
@@ -2317,11 +2329,7 @@ class WaveformWorker(QObject):
         process = self._process
         if process is not None and process.poll() is None:
             try:
-                process.terminate()
-                try:
-                    process.wait(timeout=0.3)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+                process.kill()
             except Exception:
                 pass
 
@@ -2349,7 +2357,7 @@ class WaveformWorker(QObject):
                 pass
             samples_per_peak = max(1, WAVEFORM_ANALYSIS_RATE // max(1, effective_pps))
             cmd = [
-                ffmpeg_path() or "ffmpeg", "-i", self.audio_file,
+                ffmpeg_path() or "ffmpeg", "-vn", "-i", self.audio_file,
                 "-f", "s16le", "-ac", "1",
                 "-ar", str(WAVEFORM_ANALYSIS_RATE),
                 "-v", "quiet", "pipe:1",
@@ -2562,12 +2570,80 @@ def write_rtvs_project_file(file_path, data: dict):
 
 
 # ============================================================
-# Timeline Canvas (With Right-Click Select & Easy Playhead Scrubbing)
+# Video Thumbnail Caching & Background Extraction
 # ============================================================
 
-# ============================================================
-# Timeline Canvas (With Right-Click Select & Easy Playhead Scrubbing)
-# ============================================================
+def get_video_thumbnail_cache_dir(media_file: str | Path | None) -> Path | None:
+    """Return the deterministic thumbnail cache directory for a media file."""
+    if not media_file:
+        return None
+    try:
+        p = Path(media_file).resolve()
+        stat = p.stat()
+        key_raw = f"{p.name}_{stat.st_size}_{int(stat.st_mtime)}"
+        h = hashlib.sha256(key_raw.encode("utf-8")).hexdigest()[:24]
+        base = Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails"
+        return base / h
+    except Exception:
+        try:
+            h = hashlib.sha256(str(Path(media_file)).encode("utf-8")).hexdigest()[:24]
+            base = Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails"
+            return base / h
+        except Exception:
+            return None
+
+
+def read_video_thumbnail_cache(media_file: str | Path | None, duration: float) -> list | None:
+    """Read pre-extracted video thumbnail items [(timestamp, image_path), ...] from disk cache.
+    
+    Returns list of items if the cache exists, contains valid thumbnail images, and is
+    not older than the media file; otherwise returns None.
+    """
+    if not media_file or duration <= 0:
+        return None
+    try:
+        cache_dir = get_video_thumbnail_cache_dir(media_file)
+        if not cache_dir or not cache_dir.exists() or not cache_dir.is_dir():
+            return None
+
+        media_p = Path(media_file)
+        if media_p.exists():
+            if media_p.stat().st_mtime > cache_dir.stat().st_mtime:
+                return None
+
+        thumbs = sorted(cache_dir.glob("thumb_*.jpg"))
+        if not thumbs or len(thumbs) < 2:
+            return None
+
+        valid_thumbs = []
+        for t in thumbs:
+            if t.exists() and t.stat().st_size > 0:
+                valid_thumbs.append(t)
+
+        if not valid_thumbs or len(valid_thumbs) != len(thumbs):
+            return None
+
+        items = []
+        num = len(valid_thumbs)
+        for i, p in enumerate(valid_thumbs):
+            ts = (i / max(1, num - 1)) * duration if num > 1 else 0.0
+            items.append((ts, str(p)))
+        return items
+    except Exception:
+        return None
+
+
+def invalidate_video_thumbnail_cache(media_file: str | Path | None) -> bool:
+    """Delete the thumbnail cache directory for a given media file."""
+    try:
+        cache_dir = get_video_thumbnail_cache_dir(media_file)
+        if cache_dir and cache_dir.exists():
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            return True
+    except Exception:
+        pass
+    return False
+
 
 class VideoThumbnailWorker(QObject):
     finished = Signal(object)
@@ -2578,7 +2654,7 @@ class VideoThumbnailWorker(QObject):
         self.media_path = Path(media_path)
         self.duration = max(0.1, float(duration or 0))
         self.output_dir = Path(output_dir)
-        self.count = max(8, min(48, int(count)))
+        self.count = max(8, min(80, int(count)))
         self._cancelled = False
         self._process = None
 
@@ -2587,11 +2663,7 @@ class VideoThumbnailWorker(QObject):
         process = self._process
         if process is not None and process.poll() is None:
             try:
-                process.terminate()
-                try:
-                    process.wait(timeout=0.3)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+                process.kill()
             except Exception:
                 pass
 
@@ -2601,7 +2673,7 @@ class VideoThumbnailWorker(QObject):
             fps = self.count / self.duration
             vf = f"fps={fps:.8f},scale=320:-2:force_original_aspect_ratio=decrease"
             pattern = str(self.output_dir / "thumb_%03d.jpg")
-            cmd = [ffmpeg_path() or "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(self.media_path), "-vf", vf, "-q:v", "4", pattern]
+            cmd = [ffmpeg_path() or "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(self.media_path), "-map", "0:v:0", "-vf", vf, "-q:v", "4", pattern]
             creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
             register_process(self._process)
@@ -2674,6 +2746,7 @@ class TimelineCanvas(QWidget):
         self.waveform_peaks = []
         self.waveform_levels = []
         self.video_thumbnails = []
+        self.is_video = False
         self.show_waveform = True
         self.show_thumbnails = True
         self.thumbnail_position = "below"
@@ -2714,7 +2787,7 @@ class TimelineCanvas(QWidget):
         self.show_background_banner = False
         self._background_delay_timer = QTimer(self)
         self._background_delay_timer.setSingleShot(True)
-        self._background_delay_timer.setInterval(1500)  # Show if taking > 1.5s
+        self._background_delay_timer.setInterval(100)
         self._background_delay_timer.timeout.connect(self._activate_background_banner)
 
         self.setMinimumHeight(120)
@@ -2722,39 +2795,51 @@ class TimelineCanvas(QWidget):
         self.setMouseTracking(True)
         self.setAcceptDrops(True)
 
+    def set_is_video(self, is_video: bool):
+        self.is_video = bool(is_video)
+        self.pixmap_dirty = True
+        self.update()
+
     def set_background_generation_active(self, task_name: str, active: bool):
         """Set generation state for 'waveform' or 'thumbnails'."""
         if active:
             self.active_background_tasks.add(task_name)
-            if not self._background_delay_timer.isActive() and not self.show_background_banner:
-                self._background_delay_timer.start()
+            self.show_background_banner = True
+            if self._background_delay_timer.isActive():
+                self._background_delay_timer.stop()
         else:
             self.active_background_tasks.discard(task_name)
             if not self.active_background_tasks:
                 self._background_delay_timer.stop()
                 self.show_background_banner = False
                 self.background_status_text = ""
+                self.pixmap_dirty = True
                 self.update()
                 return
 
         self._update_background_status_text()
-        if self.show_background_banner:
-            self.update()
+        self.pixmap_dirty = True
+        self.update()
 
     def _activate_background_banner(self):
         if self.active_background_tasks:
             self.show_background_banner = True
             self._update_background_status_text()
+            self.pixmap_dirty = True
             self.update()
 
     def _update_background_status_text(self):
+        win = self.window()
+        is_es = getattr(win, "language", "en") == "es"
         labels = []
         if "waveform" in self.active_background_tasks:
-            labels.append("audio waveform")
+            labels.append("forma de onda" if is_es else "audio waveform")
         if "thumbnails" in self.active_background_tasks:
-            labels.append("video thumbnails")
+            labels.append("miniaturas de video" if is_es else "video thumbnails")
         if labels:
-            self.background_status_text = f"Generating {' and '.join(labels)}..."
+            prefix = "Generando " if is_es else "Generating "
+            sep = " y " if is_es else " and "
+            self.background_status_text = f"{prefix}{sep.join(labels)}..."
         else:
             self.background_status_text = ""
 
@@ -3324,7 +3409,8 @@ class TimelineCanvas(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         available = max(20, height - self.RULER_HEIGHT)
-        has_thumbs = bool(self.video_thumbnails and self.show_thumbnails)
+        is_video_mode = getattr(self, "is_video", False) or bool(self.video_thumbnails) or ("thumbnails" in self.active_background_tasks)
+        has_thumbs = bool(self.show_thumbnails and (self.video_thumbnails or is_video_mode))
 
         if has_thumbs and self.show_waveform:
             thumbnail_height = int(available * 0.46)
@@ -3355,39 +3441,89 @@ class TimelineCanvas(QWidget):
             painter.drawLine(QPointF(0, divider_y), QPointF(width, divider_y))
 
         if has_thumbs and thumbnail_height > 0:
-            target_h = max(16, thumbnail_height - 6)
-            vis_dur = max(0.001, self.visible_duration())
+            if self.video_thumbnails:
+                target_h = max(14, int((thumbnail_height - 6) * 0.88))
+                vis_dur = max(0.001, self.visible_duration())
 
-            # Resizing logic: scale thumbnail width dynamically with track height
-            sample_pix = self.video_thumbnails[0][1] if self.video_thumbnails else None
-            aspect = (sample_pix.width() / max(1, sample_pix.height())) if (sample_pix and not sample_pix.isNull() and sample_pix.height() > 0) else (16.0 / 9.0)
-            target_w = max(28, int(target_h * aspect))
+                # Resizing logic: scale thumbnail width dynamically with track height
+                sample_pix = self.video_thumbnails[0][1] if self.video_thumbnails else None
+                aspect = (sample_pix.width() / max(1, sample_pix.height())) if (sample_pix and not sample_pix.isNull() and sample_pix.height() > 0) else (16.0 / 9.0)
+                target_w = max(24, int(target_h * aspect))
 
-            # Buffer based on scaled thumbnail width to avoid pop-in at borders
-            dt_buffer = (target_w / max(1, width)) * vis_dur * 1.5
-            t_min = max(0.0, self.scroll_offset - dt_buffer)
-            t_max = min(self.duration, self.scroll_offset + vis_dur + dt_buffer)
+                # Buffer based on scaled thumbnail width to avoid pop-in at borders
+                dt_buffer = (target_w / max(1, width)) * vis_dur * 1.5
+                t_min = max(0.0, self.scroll_offset - dt_buffer)
+                t_max = min(self.duration, self.scroll_offset + vis_dur + dt_buffer)
 
-            ts_list = [item[0] for item in self.video_thumbnails]
-            start_idx = max(0, bisect_left(ts_list, t_min) - 1)
-            end_idx = min(len(self.video_thumbnails), bisect_right(ts_list, t_max) + 1)
+                ts_list = [item[0] for item in self.video_thumbnails]
+                start_idx = max(0, bisect_left(ts_list, t_min) - 1)
+                end_idx = min(len(self.video_thumbnails), bisect_right(ts_list, t_max) + 1)
 
-            for i in range(start_idx, end_idx):
-                timestamp, pix = self.video_thumbnails[i]
-                x = self.time_to_x(timestamp, width)
-                if x + target_w < 0 or x - target_w > width:
-                    continue
-                scaled = pix.scaled(
-                    target_w,
-                    target_h,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                draw_x = int(x - scaled.width() // 2)
-                draw_y = thumbnail_y + (thumbnail_height - scaled.height()) // 2
-                painter.drawPixmap(draw_x, int(draw_y), scaled)
-                painter.setPen(self.tokens.pen(self.tokens.border_subtle, 1.0))
-                painter.drawRect(draw_x, int(draw_y), scaled.width(), scaled.height())
+                # Prevent thumbnails from overlapping or cropping when zoomed out.
+                # Prioritize full-size, uncropped display of frames over crowding.
+                last_drawn_right = -100000.0
+                min_gap_px = 2.0
+
+                for i in range(start_idx, end_idx):
+                    timestamp, pix = self.video_thumbnails[i]
+                    x = self.time_to_x(timestamp, width)
+                    if x + target_w < 0 or x - target_w > width:
+                        continue
+                    scaled = pix.scaled(
+                        target_w,
+                        target_h,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                    draw_x = int(x - scaled.width() // 2)
+                    # If drawing this thumbnail would overlap/clip the previous full-size thumbnail, skip it
+                    if draw_x < (last_drawn_right + min_gap_px):
+                        continue
+
+                    draw_y = thumbnail_y + (thumbnail_height - scaled.height()) // 2
+                    painter.drawPixmap(draw_x, int(draw_y), scaled)
+                    painter.setPen(self.tokens.pen(self.tokens.border_subtle, 1.0))
+                    painter.drawRect(draw_x, int(draw_y), scaled.width(), scaled.height())
+                    last_drawn_right = draw_x + scaled.width()
+            elif "thumbnails" in self.active_background_tasks or is_video_mode:
+                # Placeholder preview track while generating video thumbnails
+                win = self.window()
+                is_es = getattr(win, "language", "en") == "es"
+                gen_text = "Generando miniaturas de video..." if is_es else "Generating video thumbnails..."
+                
+                # Draw subtle filmstrip frame placeholder boxes along the track
+                target_h = max(14, int((thumbnail_height - 6) * 0.88))
+                aspect = 16.0 / 9.0
+                target_w = max(24, int(target_h * aspect))
+                draw_y = thumbnail_y + (thumbnail_height - target_h) // 2
+                
+                painter.save()
+                box_pen = self.tokens.pen(self.tokens.border_subtle, 1.0)
+                box_pen.setStyle(Qt.PenStyle.DashLine)
+                painter.setPen(box_pen)
+                
+                step_px = target_w + 8
+                x_pos = 12
+                while x_pos + target_w < width - 12:
+                    painter.drawRoundedRect(QRectF(x_pos, draw_y, target_w, target_h), 2.0, 2.0)
+                    x_pos += step_px
+                
+                # Draw centered preview badge with text
+                painter.setFont(self.font())
+                fm = painter.fontMetrics()
+                text_w = fm.horizontalAdvance(gen_text)
+                text_badge_w = text_w + 24
+                text_badge_h = min(26, max(18, thumbnail_height - 6))
+                text_badge_x = (width - text_badge_w) / 2.0
+                text_badge_y = thumbnail_y + (thumbnail_height - text_badge_h) / 2.0
+                text_badge_rect = QRectF(text_badge_x, text_badge_y, text_badge_w, text_badge_h)
+                
+                painter.setPen(self.tokens.pen(self.tokens.status_banner_border, 1.0))
+                painter.setBrush(self.tokens.brush(self.tokens.status_banner_bg, 235))
+                painter.drawRoundedRect(text_badge_rect, 4.0, 4.0)
+                painter.setPen(self.tokens.color(self.tokens.status_banner_text))
+                painter.drawText(text_badge_rect, Qt.AlignmentFlag.AlignCenter, gen_text)
+                painter.restore()
 
         if self.show_waveform and self.waveform_peaks and waveform_height > 0:
             painter.setPen(self.tokens.pen(self.tokens.waveform_stroke, 1.0))
@@ -3682,6 +3818,10 @@ class TimelineWidget(QWidget):
 
         self.is_internal_scrollbar_update = False
         self.update_scrollbar_range()
+
+    def set_is_video(self, is_video: bool):
+        if hasattr(self, "canvas") and hasattr(self.canvas, "set_is_video"):
+            self.canvas.set_is_video(is_video)
 
     def set_background_generation_active(self, task_name: str, active: bool):
         if hasattr(self, "canvas") and hasattr(self.canvas, "set_background_generation_active"):
@@ -4709,7 +4849,7 @@ def terminate_all_registered_processes():
     _REGISTERED_PROCESSES.clear()
 
 
-def cleanup_old_thumbnail_cache(max_age_hours=24):
+def cleanup_old_thumbnail_cache(max_age_hours=168):
     """Purge temporary thumbnail directories older than max_age_hours in a background thread."""
     def _worker():
         try:

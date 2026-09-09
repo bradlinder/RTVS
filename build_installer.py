@@ -38,7 +38,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.6.0"
+    PROJECT_VERSION = "2.7.0"
 
 # Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]
@@ -494,24 +494,39 @@ def package_plugins(
                 pass
 
         zip_path = dist_plugins / f"rtvs-plugin-{plugin_id}-v{p_ver}.zip"
-        print(f"[BUILD] Packaging plugin '{plugin_id}' (v{p_ver}) -> {zip_path.name}")
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        addon_path = dist_plugins / f"{plugin_id}.rtvs-addon"
+        addon_ver_path = dist_plugins / f"rtvs-plugin-{plugin_id}-v{p_ver}.rtvs-addon"
+        local_addon_in_sub = p_dir / f"{plugin_id}.rtvs-addon"
+        local_addon_in_root = plugins_src / f"{plugin_id}.rtvs-addon"
+
+        print(f"[BUILD] Packaging plugin '{plugin_id}' (v{p_ver}) -> {addon_path.name}")
+        # Build .rtvs-addon archive (which contains the plugin files)
+        with zipfile.ZipFile(addon_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for item in p_dir.rglob("*"):
-                if item.is_file() and "__pycache__" not in item.parts:
-                    arcname = Path(plugin_id) / item.relative_to(p_dir)
-                    zf.write(item, arcname)
-        generated_zips.append(zip_path)
+                if item.is_file() and "__pycache__" not in item.parts and not item.name.endswith((".pyc", ".pyo", ".rtvs-addon")):
+                    rel = item.relative_to(p_dir)
+                    zf.write(item, rel)
+
+        # Mirror as versioned .rtvs-addon and .zip for release downloads
+        shutil.copy2(addon_path, addon_ver_path)
+        shutil.copy2(addon_path, zip_path)
+        shutil.copy2(addon_path, local_addon_in_sub)
+        shutil.copy2(addon_path, local_addon_in_root)
+        generated_zips.extend([addon_path, addon_ver_path, zip_path])
 
         if app_root is not None:
             dest_plugin_dir = app_root / "plugins" / plugin_id
             dest_plugin_dir.mkdir(parents=True, exist_ok=True)
             for item in p_dir.rglob("*"):
-                if item.is_file() and "__pycache__" not in item.parts:
+                if item.is_file() and "__pycache__" not in item.parts and not item.name.endswith((".pyc", ".pyo")):
                     rel = item.relative_to(p_dir)
                     target = dest_plugin_dir / rel
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(item, target)
-            print(f"[BUILD] Bundled plugin '{plugin_id}' into {dest_plugin_dir}")
+            # Ensure .rtvs-addon is also in app_root/plugins/
+            shutil.copy2(addon_path, dest_plugin_dir / f"{plugin_id}.rtvs-addon")
+            shutil.copy2(addon_path, app_root / "plugins" / f"{plugin_id}.rtvs-addon")
+            print(f"[BUILD] Bundled plugin '{plugin_id}' and .rtvs-addon into {dest_plugin_dir}")
 
     return generated_zips
 

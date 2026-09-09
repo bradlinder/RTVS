@@ -355,6 +355,7 @@ class WordPressClient:
         category_ids: list[int] | None = None,
         author_ids: list[int] | None = None,
         author_term_ids: list[int] | None = None,
+        featured_media_id: int | None = None,
     ) -> dict:
         """Create a post in WordPress."""
         import requests
@@ -370,6 +371,8 @@ class WordPressClient:
             payload["author"] = author_ids[0]
         if author_term_ids:
             payload["ppma_author"] = [int(term_id) for term_id in author_term_ids]
+        if featured_media_id:
+            payload["featured_media"] = int(featured_media_id)
 
         url = f"{self.api_base}/posts"
         resp = requests.post(url, auth=self._get_auth(), json=payload, timeout=30)
@@ -524,6 +527,7 @@ class WordPressExportMixin:
         show_completion_dialog: bool = False,
         media_filename: str | None = None,
         progress_callback=None,
+        featured_image_path: str | None = None,
     ) -> dict:
         """Extract media clip, upload to WordPress media library, and create draft post.
 
@@ -542,6 +546,17 @@ class WordPressExportMixin:
             raise RuntimeError("No media file is loaded in the active project to export.")
 
         media_url = ""
+        featured_media_id = None
+
+        # Upload featured image / custom thumbnail if selected
+        if featured_image_path and Path(featured_image_path).is_file():
+            try:
+                report_progress(1, "Uploading featured image…")
+                img_item = client.upload_media(featured_image_path, filename=Path(featured_image_path).name)
+                featured_media_id = img_item.get("id")
+            except Exception as exc:
+                self.log_activity(f"[WORDPRESS WARNING] Failed to upload featured image: {exc}")
+
         # 1. Prepare the media file. This can take a while for large WAV files.
         report_progress(1, "Preparing audio for WordPress…")
         temp_audio = None
@@ -726,6 +741,7 @@ class WordPressExportMixin:
             category_ids=category_ids,
             author_ids=author_ids,
             author_term_ids=author_term_ids,
+            featured_media_id=featured_media_id,
         )
 
         post_id = post_data.get("id")

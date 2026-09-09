@@ -1,12 +1,12 @@
 {
   "id": "wordpress",
   "name": "WordPress Publisher",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "description": "Publishes segmented audio/video stories, transcripts, excerpts, and custom featured images directly to WordPress posts via the WP REST API.",
   "author": "Radio & TV Segmenter Team",
   "website": "https://github.com/bradlinder/RTVS",
   "min_app_version": "2.6.0",
   "category": "export",
   "entry_point": "plugin:Plugin",
-  "enabled_by_default": true
+  "enabled_by_default": false
 }

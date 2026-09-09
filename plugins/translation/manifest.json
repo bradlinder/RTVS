@@ -1,12 +1,12 @@
 {
   "id": "translation",
   "name": "Language Translation",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "description": "Provides local multi-language neural machine translation (MarianMT and NLLB models) with synchronized bilingual split-view editing and translated exports.",
   "author": "Radio & TV Segmenter Team",
   "website": "https://github.com/bradlinder/RTVS",
   "min_app_version": "2.6.0",
   "category": "ai",
   "entry_point": "plugin:Plugin",
-  "enabled_by_default": true
+  "enabled_by_default": false
 }

@@ -5,6 +5,7 @@ maintaining the established MainWindow-facing API while responsibilities are iso
 """
 
 from prs_shared import *
+import webbrowser
 from wordpress_export import generate_wp_excerpt, WordPressSettingsDialog, _get_wp_password
 
 
@@ -68,10 +69,137 @@ def generate_youtube_chapters(stories: list, ensure_zero_start: bool = True) -> 
     return "\n".join(lines) + "\n"
 
 
-class UnifiedExportDialog(QDialog):
-    """Unified Export Center supporting Local Files and WordPress Draft Posts."""
+class YouTubeAssistedUploadGuideDialog(QDialog):
+    """Instructional guide and assisted upload dialog for YouTube Studio."""
 
-    def __init__(self, main_window, initial_scope="full", parent=None):
+    def __init__(self, parent, title: str, description: str, tags: str, files_dict: dict, privacy: str = "unlisted"):
+        super().__init__(parent)
+        self.setWindowTitle("YouTube Studio Assisted Upload Guide")
+        self.resize(720, 580)
+        self.video_title = title
+        self.description = description
+        self.tags = tags
+        self.files_dict = files_dict
+        self.privacy = privacy
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        # Header Banner
+        header = QWidget()
+        h_layout = QVBoxLayout(header)
+        h_layout.setContentsMargins(12, 12, 12, 12)
+        header.setStyleSheet("background-color: #1e293b; border-radius: 8px; border: 1px solid #334155;")
+
+        banner_title = QLabel("<b style='font-size: 15px; color: #22c55e;'>✓ YouTube Export Package Prepared!</b>")
+        banner_desc = QLabel(
+            "Your media clip, chapter markers, thumbnail, and captions have been exported and are ready for YouTube Studio. "
+            "Follow the steps below to complete your upload."
+        )
+        banner_desc.setStyleSheet("color: #cbd5e1; font-size: 12px;")
+        banner_desc.setWordWrap(True)
+        h_layout.addWidget(banner_title)
+        h_layout.addWidget(banner_desc)
+        layout.addWidget(header)
+
+        # Exported Files Box
+        files_box = QGroupBox("Exported Files")
+        fb_layout = QVBoxLayout(files_box)
+        fb_layout.setSpacing(5)
+        for label, path in files_dict.items():
+            if path:
+                row = QLabel(f"<b>{label}:</b> <code style='color: #38bdf8;'>{html.escape(str(path))}</code>")
+                row.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                fb_layout.addWidget(row)
+        layout.addWidget(files_box)
+
+        # Clipboard Notice
+        clip_notice = QLabel("📋 <b>Video Title, Description & Chapters have been copied to your clipboard!</b>")
+        clip_notice.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: bold;")
+        layout.addWidget(clip_notice)
+
+        # Step by step guide
+        guide_box = QGroupBox("Step-by-Step Instructions")
+        guide_layout = QVBoxLayout(guide_box)
+        guide_layout.setSpacing(6)
+
+        steps = (
+            "<b>1. Open YouTube Studio:</b> Click <i>Open YouTube Studio</i> below or visit <b>studio.youtube.com</b>.<br>"
+            "<b>2. Upload Media:</b> In YouTube Studio, click <b>CREATE > Upload videos</b> and drag in your video file.<br>"
+            "<b>3. Description & Chapters:</b> Paste (Ctrl+V / Cmd+V) into the description field. Chapter timestamps starting at 00:00 will automatically create interactive video chapters.<br>"
+            "<b>4. Thumbnail:</b> Under the Thumbnail section, click <i>Upload thumbnail</i> and choose your exported thumbnail image.<br>"
+            "<b>5. Tags:</b> Click <i>SHOW MORE</i>, find <i>Tags</i>, and click <i>Copy Tags</i> below to paste them.<br>"
+            "<b>6. Subtitles:</b> In the <i>Video elements</i> tab, click <i>Add subtitles</i> and upload the exported .srt file.<br>"
+            "<b>7. Visibility:</b> Set to Unlisted or Public and click <b>Publish</b>."
+        )
+        lbl_steps = QLabel(steps)
+        lbl_steps.setWordWrap(True)
+        lbl_steps.setStyleSheet("font-size: 12px; line-height: 1.45;")
+        guide_layout.addWidget(lbl_steps)
+        layout.addWidget(guide_box)
+
+        # Action Buttons
+        btn_box = QHBoxLayout()
+        copy_desc_btn = QPushButton("Copy Description & Chapters")
+        copy_desc_btn.clicked.connect(self._copy_description)
+        copy_title_btn = QPushButton("Copy Title")
+        copy_title_btn.clicked.connect(self._copy_title)
+        copy_tags_btn = QPushButton("Copy Tags")
+        copy_tags_btn.clicked.connect(self._copy_tags)
+
+        open_browser_btn = QPushButton("Open YouTube Studio")
+        open_browser_btn.setStyleSheet("font-weight: bold; background-color: #dc2626; color: white; padding: 5px 12px;")
+        open_browser_btn.clicked.connect(self._open_youtube_studio)
+
+        open_folder_btn = QPushButton("Open Export Folder")
+        open_folder_btn.clicked.connect(self._open_folder)
+
+        btn_box.addWidget(copy_desc_btn)
+        btn_box.addWidget(copy_title_btn)
+        btn_box.addWidget(copy_tags_btn)
+        btn_box.addStretch()
+        btn_box.addWidget(open_browser_btn)
+        btn_box.addWidget(open_folder_btn)
+        layout.addLayout(btn_box)
+
+        # Close
+        close_box = QHBoxLayout()
+        close_box.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        close_box.addWidget(close_btn)
+        layout.addLayout(close_box)
+
+    def _copy_description(self):
+        QApplication.clipboard().setText(self.description)
+        QMessageBox.information(self, "Copied", "Description and chapter markers copied to clipboard!")
+
+    def _copy_title(self):
+        QApplication.clipboard().setText(self.video_title)
+        QMessageBox.information(self, "Copied", "Video title copied to clipboard!")
+
+    def _copy_tags(self):
+        QApplication.clipboard().setText(self.tags)
+        QMessageBox.information(self, "Copied", "Tags copied to clipboard!")
+
+    def _open_youtube_studio(self):
+        webbrowser.open("https://studio.youtube.com/channel/UC/videos/upload?d=ud")
+
+    def _open_folder(self):
+        folder = None
+        for p in self.files_dict.values():
+            if p and os.path.exists(p):
+                folder = str(Path(p).parent)
+                break
+        if folder:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+
+
+class UnifiedExportDialog(QDialog):
+    """Unified Export Center supporting Local Files, WordPress Draft Posts, and YouTube Studio Assisted Uploads."""
+
+    def __init__(self, main_window, initial_scope="full", initial_dest=None, parent=None):
         super().__init__(parent or main_window)
         self.main_window = main_window
         self.setWindowTitle("Export")
@@ -83,15 +211,40 @@ class UnifiedExportDialog(QDialog):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        # Target Selection: Local vs WordPress
+        # Target Selection: Local vs WordPress vs YouTube
         dest_group = QGroupBox("Export Destination")
         dest_layout = QHBoxLayout(dest_group)
         self.radio_local = QRadioButton("Local Files (Media && Transcripts)")
         self.radio_wp = QRadioButton("WordPress Draft Post")
+        self.radio_youtube = QRadioButton("YouTube Studio (Assisted Upload)")
         self.radio_local.setChecked(True)
         dest_layout.addWidget(self.radio_local)
         dest_layout.addWidget(self.radio_wp)
+        dest_layout.addWidget(self.radio_youtube)
         layout.addWidget(dest_group)
+
+        wp_enabled = hasattr(self.main_window, "plugin_manager") and self.main_window.plugin_manager.is_plugin_enabled("wordpress")
+        yt_enabled = hasattr(self.main_window, "plugin_manager") and self.main_window.plugin_manager.is_plugin_enabled("youtube")
+        if not wp_enabled:
+            self.radio_wp.setVisible(False)
+            self.radio_wp.setEnabled(False)
+        if not yt_enabled:
+            self.radio_youtube.setVisible(False)
+            self.radio_youtube.setEnabled(False)
+        if not wp_enabled and not yt_enabled:
+            dest_group.setVisible(False)
+
+        self._temp_preview_files = set()
+        self._is_video_project = bool(getattr(self.main_window, "current_media_is_video", False))
+        self._yt_frame_pos = float(getattr(self.main_window, "current_position", 0.0) or 0.0)
+        self._wp_scrub_timer = QTimer(self)
+        self._wp_scrub_timer.setSingleShot(True)
+        self._wp_scrub_timer.setInterval(120)
+        self._wp_scrub_timer.timeout.connect(self._on_wp_scrub_timer_timeout)
+        self._yt_scrub_timer = QTimer(self)
+        self._yt_scrub_timer.setSingleShot(True)
+        self._yt_scrub_timer.setInterval(120)
+        self._yt_scrub_timer.timeout.connect(self._on_yt_scrub_timer_timeout)
 
         # Scope Selection
         is_music = getattr(self.main_window, "story_detection_mode", "voice") == "music"
@@ -394,6 +547,105 @@ class UnifiedExportDialog(QDialog):
 
         editor_layout.addLayout(tax_columns)
 
+        # WordPress Featured Image / Custom Thumbnail Group
+        wp_thumb_group = QGroupBox("Featured Image / Custom Thumbnail")
+        wp_thumb_layout = QHBoxLayout(wp_thumb_group)
+        wp_thumb_layout.setContentsMargins(8, 8, 8, 8)
+        wp_thumb_layout.setSpacing(10)
+
+        wp_thumb_controls = QVBoxLayout()
+        wp_thumb_controls.setSpacing(6)
+
+        self.wp_rad_thumb_none = QRadioButton("None")
+        self.wp_rad_thumb_grab = QRadioButton("Grab frame from video")
+        self.wp_rad_thumb_file = QRadioButton("Select custom image file...")
+        self.wp_rad_thumb_none.setChecked(True)
+
+        if not self._is_video_project:
+            self.wp_rad_thumb_grab.setEnabled(False)
+            self.wp_rad_thumb_grab.setText("Grab frame from video (Audio-only project)")
+            self.wp_rad_thumb_grab.setToolTip("Video frame capture requires video media (audio-only file loaded)")
+
+        wp_thumb_controls.addWidget(self.wp_rad_thumb_none)
+        wp_thumb_controls.addWidget(self.wp_rad_thumb_grab)
+
+        # In-dialog Frame Scrubber & Stepper for WordPress
+        self.wp_scrub_widget = QWidget()
+        wp_scrub_vbox = QVBoxLayout(self.wp_scrub_widget)
+        wp_scrub_vbox.setContentsMargins(16, 2, 4, 4)
+        wp_scrub_vbox.setSpacing(4)
+
+        self.wp_scrub_slider = QSlider(Qt.Orientation.Horizontal)
+        self.wp_scrub_slider.setRange(0, 10000)
+        self.wp_scrub_slider.valueChanged.connect(self._on_wp_slider_value_changed)
+        wp_scrub_vbox.addWidget(self.wp_scrub_slider)
+
+        wp_stepper_row = QHBoxLayout()
+        wp_stepper_row.setSpacing(4)
+        self.wp_step_back_sec_btn = QPushButton("◀ -1s")
+        self.wp_step_back_sec_btn.setToolTip("Step backward 1 second")
+        self.wp_step_back_sec_btn.clicked.connect(lambda: self._on_wp_step(-1.0))
+        self.wp_step_back_frame_btn = QPushButton("◀ -1f")
+        self.wp_step_back_frame_btn.setToolTip("Step backward 1 frame (~33ms)")
+        self.wp_step_back_frame_btn.clicked.connect(lambda: self._on_wp_step(-0.0333))
+
+        self.wp_scrub_time_label = QLabel("00:00:00.000")
+        self.wp_scrub_time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.wp_scrub_time_label.setStyleSheet("padding: 2px 6px; background-color: #0f172a; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 11px; font-weight: bold; color: #e2e8f0;")
+
+        self.wp_step_fwd_frame_btn = QPushButton("+1f ▶")
+        self.wp_step_fwd_frame_btn.setToolTip("Step forward 1 frame (~33ms)")
+        self.wp_step_fwd_frame_btn.clicked.connect(lambda: self._on_wp_step(0.0333))
+        self.wp_step_fwd_sec_btn = QPushButton("+1s ▶")
+        self.wp_step_fwd_sec_btn.setToolTip("Step forward 1 second")
+        self.wp_step_fwd_sec_btn.clicked.connect(lambda: self._on_wp_step(1.0))
+        self.wp_sync_playhead_btn = QPushButton("⟳ Playhead")
+        self.wp_sync_playhead_btn.setToolTip("Sync thumbnail position to the main timeline playhead")
+        self.wp_sync_playhead_btn.clicked.connect(self._on_wp_sync_playhead)
+
+        wp_stepper_row.addWidget(self.wp_step_back_sec_btn)
+        wp_stepper_row.addWidget(self.wp_step_back_frame_btn)
+        wp_stepper_row.addWidget(self.wp_scrub_time_label)
+        wp_stepper_row.addWidget(self.wp_step_fwd_frame_btn)
+        wp_stepper_row.addWidget(self.wp_step_fwd_sec_btn)
+        wp_stepper_row.addWidget(self.wp_sync_playhead_btn)
+        wp_stepper_row.addStretch()
+        wp_scrub_vbox.addLayout(wp_stepper_row)
+        self.wp_scrub_widget.setVisible(False)
+        wp_thumb_controls.addWidget(self.wp_scrub_widget)
+
+        wp_thumb_controls.addWidget(self.wp_rad_thumb_file)
+
+        # Custom Browse Button row
+        self.wp_browse_widget = QWidget()
+        wp_browse_box = QHBoxLayout(self.wp_browse_widget)
+        wp_browse_box.setContentsMargins(16, 2, 4, 4)
+        wp_browse_box.setSpacing(6)
+        self.wp_browse_thumb_btn = QPushButton("Browse Image...")
+        self.wp_browse_thumb_btn.clicked.connect(self._on_wp_browse_thumb)
+        wp_browse_box.addWidget(self.wp_browse_thumb_btn)
+        wp_browse_box.addStretch()
+        self.wp_browse_widget.setVisible(False)
+        wp_thumb_controls.addWidget(self.wp_browse_widget)
+
+        self.wp_thumb_path_label = QLabel("No image selected")
+        self.wp_thumb_path_label.setStyleSheet("color: #64748b; font-size: 11px;")
+        wp_thumb_controls.addWidget(self.wp_thumb_path_label)
+
+        wp_thumb_layout.addLayout(wp_thumb_controls, stretch=2)
+
+        self.wp_thumb_preview_label = QLabel("No Thumbnail")
+        self.wp_thumb_preview_label.setFixedSize(160, 90)
+        self.wp_thumb_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.wp_thumb_preview_label.setStyleSheet("border: 1px dashed #475569; border-radius: 4px; background-color: #0f172a; color: #64748b; font-size: 10px;")
+        wp_thumb_layout.addWidget(self.wp_thumb_preview_label, stretch=1)
+
+        editor_layout.addWidget(wp_thumb_group)
+
+        self.wp_rad_thumb_none.toggled.connect(self._on_wp_thumb_mode_changed)
+        self.wp_rad_thumb_grab.toggled.connect(self._on_wp_thumb_mode_changed)
+        self.wp_rad_thumb_file.toggled.connect(self._on_wp_thumb_mode_changed)
+
         # Bulk Actions Row (When multi-post scope is active)
         self.wp_bulk_box = QWidget()
         bulk_layout = QHBoxLayout(self.wp_bulk_box)
@@ -404,8 +656,12 @@ class UnifiedExportDialog(QDialog):
         self.wp_apply_cats_all_btn = QPushButton("Apply Categories to All Posts")
         self.wp_apply_cats_all_btn.setToolTip("Copy this post's category selection to all other posts in the queue")
         self.wp_apply_cats_all_btn.clicked.connect(self._apply_categories_to_all_posts)
+        self.wp_apply_thumb_all_btn = QPushButton("Apply Thumbnail to All Posts")
+        self.wp_apply_thumb_all_btn.setToolTip("Copy this post's thumbnail selection to all other posts in the queue")
+        self.wp_apply_thumb_all_btn.clicked.connect(self._apply_thumbnails_to_all_posts)
         bulk_layout.addWidget(self.wp_apply_authors_all_btn)
         bulk_layout.addWidget(self.wp_apply_cats_all_btn)
+        bulk_layout.addWidget(self.wp_apply_thumb_all_btn)
         bulk_layout.addStretch()
         editor_layout.addWidget(self.wp_bulk_box)
 
@@ -515,10 +771,258 @@ class UnifiedExportDialog(QDialog):
 
         self.stacked_widget.addWidget(wp_page)
 
+        # ==========================================
+        # PAGE 2: YouTube Studio Assisted Upload
+        # ==========================================
+        yt_page = QWidget()
+        yt_page_layout = QVBoxLayout(yt_page)
+        yt_page_layout.setContentsMargins(0, 0, 0, 0)
+
+        yt_scroll = QScrollArea()
+        yt_scroll.setWidgetResizable(True)
+        yt_scroll_content = QWidget()
+        yt_layout = QVBoxLayout(yt_scroll_content)
+        yt_layout.setSpacing(12)
+
+        # Overview banner
+        yt_banner = QWidget()
+        yt_b_layout = QVBoxLayout(yt_banner)
+        yt_b_layout.setContentsMargins(12, 10, 12, 10)
+        yt_banner.setStyleSheet("background-color: #1e293b; border-radius: 6px; border: 1px solid #334155;")
+        yt_banner_title = QLabel("<b>YouTube Studio Assisted Upload Workflow</b>")
+        yt_banner_title.setStyleSheet("color: #f87171; font-size: 13px;")
+        yt_banner_info = QLabel(
+            "Prepares your media clip, thumbnail, captions (.srt), and formats your video description with interactive chapter timestamps. "
+            "Upon export, the assets are placed in your export folder, description is copied to your clipboard, and YouTube Studio is opened in your browser for immediate manual upload."
+        )
+        yt_banner_info.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        yt_banner_info.setWordWrap(True)
+        yt_b_layout.addWidget(yt_banner_title)
+        yt_b_layout.addWidget(yt_banner_info)
+        yt_layout.addWidget(yt_banner)
+
+        # Video Metadata Group
+        yt_meta_group = QGroupBox("Video Details")
+        yt_meta_layout = QGridLayout(yt_meta_group)
+        yt_meta_layout.setSpacing(8)
+
+        yt_meta_layout.addWidget(QLabel("Title:"), 0, 0)
+        self.yt_title_edit = QLineEdit()
+        self.yt_title_edit.setPlaceholderText("Enter YouTube video title...")
+        yt_meta_layout.addWidget(self.yt_title_edit, 0, 1, 1, 3)
+
+        yt_meta_layout.addWidget(QLabel("Category:"), 1, 0)
+        self.yt_category_combo = QComboBox()
+        yt_categories = [
+            ("News & Politics", "25"),
+            ("Entertainment", "24"),
+            ("Education", "27"),
+            ("People & Blogs", "22"),
+            ("Music", "10"),
+            ("Film & Animation", "1"),
+            ("Science & Technology", "28"),
+            ("Howto & Style", "26"),
+            ("Travel & Events", "19"),
+            ("Sports", "17"),
+        ]
+        for cname, cid in yt_categories:
+            self.yt_category_combo.addItem(cname, cid)
+        yt_meta_layout.addWidget(self.yt_category_combo, 1, 1)
+
+        yt_meta_layout.addWidget(QLabel("Privacy:"), 1, 2)
+        self.yt_privacy_combo = QComboBox()
+        self.yt_privacy_combo.addItem("Unlisted (Recommended)", "unlisted")
+        self.yt_privacy_combo.addItem("Public", "public")
+        self.yt_privacy_combo.addItem("Private", "private")
+        yt_meta_layout.addWidget(self.yt_privacy_combo, 1, 3)
+
+        yt_meta_layout.addWidget(QLabel("Tags:"), 2, 0)
+        self.yt_tags_edit = QLineEdit()
+        self.yt_tags_edit.setPlaceholderText("Comma-separated tags, e.g. news, broadcast, interview")
+        yt_meta_layout.addWidget(self.yt_tags_edit, 2, 1, 1, 3)
+
+        yt_layout.addWidget(yt_meta_group)
+
+        # Description & Chapter Markers Group
+        yt_desc_group = QGroupBox("Description & Chapters")
+        yt_desc_layout = QVBoxLayout(yt_desc_group)
+        yt_desc_layout.setSpacing(6)
+
+        desc_header_layout = QHBoxLayout()
+        desc_tip = QLabel("Chapter timestamps (00:00) will automatically become chapters on YouTube:")
+        desc_tip.setStyleSheet("color: #64748b; font-size: 11px;")
+        desc_header_layout.addWidget(desc_tip)
+        desc_header_layout.addStretch()
+        self.yt_regen_chapters_btn = QPushButton("Reset Chapters from Stories")
+        self.yt_regen_chapters_btn.setToolTip("Regenerate default description and chapter timestamps from current stories.")
+        self.yt_regen_chapters_btn.clicked.connect(self._populate_youtube_metadata)
+        desc_header_layout.addWidget(self.yt_regen_chapters_btn)
+        yt_desc_layout.addLayout(desc_header_layout)
+
+        self.yt_desc_edit = QPlainTextEdit()
+        self.yt_desc_edit.setMinimumHeight(130)
+        self.yt_desc_edit.setPlaceholderText("Enter video description and chapter timestamps...")
+        yt_desc_layout.addWidget(self.yt_desc_edit)
+
+        yt_layout.addWidget(yt_desc_group)
+
+        # Thumbnail & Extras Group
+        yt_extras_group = QGroupBox("Thumbnail & Extras")
+        yt_extras_layout = QVBoxLayout(yt_extras_group)
+        yt_extras_layout.setSpacing(8)
+
+        # Thumbnail selector
+        thumb_subgroup = QWidget()
+        thumb_sub_layout = QHBoxLayout(thumb_subgroup)
+        thumb_sub_layout.setContentsMargins(0, 0, 0, 0)
+        
+        thumb_radio_box = QVBoxLayout()
+        self.yt_rad_auto_thumb = QRadioButton("Automatic (YouTube will select frame)")
+        self.yt_rad_frame_grab = QRadioButton("Grab frame from video")
+        self.yt_rad_file_thumb = QRadioButton("Select custom image file...")
+        
+        if not self._is_video_project:
+            self.yt_rad_frame_grab.setEnabled(False)
+            self.yt_rad_frame_grab.setText("Grab frame from video (Audio-only project)")
+            self.yt_rad_frame_grab.setToolTip("Video frame capture requires video media (audio-only file loaded)")
+            self.yt_rad_auto_thumb.setChecked(True)
+        else:
+            self.yt_rad_frame_grab.setChecked(True)
+
+        thumb_radio_box.addWidget(self.yt_rad_auto_thumb)
+        thumb_radio_box.addWidget(self.yt_rad_frame_grab)
+
+        # In-dialog Frame Scrubber & Stepper for YouTube
+        self.yt_scrub_widget = QWidget()
+        yt_scrub_vbox = QVBoxLayout(self.yt_scrub_widget)
+        yt_scrub_vbox.setContentsMargins(16, 2, 4, 4)
+        yt_scrub_vbox.setSpacing(4)
+
+        self.yt_scrub_slider = QSlider(Qt.Orientation.Horizontal)
+        self.yt_scrub_slider.setRange(0, 10000)
+        self.yt_scrub_slider.valueChanged.connect(self._on_yt_slider_value_changed)
+        yt_scrub_vbox.addWidget(self.yt_scrub_slider)
+
+        yt_stepper_row = QHBoxLayout()
+        yt_stepper_row.setSpacing(4)
+        self.yt_step_back_sec_btn = QPushButton("◀ -1s")
+        self.yt_step_back_sec_btn.setToolTip("Step backward 1 second")
+        self.yt_step_back_sec_btn.clicked.connect(lambda: self._on_yt_step(-1.0))
+        self.yt_step_back_frame_btn = QPushButton("◀ -1f")
+        self.yt_step_back_frame_btn.setToolTip("Step backward 1 frame (~33ms)")
+        self.yt_step_back_frame_btn.clicked.connect(lambda: self._on_yt_step(-0.0333))
+
+        self.yt_scrub_time_label = QLabel("00:00:00.000")
+        self.yt_scrub_time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.yt_scrub_time_label.setStyleSheet("padding: 2px 6px; background-color: #0f172a; border: 1px solid #334155; border-radius: 4px; font-family: monospace; font-size: 11px; font-weight: bold; color: #e2e8f0;")
+
+        self.yt_step_fwd_frame_btn = QPushButton("+1f ▶")
+        self.yt_step_fwd_frame_btn.setToolTip("Step forward 1 frame (~33ms)")
+        self.yt_step_fwd_frame_btn.clicked.connect(lambda: self._on_yt_step(0.0333))
+        self.yt_step_fwd_sec_btn = QPushButton("+1s ▶")
+        self.yt_step_fwd_sec_btn.setToolTip("Step forward 1 second")
+        self.yt_step_fwd_sec_btn.clicked.connect(lambda: self._on_yt_step(1.0))
+        self.yt_sync_playhead_btn = QPushButton("⟳ Playhead")
+        self.yt_sync_playhead_btn.setToolTip("Sync thumbnail position to the main timeline playhead")
+        self.yt_sync_playhead_btn.clicked.connect(self._on_yt_sync_playhead)
+
+        yt_stepper_row.addWidget(self.yt_step_back_sec_btn)
+        yt_stepper_row.addWidget(self.yt_step_back_frame_btn)
+        yt_stepper_row.addWidget(self.yt_scrub_time_label)
+        yt_stepper_row.addWidget(self.yt_step_fwd_frame_btn)
+        yt_stepper_row.addWidget(self.yt_step_fwd_sec_btn)
+        yt_stepper_row.addWidget(self.yt_sync_playhead_btn)
+        yt_stepper_row.addStretch()
+        yt_scrub_vbox.addLayout(yt_stepper_row)
+        self.yt_scrub_widget.setVisible(self.yt_rad_frame_grab.isChecked())
+        thumb_radio_box.addWidget(self.yt_scrub_widget)
+
+        thumb_radio_box.addWidget(self.yt_rad_file_thumb)
+
+        # YouTube Browse Button row
+        self.yt_browse_widget = QWidget()
+        yt_browse_box = QHBoxLayout(self.yt_browse_widget)
+        yt_browse_box.setContentsMargins(16, 2, 4, 4)
+        yt_browse_box.setSpacing(6)
+        self.yt_browse_thumb_btn = QPushButton("Browse Image...")
+        self.yt_browse_thumb_btn.clicked.connect(self._on_yt_browse_thumb)
+        yt_browse_box.addWidget(self.yt_browse_thumb_btn)
+        yt_browse_box.addStretch()
+        self.yt_browse_widget.setVisible(False)
+        thumb_radio_box.addWidget(self.yt_browse_widget)
+
+        self.yt_thumb_path_label = QLabel("No image selected")
+        self.yt_thumb_path_label.setStyleSheet("color: #64748b; font-size: 11px;")
+        thumb_radio_box.addWidget(self.yt_thumb_path_label)
+
+        thumb_sub_layout.addLayout(thumb_radio_box, stretch=2)
+
+        # Preview box
+        self.yt_thumb_preview_label = QLabel("Frame Preview")
+        self.yt_thumb_preview_label.setFixedSize(160, 90)
+        self.yt_thumb_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.yt_thumb_preview_label.setStyleSheet("border: 1px dashed #475569; border-radius: 4px; background-color: #0f172a; color: #64748b; font-size: 10px;")
+        thumb_sub_layout.addWidget(self.yt_thumb_preview_label, stretch=1)
+
+        yt_extras_layout.addWidget(thumb_subgroup)
+
+        self.yt_rad_auto_thumb.toggled.connect(self._on_yt_thumb_mode_changed)
+        self.yt_rad_frame_grab.toggled.connect(self._on_yt_thumb_mode_changed)
+        self.yt_rad_file_thumb.toggled.connect(self._on_yt_thumb_mode_changed)
+
+        # Post-export actions & captions
+        yt_options_box = QVBoxLayout()
+        self.yt_cb_subtitles = QCheckBox("Generate Subtitles / Closed Captions (.srt) for YouTube")
+        self.yt_cb_subtitles.setChecked(True)
+        self.yt_cb_copy_clipboard = QCheckBox("Automatically copy Title, Description & Chapters to clipboard")
+        self.yt_cb_copy_clipboard.setChecked(True)
+        self.yt_cb_open_browser = QCheckBox("Automatically open YouTube Studio upload page in web browser")
+        self.yt_cb_open_browser.setChecked(True)
+        self.yt_cb_open_folder = QCheckBox("Open export directory in file manager after package is ready")
+        self.yt_cb_open_folder.setChecked(True)
+
+        yt_options_box.addWidget(self.yt_cb_subtitles)
+        yt_options_box.addWidget(self.yt_cb_copy_clipboard)
+        yt_options_box.addWidget(self.yt_cb_open_browser)
+        yt_options_box.addWidget(self.yt_cb_open_folder)
+        yt_extras_layout.addLayout(yt_options_box)
+
+        yt_layout.addWidget(yt_extras_group)
+
+        # Export Location Group
+        yt_loc_group = QGroupBox("YouTube Export Destination Directory")
+        yt_loc_layout = QVBoxLayout(yt_loc_group)
+        yt_loc_layout.setSpacing(6)
+
+        self.yt_loc_default_radio = QRadioButton("Default project directory")
+        self.yt_loc_custom_radio = QRadioButton("Custom directory:")
+        self.yt_loc_default_radio.setChecked(True)
+        yt_loc_layout.addWidget(self.yt_loc_default_radio)
+
+        yt_custom_row = QHBoxLayout()
+        yt_custom_row.addWidget(self.yt_loc_custom_radio)
+        self.yt_loc_custom_edit = QLineEdit()
+        self.yt_loc_custom_edit.setPlaceholderText("Select destination folder...")
+        self.yt_loc_browse_btn = QPushButton("Browse...")
+        self.yt_loc_browse_btn.clicked.connect(self._browse_yt_custom_export_location)
+        yt_custom_row.addWidget(self.yt_loc_custom_edit)
+        yt_custom_row.addWidget(self.yt_loc_browse_btn)
+        yt_loc_layout.addLayout(yt_custom_row)
+
+        yt_layout.addWidget(yt_loc_group)
+        yt_layout.addStretch()
+
+        yt_scroll.setWidget(yt_scroll_content)
+        yt_page_layout.addWidget(yt_scroll)
+
+        self.stacked_widget.addWidget(yt_page)
+
         layout.addWidget(self.stacked_widget)
 
         # Connect radio buttons
         self.radio_local.toggled.connect(self._on_dest_changed)
+        self.radio_wp.toggled.connect(self._on_dest_changed)
+        self.radio_youtube.toggled.connect(self._on_dest_changed)
         self.scope_combo.currentIndexChanged.connect(self._on_scope_changed)
 
         # Dialog Buttons
@@ -539,7 +1043,25 @@ class UnifiedExportDialog(QDialog):
         self.export_btn.clicked.connect(self._handle_accept)
 
         self._load_saved_options()
+        if initial_dest == "youtube" and yt_enabled:
+            self.radio_youtube.setChecked(True)
+        elif initial_dest == "wordpress" and wp_enabled:
+            self.radio_wp.setChecked(True)
         self._on_dest_changed()
+
+    def done(self, r):
+        if hasattr(self, "_wp_scrub_timer") and self._wp_scrub_timer.isActive():
+            self._wp_scrub_timer.stop()
+        if hasattr(self, "_yt_scrub_timer") and self._yt_scrub_timer.isActive():
+            self._yt_scrub_timer.stop()
+        if r != QDialog.DialogCode.Accepted:
+            for temp_f in getattr(self, "_temp_preview_files", set()):
+                try:
+                    if temp_f and Path(temp_f).exists():
+                        Path(temp_f).unlink(missing_ok=True)
+                except Exception:
+                    pass
+        super().done(r)
 
     def _open_wp_settings(self):
         dialog = WordPressSettingsDialog(self)
@@ -576,14 +1098,218 @@ class UnifiedExportDialog(QDialog):
         if self.radio_local.isChecked():
             self.stacked_widget.setCurrentIndex(0)
             self.export_btn.setText("Export Files...")
+        elif self.radio_youtube.isChecked():
+            self.stacked_widget.setCurrentIndex(2)
+            self.export_btn.setText("Export YouTube Package...")
+            self._populate_youtube_metadata()
         else:
             self.stacked_widget.setCurrentIndex(1)
             self.export_btn.setText("Publish Draft to WordPress")
             self._rebuild_wp_post_items()
 
     def _on_scope_changed(self):
-        if not self.radio_local.isChecked():
+        if self.radio_wp.isChecked():
             self._rebuild_wp_post_items()
+        elif self.radio_youtube.isChecked():
+            self._populate_youtube_metadata()
+
+    def _get_yt_bounds(self):
+        scope = self.scope_combo.currentData()
+        stories = getattr(self.main_window, "stories", [])
+        if scope == "selected_stories":
+            sel_indices = getattr(self.main_window, "current_selected_story_indices", [])
+            target_stories = [stories[i] for i in sel_indices if 0 <= i < len(stories)]
+            if len(target_stories) == 1:
+                st = target_stories[0]
+                t_start = float(getattr(st, "start", 0.0) or 0.0)
+                t_end = float(getattr(st, "end", 0.0) or 0.0)
+                return t_start, max(t_start + 0.1, t_end)
+        dur = max(0.1, float(getattr(self.main_window, "duration", 0.0) or 0.0))
+        return 0.0, dur
+
+    def _sync_yt_slider_to_pos(self, pos: float):
+        t_min, t_max = self._get_yt_bounds()
+        clamped = max(t_min, min(t_max, float(pos)))
+        self._yt_frame_pos = clamped
+        span = max(0.001, t_max - t_min)
+        val = int(round(((clamped - t_min) / span) * 10000))
+        self.yt_scrub_slider.blockSignals(True)
+        self.yt_scrub_slider.setValue(max(0, min(10000, val)))
+        self.yt_scrub_slider.blockSignals(False)
+        self.yt_scrub_time_label.setText(format_time(clamped, include_millis=True))
+
+    def _on_yt_slider_value_changed(self, val: int):
+        t_min, t_max = self._get_yt_bounds()
+        pos = t_min + (val / 10000.0) * (t_max - t_min)
+        self._yt_frame_pos = pos
+        self.yt_scrub_time_label.setText(format_time(pos, include_millis=True))
+        self._yt_scrub_timer.start(120)
+
+    def _on_yt_scrub_timer_timeout(self):
+        self._capture_yt_frame(pos=self._yt_frame_pos)
+
+    def _on_yt_step(self, delta_secs: float):
+        t_min, t_max = self._get_yt_bounds()
+        cur_pos = getattr(self, "_yt_frame_pos", t_min)
+        new_pos = max(t_min, min(t_max, cur_pos + delta_secs))
+        self._sync_yt_slider_to_pos(new_pos)
+        self._capture_yt_frame(pos=new_pos)
+
+    def _on_yt_sync_playhead(self):
+        t_min, t_max = self._get_yt_bounds()
+        playhead_pos = float(getattr(self.main_window, "current_position", 0.0) or 0.0)
+        new_pos = max(t_min, min(t_max, playhead_pos))
+        self._sync_yt_slider_to_pos(new_pos)
+        self._capture_yt_frame(pos=new_pos)
+
+    def _on_yt_browse_thumb(self):
+        fn, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select YouTube Thumbnail Image",
+            "",
+            "Image Files (*.jpg *.jpeg *.png *.webp);;All Files (*.*)",
+        )
+        if fn:
+            self._yt_custom_thumb_path = fn
+            self.yt_thumb_path_label.setText(Path(fn).name)
+            pix = QPixmap(fn).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.yt_thumb_preview_label.setPixmap(pix)
+
+    def _on_yt_thumb_mode_changed(self):
+        if self.yt_rad_auto_thumb.isChecked():
+            self.yt_scrub_widget.setVisible(False)
+            self.yt_browse_widget.setVisible(False)
+            self.yt_thumb_path_label.setText("No custom image selected")
+            self.yt_thumb_preview_label.clear()
+            self.yt_thumb_preview_label.setText("Auto Thumbnail\n(YouTube)")
+        elif self.yt_rad_frame_grab.isChecked():
+            self.yt_browse_widget.setVisible(False)
+            self.yt_scrub_widget.setVisible(True)
+            if getattr(self, "_yt_frame_pos", None) is None:
+                t_min, _ = self._get_yt_bounds()
+                playhead = float(getattr(self.main_window, "current_position", 0.0) or 0.0)
+                self._yt_frame_pos = playhead if playhead > 0 else t_min
+            self._sync_yt_slider_to_pos(self._yt_frame_pos)
+            self._capture_yt_frame(pos=self._yt_frame_pos)
+        elif self.yt_rad_file_thumb.isChecked():
+            self.yt_scrub_widget.setVisible(False)
+            self.yt_browse_widget.setVisible(True)
+            if getattr(self, "_yt_custom_thumb_path", None) and Path(self._yt_custom_thumb_path).exists():
+                self.yt_thumb_path_label.setText(Path(self._yt_custom_thumb_path).name)
+                pix = QPixmap(self._yt_custom_thumb_path).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.yt_thumb_preview_label.setPixmap(pix)
+            else:
+                self.yt_thumb_path_label.setText("Click Browse to select image")
+                self.yt_thumb_preview_label.clear()
+                self.yt_thumb_preview_label.setText("Click Browse to\nselect image")
+
+    def _capture_yt_frame(self, pos=None):
+        if not self._is_video_project:
+            self.yt_thumb_preview_label.setText("Audio-only media\n(No video frames)")
+            return None
+        media_file = getattr(self.main_window, "audio_file", None)
+        if not media_file or not Path(media_file).exists():
+            self.yt_thumb_preview_label.setText("No media\nloaded")
+            return None
+        if pos is None:
+            pos = getattr(self, "_yt_frame_pos", float(getattr(self.main_window, "current_position", 0.0) or 0.0))
+        out_dir = Path(tempfile.gettempdir())
+        out_path = out_dir / f"rtvs_yt_frame_{os.getpid()}.jpg"
+        ff = ffmpeg_path() or "ffmpeg"
+        cmd = [
+            ff, "-hide_banner", "-loglevel", "error", "-y",
+            "-ss", f"{max(0.0, float(pos)):.3f}",
+            "-i", str(media_file),
+            "-frames:v", "1",
+            "-q:v", "2",
+            str(out_path),
+        ]
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        try:
+            res = subprocess.run(cmd, capture_output=True, timeout=5, creationflags=flags)
+            if res.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:
+                self._yt_captured_frame = str(out_path)
+                self._temp_preview_files.add(str(out_path))
+                pix = QPixmap(str(out_path)).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.yt_thumb_preview_label.setPixmap(pix)
+                self.yt_thumb_path_label.setText(f"Video frame captured at {format_time(pos, include_millis=True)}")
+                return str(out_path)
+        except subprocess.TimeoutExpired:
+            print(f"[YOUTUBE EXPORT] Frame capture timed out after 5 seconds at {pos}s")
+            self.yt_thumb_preview_label.setText("Frame capture\ntimed out")
+            return None
+        except Exception as exc:
+            print(f"[YOUTUBE EXPORT] Frame capture failed: {exc}")
+        self.yt_thumb_preview_label.setText("Frame capture\nfailed")
+        return None
+
+    def _browse_yt_custom_export_location(self):
+        cur = self.yt_loc_custom_edit.text().strip() or self.default_export_dir
+        folder = QFileDialog.getExistingDirectory(self, "Choose YouTube Export Folder", cur)
+        if folder:
+            self.yt_loc_custom_edit.setText(folder)
+            self.yt_loc_custom_radio.setChecked(True)
+
+    def _populate_youtube_metadata(self):
+        scope = self.scope_combo.currentData()
+        stories = getattr(self.main_window, "stories", [])
+
+        if scope == "selected_stories":
+            sel_indices = getattr(self.main_window, "current_selected_story_indices", [])
+            target_stories = [stories[i] for i in sel_indices if 0 <= i < len(stories)]
+        else:
+            target_stories = stories
+
+        if scope == "selected_stories" and len(target_stories) == 1:
+            title = (getattr(target_stories[0], "title", "") or "Story Segment").strip()
+        else:
+            if getattr(self.main_window, "project_file", None):
+                title = self.main_window.project_file.stem
+            elif getattr(self.main_window, "audio_file", None):
+                title = Path(self.main_window.audio_file).stem
+            else:
+                title = "Broadcast Recording"
+
+        chapters = []
+        if target_stories:
+            first_st_start = getattr(target_stories[0], "start", 0.0)
+            offset = first_st_start if (scope == "selected_stories" and len(target_stories) == 1) else 0.0
+            
+            if (first_st_start - offset) > 0.5:
+                chapters.append("00:00 Introduction")
+            for i, st in enumerate(target_stories, 1):
+                rel_start = max(0.0, getattr(st, "start", 0.0) - offset)
+                if rel_start >= 3600:
+                    h = int(rel_start // 3600)
+                    m = int((rel_start % 3600) // 60)
+                    s = int(rel_start % 60)
+                    ts_str = f"{h}:{m:02d}:{s:02d}"
+                else:
+                    m = int(rel_start // 60)
+                    s = int(rel_start % 60)
+                    ts_str = f"{m:02d}:{s:02d}"
+                st_title = (getattr(st, "title", "") or f"Segment {i}").strip()
+                chapters.append(f"{ts_str} {st_title}")
+
+        desc_lines = [
+            f"Recording: {title}",
+            "",
+            "Chapters:",
+            "\n".join(chapters) if chapters else "00:00 Broadcast Start",
+            "",
+            "Produced with Radio & TV Segmenter.",
+        ]
+
+        if not self.yt_title_edit.text().strip():
+            self.yt_title_edit.setText(title)
+        self.yt_desc_edit.setPlainText("\n".join(desc_lines))
+
+        tags = [title, "broadcast", "news", "radio", "tv", "segment"]
+        if not self.yt_tags_edit.text().strip():
+            self.yt_tags_edit.setText(", ".join([t for t in tags if t]))
+
+        if self.yt_rad_frame_grab.isChecked():
+            self._capture_yt_frame()
 
     def _filter_authors_list(self, text: str):
         query = text.strip().lower()
@@ -755,6 +1481,64 @@ class UnifiedExportDialog(QDialog):
             item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
         self._syncing_post_editor = False
 
+    def _get_wp_post_bounds(self, post_index=None):
+        idx = self._current_post_index if post_index is None else post_index
+        if 0 <= idx < len(self.wp_post_items):
+            p = self.wp_post_items[idx]
+            if p.get("start") is not None and p.get("end") is not None:
+                t_start = float(p["start"])
+                t_end = float(p["end"])
+                return t_start, max(t_start + 0.1, t_end)
+        dur = max(0.1, float(getattr(self.main_window, "duration", 0.0) or 0.0))
+        return 0.0, dur
+
+    def _sync_wp_slider_to_pos(self, pos: float):
+        t_min, t_max = self._get_wp_post_bounds()
+        clamped = max(t_min, min(t_max, float(pos)))
+        if 0 <= self._current_post_index < len(self.wp_post_items):
+            self.wp_post_items[self._current_post_index]["frame_pos"] = clamped
+        span = max(0.001, t_max - t_min)
+        val = int(round(((clamped - t_min) / span) * 10000))
+        self.wp_scrub_slider.blockSignals(True)
+        self.wp_scrub_slider.setValue(max(0, min(10000, val)))
+        self.wp_scrub_slider.blockSignals(False)
+        self.wp_scrub_time_label.setText(format_time(clamped, include_millis=True))
+
+    def _on_wp_slider_value_changed(self, val: int):
+        if self._syncing_post_editor or not (0 <= self._current_post_index < len(self.wp_post_items)):
+            return
+        t_min, t_max = self._get_wp_post_bounds()
+        pos = t_min + (val / 10000.0) * (t_max - t_min)
+        post = self.wp_post_items[self._current_post_index]
+        post["frame_pos"] = pos
+        self.wp_scrub_time_label.setText(format_time(pos, include_millis=True))
+        self._wp_scrub_timer.start(120)
+
+    def _on_wp_scrub_timer_timeout(self):
+        if 0 <= self._current_post_index < len(self.wp_post_items):
+            post = self.wp_post_items[self._current_post_index]
+            pos = post.get("frame_pos")
+            self._capture_wp_frame(pos=pos)
+
+    def _on_wp_step(self, delta_secs: float):
+        if not (0 <= self._current_post_index < len(self.wp_post_items)):
+            return
+        post = self.wp_post_items[self._current_post_index]
+        t_min, t_max = self._get_wp_post_bounds()
+        cur_pos = post.get("frame_pos", t_min)
+        new_pos = max(t_min, min(t_max, cur_pos + delta_secs))
+        self._sync_wp_slider_to_pos(new_pos)
+        self._capture_wp_frame(pos=new_pos)
+
+    def _on_wp_sync_playhead(self):
+        if not (0 <= self._current_post_index < len(self.wp_post_items)):
+            return
+        t_min, t_max = self._get_wp_post_bounds()
+        playhead_pos = float(getattr(self.main_window, "current_position", 0.0) or 0.0)
+        new_pos = max(t_min, min(t_max, playhead_pos))
+        self._sync_wp_slider_to_pos(new_pos)
+        self._capture_wp_frame(pos=new_pos)
+
     def _load_post_editor_state(self, index: int):
         if not (0 <= index < len(self.wp_post_items)):
             return
@@ -765,10 +1549,167 @@ class UnifiedExportDialog(QDialog):
         self.wp_current_post_header.setText(f"<b>Post Settings: {html.escape(post.get('task_label', 'Post'))}</b>")
         self.wp_title_edit.setText(post.get("title", ""))
         self.wp_excerpt_edit.setPlainText(post.get("excerpt", ""))
+
+        mode = post.get("featured_image_mode", "none")
+        img = post.get("featured_image")
+        frame_pos = post.get("frame_pos")
+        if frame_pos is None:
+            t_min, _ = self._get_wp_post_bounds(index)
+            frame_pos = t_min
+            post["frame_pos"] = frame_pos
+
+        if mode == "grab" and self._is_video_project:
+            self.wp_rad_thumb_grab.setChecked(True)
+            self.wp_scrub_widget.setVisible(True)
+            self.wp_browse_widget.setVisible(False)
+            self._sync_wp_slider_to_pos(frame_pos)
+            if img and Path(img).exists():
+                self.wp_thumb_path_label.setText(f"Video frame captured at {format_time(frame_pos, include_millis=True)}")
+                pix = QPixmap(str(img)).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.wp_thumb_preview_label.setPixmap(pix)
+            else:
+                self.wp_thumb_path_label.setText("Frame will be captured from video")
+                self.wp_thumb_preview_label.clear()
+                self.wp_thumb_preview_label.setText("Video Frame")
+        elif mode == "file" and img:
+            self.wp_rad_thumb_file.setChecked(True)
+            self.wp_scrub_widget.setVisible(False)
+            self.wp_browse_widget.setVisible(True)
+            self.wp_thumb_path_label.setText(Path(img).name)
+            if Path(img).exists():
+                pix = QPixmap(str(img)).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.wp_thumb_preview_label.setPixmap(pix)
+            else:
+                self.wp_thumb_preview_label.clear()
+                self.wp_thumb_preview_label.setText("Image not found")
+        else:
+            self.wp_rad_thumb_none.setChecked(True)
+            self.wp_scrub_widget.setVisible(False)
+            self.wp_browse_widget.setVisible(False)
+            self.wp_thumb_path_label.setText("No image selected")
+            self.wp_thumb_preview_label.clear()
+            self.wp_thumb_preview_label.setText("No Thumbnail")
+
         self._syncing_post_editor = False
 
         self._set_editor_checked_authors(post.get("author_ids", []), post.get("author_term_ids", []))
         self._set_editor_checked_categories(post.get("category_ids", []))
+
+    def _on_wp_thumb_mode_changed(self):
+        if self._syncing_post_editor or not (0 <= self._current_post_index < len(self.wp_post_items)):
+            return
+        post = self.wp_post_items[self._current_post_index]
+        if self.wp_rad_thumb_none.isChecked():
+            self.wp_scrub_widget.setVisible(False)
+            self.wp_browse_widget.setVisible(False)
+            self.wp_thumb_path_label.setText("No image selected")
+            self.wp_thumb_preview_label.clear()
+            self.wp_thumb_preview_label.setText("No Thumbnail")
+            post["featured_image"] = None
+            post["featured_image_mode"] = "none"
+        elif self.wp_rad_thumb_grab.isChecked():
+            self.wp_browse_widget.setVisible(False)
+            self.wp_scrub_widget.setVisible(True)
+            if post.get("frame_pos") is None:
+                t_min, _ = self._get_wp_post_bounds()
+                post["frame_pos"] = t_min
+            self._sync_wp_slider_to_pos(post["frame_pos"])
+            self._capture_wp_frame(pos=post.get("frame_pos"))
+        elif self.wp_rad_thumb_file.isChecked():
+            self.wp_scrub_widget.setVisible(False)
+            self.wp_browse_widget.setVisible(True)
+            custom_path = post.get("featured_image")
+            if custom_path and Path(custom_path).exists() and post.get("featured_image_mode") == "file":
+                self.wp_thumb_path_label.setText(Path(custom_path).name)
+                pix = QPixmap(str(custom_path)).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.wp_thumb_preview_label.setPixmap(pix)
+            else:
+                self.wp_thumb_path_label.setText("Click Browse to select image file")
+                self.wp_thumb_preview_label.clear()
+                self.wp_thumb_preview_label.setText("No Image\nSelected")
+
+    def _on_wp_capture_frame_btn_clicked(self):
+        self._capture_wp_frame()
+
+    def _capture_wp_frame(self, pos=None):
+        if not (0 <= self._current_post_index < len(self.wp_post_items)):
+            return None
+        if not self._is_video_project:
+            self.wp_thumb_preview_label.setText("Audio-only media\n(No video frames)")
+            return None
+        post = self.wp_post_items[self._current_post_index]
+        media_file = getattr(self.main_window, "audio_file", None)
+        if not media_file or not Path(media_file).exists():
+            self.wp_thumb_preview_label.setText("No media\nloaded")
+            return None
+
+        if pos is None:
+            if post.get("frame_pos") is not None:
+                pos = float(post["frame_pos"])
+            elif post.get("start") is not None:
+                pos = float(post["start"])
+            else:
+                pos = float(getattr(self.main_window, "current_position", 0.0) or 0.0)
+
+        post["frame_pos"] = float(pos)
+        out_dir = Path(tempfile.gettempdir())
+        out_path = out_dir / f"rtvs_wp_frame_{self._current_post_index}_{os.getpid()}.jpg"
+        ff = ffmpeg_path() or "ffmpeg"
+        cmd = [
+            ff, "-hide_banner", "-loglevel", "error", "-y",
+            "-ss", f"{max(0.0, float(pos)):.3f}",
+            "-i", str(media_file),
+            "-frames:v", "1",
+            "-q:v", "2",
+            str(out_path),
+        ]
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        try:
+            res = subprocess.run(cmd, capture_output=True, timeout=5, creationflags=flags)
+            if res.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:
+                post["featured_image"] = str(out_path)
+                post["featured_image_mode"] = "grab"
+                self._temp_preview_files.add(str(out_path))
+                self.wp_thumb_path_label.setText(f"Video frame captured at {format_time(pos, include_millis=True)}")
+                pix = QPixmap(str(out_path)).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.wp_thumb_preview_label.setPixmap(pix)
+                return str(out_path)
+        except subprocess.TimeoutExpired:
+            print(f"[WORDPRESS EXPORT] Frame capture timed out after 5 seconds at {pos}s")
+            self.wp_thumb_preview_label.setText("Frame capture\ntimed out")
+            return None
+        except Exception as exc:
+            print(f"[WORDPRESS EXPORT] Frame capture failed: {exc}")
+        self.wp_thumb_preview_label.setText("Frame capture\nfailed")
+        return None
+
+    def _on_wp_browse_thumb(self):
+        if not (0 <= self._current_post_index < len(self.wp_post_items)):
+            return
+        fn, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select WordPress Featured Image",
+            "",
+            "Image Files (*.jpg *.jpeg *.png *.webp);;All Files (*.*)",
+        )
+        if fn:
+            post = self.wp_post_items[self._current_post_index]
+            post["featured_image"] = fn
+            post["featured_image_mode"] = "file"
+            self.wp_rad_thumb_file.setChecked(True)
+            self.wp_thumb_path_label.setText(Path(fn).name)
+            pix = QPixmap(fn).scaled(160, 90, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.wp_thumb_preview_label.setPixmap(pix)
+
+    def _apply_thumbnails_to_all_posts(self):
+        if not (0 <= self._current_post_index < len(self.wp_post_items)):
+            return
+        current_img = self.wp_post_items[self._current_post_index].get("featured_image")
+        current_mode = self.wp_post_items[self._current_post_index].get("featured_image_mode", "none")
+        for post in self.wp_post_items:
+            post["featured_image"] = current_img
+            post["featured_image_mode"] = current_mode
+        QMessageBox.information(self, "Applied Thumbnails", f"Applied thumbnail settings to all {len(self.wp_post_items)} posts.")
 
     def _rebuild_wp_post_items(self):
         scope = self.scope_combo.currentData()
@@ -787,9 +1728,12 @@ class UnifiedExportDialog(QDialog):
                 "excerpt": excerpt,
                 "start": None,
                 "end": None,
+                "frame_pos": float(getattr(self.main_window, "current_position", 0.0) or 0.0),
                 "author_ids": [],
                 "author_term_ids": [],
                 "category_ids": [],
+                "featured_image": None,
+                "featured_image_mode": "none",
             })
         elif scope == "selected_stories":
             indices = getattr(self.main_window, "current_selected_story_indices", []) or []
@@ -807,9 +1751,12 @@ class UnifiedExportDialog(QDialog):
                         "excerpt": excerpt,
                         "start": st.start,
                         "end": st.end,
+                        "frame_pos": float(st.start if st.start is not None else (getattr(self.main_window, "current_position", 0.0) or 0.0)),
                         "author_ids": [],
                         "author_term_ids": [],
                         "category_ids": [],
+                        "featured_image": None,
+                        "featured_image_mode": "none",
                     })
         elif scope == "all_stories":
             for idx, st in enumerate(stories):
@@ -822,9 +1769,12 @@ class UnifiedExportDialog(QDialog):
                     "excerpt": excerpt,
                     "start": st.start,
                     "end": st.end,
+                    "frame_pos": float(st.start if st.start is not None else (getattr(self.main_window, "current_position", 0.0) or 0.0)),
                     "author_ids": [],
                     "author_term_ids": [],
                     "category_ids": [],
+                    "featured_image": None,
+                    "featured_image_mode": "none",
                 })
         elif scope == "full_and_all_stories":
             raw_text = self.main_window._get_transcript_text_slice(0.0, None) if hasattr(self.main_window, "_get_transcript_text_slice") else ""
@@ -835,9 +1785,12 @@ class UnifiedExportDialog(QDialog):
                 "excerpt": excerpt,
                 "start": None,
                 "end": None,
+                "frame_pos": float(getattr(self.main_window, "current_position", 0.0) or 0.0),
                 "author_ids": [],
                 "author_term_ids": [],
                 "category_ids": [],
+                "featured_image": None,
+                "featured_image_mode": "none",
             })
             for idx, st in enumerate(stories):
                 st_title = st.title if st.title else f"{base_name} - Story {idx + 1}"
@@ -849,9 +1802,12 @@ class UnifiedExportDialog(QDialog):
                     "excerpt": st_excerpt,
                     "start": st.start,
                     "end": st.end,
+                    "frame_pos": float(st.start if st.start is not None else (getattr(self.main_window, "current_position", 0.0) or 0.0)),
                     "author_ids": [],
                     "author_term_ids": [],
                     "category_ids": [],
+                    "featured_image": None,
+                    "featured_image_mode": "none",
                 })
 
         if not new_items:
@@ -861,9 +1817,12 @@ class UnifiedExportDialog(QDialog):
                 "excerpt": "",
                 "start": None,
                 "end": None,
+                "frame_pos": float(getattr(self.main_window, "current_position", 0.0) or 0.0),
                 "author_ids": [],
                 "author_term_ids": [],
                 "category_ids": [],
+                "featured_image": None,
+                "featured_image_mode": "none",
             })
 
         self.wp_post_items = new_items
@@ -995,6 +1954,15 @@ class UnifiedExportDialog(QDialog):
             if (formats["txt"] or formats["docx"]) and not self.cb_en.isChecked() and not self.cb_es.isChecked():
                 QMessageBox.warning(self, "Export", "Please select at least one language track (English or Spanish).")
                 return
+        elif self.radio_youtube.isChecked():
+            if self.yt_loc_custom_radio.isChecked():
+                custom_path = self.yt_loc_custom_edit.text().strip()
+                if not custom_path or not os.path.isdir(custom_path):
+                    QMessageBox.warning(self, "Export Location", "Please select a valid directory for the custom export location.")
+                    return
+            if not self.yt_title_edit.text().strip():
+                QMessageBox.warning(self, "Export", "Please provide a video title for YouTube export.")
+                return
         else:
             if not self.wp_cb_en.isChecked() and not self.wp_cb_es.isChecked():
                 QMessageBox.warning(self, "Export", "Please select at least one transcript language (English or Spanish) for the WordPress post.")
@@ -1099,6 +2067,36 @@ class UnifiedExportDialog(QDialog):
                 "formats": formats,
                 "options": options,
                 "base": base,
+                "export_dir": export_dir,
+            }
+        elif self.radio_youtube.isChecked():
+            thumb_mode = "auto"
+            thumb_file = None
+            if self.yt_rad_frame_grab.isChecked():
+                thumb_mode = "frame"
+                thumb_file = getattr(self, "_yt_captured_frame", None)
+            elif self.yt_rad_file_thumb.isChecked():
+                thumb_mode = "file"
+                thumb_file = getattr(self, "_yt_custom_thumb_path", None)
+
+            export_dir = None
+            if self.yt_loc_custom_radio.isChecked() and self.yt_loc_custom_edit.text().strip():
+                export_dir = self.yt_loc_custom_edit.text().strip()
+
+            return {
+                "destination": "youtube",
+                "scope": scope,
+                "title": self.yt_title_edit.text().strip() or "Broadcast Video",
+                "description": self.yt_desc_edit.toPlainText().strip(),
+                "tags": self.yt_tags_edit.text().strip(),
+                "category": self.yt_category_combo.currentData(),
+                "privacy": self.yt_privacy_combo.currentData(),
+                "thumb_mode": thumb_mode,
+                "thumb_file": thumb_file,
+                "copy_clipboard": self.yt_cb_copy_clipboard.isChecked(),
+                "open_browser": self.yt_cb_open_browser.isChecked(),
+                "open_folder": self.yt_cb_open_folder.isChecked(),
+                "include_subtitles": self.yt_cb_subtitles.isChecked(),
                 "export_dir": export_dir,
             }
         else:
@@ -1731,10 +2729,13 @@ class ProjectExportMixin:
 
         if audio_path is not None:
             self.stop_waveform_worker()
+            self.stop_video_thumbnail_worker()
             self.audio_file = audio_path
             self.player.setSource(QUrl.fromLocalFile(str(audio_path)))
             self.current_media_is_video = self.is_video_file(audio_path)
             self.update_video_preview_state()
+            if hasattr(self, "timeline") and hasattr(self.timeline, "set_is_video"):
+                self.timeline.set_is_video(self.current_media_is_video)
             self.timeline.set_audio_filename(audio_path.name)
             self.timeline.set_waveform_peaks([])
 
@@ -1751,6 +2752,8 @@ class ProjectExportMixin:
             self.audio_file = None
             self.current_media_is_video = False
             self.update_video_preview_state()
+            if hasattr(self, "timeline") and hasattr(self.timeline, "set_is_video"):
+                self.timeline.set_is_video(False)
 
         self.duration = float(data.get("duration") or 0)
         if self.duration > 0:
@@ -1891,8 +2894,8 @@ class ProjectExportMixin:
         """Standard trigger for the main toolbar Export button."""
         self.open_unified_export_dialog()
 
-    def open_unified_export_dialog(self, initial_scope=None):
-        """Unified Export Dialog entry point for local file exports and WordPress publishing."""
+    def open_unified_export_dialog(self, initial_scope=None, initial_dest=None):
+        """Unified Export Dialog entry point for local file exports, WordPress publishing, and YouTube Studio assisted exports."""
         if not self.transcript and not self.audio_file:
             QMessageBox.warning(self, "Nothing to Export", "There is no transcript or media available to export.")
             return
@@ -1906,7 +2909,7 @@ class ProjectExportMixin:
             else:
                 initial_scope = "full"
 
-        dialog = UnifiedExportDialog(self, initial_scope=initial_scope)
+        dialog = UnifiedExportDialog(self, initial_scope=initial_scope, initial_dest=initial_dest)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -1956,6 +2959,8 @@ class ProjectExportMixin:
                 self.export_all_stories(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir), is_custom_location=is_custom)
             elif scope == "full_and_all_stories":
                 self.export_full_and_all_stories(custom_formats=formats, custom_base=chosen_name, custom_options=options, directory=str(project_dir), is_custom_location=is_custom)
+        elif dest == "youtube":
+            self._handle_youtube_export_result(result)
         else:
             self._handle_wordpress_export_result(result)
 
@@ -2352,6 +3357,7 @@ class ProjectExportMixin:
                         category_ids=post.get("category_ids", []),
                         show_completion_dialog=False,
                         media_filename=media_filename,
+                        featured_image_path=post.get("featured_image"),
                         progress_callback=wp_progress,
                     )
                     if post_data and isinstance(post_data, dict):
@@ -2415,6 +3421,198 @@ class ProjectExportMixin:
                 f"None of the {len(failed_posts)} posts could be exported to WordPress.\n\n"
                 f"Errors:\n{fail_summary}",
             )
+
+    def _handle_youtube_export_result(self, result: dict):
+        scope = result.get("scope", "full")
+        title = result.get("title", "Broadcast Video").strip()
+        description = result.get("description", "").strip()
+        tags = result.get("tags", "").strip()
+        category = result.get("category", "25")
+        privacy = result.get("privacy", "unlisted")
+        thumb_mode = result.get("thumb_mode", "auto")
+        thumb_file = result.get("thumb_file")
+        copy_clipboard = result.get("copy_clipboard", True)
+        open_browser = result.get("open_browser", True)
+        open_folder = result.get("open_folder", True)
+        include_subtitles = result.get("include_subtitles", True)
+
+        # 1. Determine export directory (creating a dedicated YouTube subfolder in project directory)
+        export_dir = result.get("export_dir")
+        create_bundle = str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"}
+
+        if export_dir and os.path.isdir(export_dir):
+            base_dir = Path(export_dir)
+            if create_bundle and base_dir.name.lower() != "youtube":
+                out_dir = base_dir / "YouTube"
+            else:
+                out_dir = base_dir
+        else:
+            project_dir, _, _, _ = self.prepare_export_directories(prompt_user=False)
+            if create_bundle and project_dir.name.lower() != "youtube":
+                out_dir = project_dir / "YouTube"
+            else:
+                out_dir = project_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        base_name = safe_filename(title) or "youtube_export"
+
+        # 2. Export Media Clip
+        media_src = getattr(self, "audio_file", None)
+        exported_media_path = None
+        if media_src and Path(media_src).exists():
+            src_path = Path(media_src)
+            ext = src_path.suffix.lower() or ".mp4"
+            dst_media = out_dir / f"{base_name}{ext}"
+
+            # If exporting selected stories, cut media clip with ffmpeg
+            if scope == "selected_stories":
+                sel_indices = getattr(self, "current_selected_story_indices", [])
+                stories = getattr(self, "stories", [])
+                target_stories = [stories[i] for i in sel_indices if 0 <= i < len(stories)]
+                if target_stories:
+                    start_sec = min(getattr(st, "start", 0.0) for st in target_stories)
+                    end_sec = max(getattr(st, "end", getattr(st, "start", 0.0) + 1.0) for st in target_stories)
+                    dur = max(0.1, end_sec - start_sec)
+                    ff = ffmpeg_path() or "ffmpeg"
+                    cmd = [
+                        ff, "-hide_banner", "-loglevel", "error", "-y",
+                        "-ss", f"{start_sec:.3f}",
+                        "-i", str(src_path),
+                        "-t", f"{dur:.3f}",
+                        "-c", "copy",
+                        str(dst_media)
+                    ]
+                    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                    try:
+                        subprocess.run(cmd, capture_output=True, timeout=120, creationflags=flags)
+                    except Exception:
+                        shutil.copy2(str(src_path), str(dst_media))
+                else:
+                    shutil.copy2(str(src_path), str(dst_media))
+            else:
+                try:
+                    if not dst_media.exists() or dst_media.resolve() != src_path.resolve():
+                        shutil.copy2(str(src_path), str(dst_media))
+                except Exception:
+                    pass
+            exported_media_path = str(dst_media)
+
+        # 3. Export Thumbnail
+        exported_thumb_path = None
+        if thumb_mode in ("frame", "file") and thumb_file and Path(thumb_file).exists():
+            thumb_ext = Path(thumb_file).suffix.lower() or ".jpg"
+            dst_thumb = out_dir / f"{base_name}_thumbnail{thumb_ext}"
+            try:
+                shutil.copy2(thumb_file, str(dst_thumb))
+                exported_thumb_path = str(dst_thumb)
+            except Exception as e:
+                print(f"[YOUTUBE EXPORT] Thumbnail copy error: {e}")
+
+        # 4. Export Subtitles / Captions (.srt)
+        exported_srt_path = None
+        if include_subtitles and getattr(self, "transcript", None):
+            dst_srt = out_dir / f"{base_name}.srt"
+            try:
+                segs = self.transcript.get("segments", [])
+                if scope == "selected_stories":
+                    sel_indices = getattr(self, "current_selected_story_indices", [])
+                    stories = getattr(self, "stories", [])
+                    target_stories = [stories[i] for i in sel_indices if 0 <= i < len(stories)]
+                    if target_stories:
+                        start_sec = min(getattr(st, "start", 0.0) for st in target_stories)
+                        end_sec = max(getattr(st, "end", getattr(st, "start", 0.0) + 1.0) for st in target_stories)
+                        segs = [s for s in segs if s.get("start", 0.0) >= start_sec and s.get("end", 0.0) <= end_sec]
+
+                srt_lines = []
+                def srt_ts(sec):
+                    h = int(sec // 3600)
+                    m = int((sec % 3600) // 60)
+                    s = int(sec % 60)
+                    ms = int(round((sec - int(sec)) * 1000))
+                    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+                for i, seg in enumerate(segs, 1):
+                    s_t = max(0.0, float(seg.get("start", 0.0)))
+                    e_t = max(s_t, float(seg.get("end", 0.0)))
+                    text = seg.get("text", "").strip()
+                    if not text:
+                        continue
+                    srt_lines.append(f"{i}\n{srt_ts(s_t)} --> {srt_ts(e_t)}\n{text}\n")
+                if srt_lines:
+                    dst_srt.write_text("\n".join(srt_lines), encoding="utf-8")
+                    exported_srt_path = str(dst_srt)
+            except Exception as e:
+                print(f"[YOUTUBE EXPORT] SRT export error: {e}")
+
+        # 5. Export YouTube Upload Info Text File
+        info_file = out_dir / f"{base_name}_youtube_info.txt"
+        info_content = [
+            "=" * 78,
+            "YOUTUBE STUDIO UPLOAD GUIDE & METADATA",
+            "=" * 78,
+            "",
+            f"VIDEO TITLE:\n{title}",
+            "",
+            f"DESCRIPTION & CHAPTER TIMESTAMPS:\n{description}",
+            "",
+            f"TAGS:\n{tags}",
+            "",
+            f"PRIVACY STATUS: {privacy.capitalize()}",
+            f"CATEGORY ID: {category}",
+            "",
+            "EXPORTED ASSETS:",
+            f"- Video File: {Path(exported_media_path).name if exported_media_path else 'None'}",
+            f"- Thumbnail: {Path(exported_thumb_path).name if exported_thumb_path else 'Auto / None'}",
+            f"- Closed Captions: {Path(exported_srt_path).name if exported_srt_path else 'None'}",
+            "",
+            "-" * 78,
+            "HOW TO UPLOAD TO YOUTUBE STUDIO:",
+            "-" * 78,
+            "1. Open https://studio.youtube.com in your web browser.",
+            "2. In YouTube Studio, click CREATE (top right) -> Upload videos.",
+            "3. Drag and drop your video file into the upload window.",
+            "4. Paste (Ctrl+V / Cmd+V) the Description above into the Description box.",
+            "   (The chapter timestamps will automatically turn into interactive video chapters!)",
+            "5. Under 'Thumbnail', click 'Upload thumbnail' and select your thumbnail file.",
+            "6. Under 'Show More' -> 'Tags', paste the tags above.",
+            "7. In the 'Video elements' tab, upload your .srt subtitle file if desired.",
+            "8. Set your visibility (Unlisted or Public) and click Publish.",
+            "=" * 78,
+        ]
+        info_file.write_text("\n".join(info_content), encoding="utf-8")
+
+        # 6. Copy to clipboard
+        clipboard_text = f"{title}\n\n{description}"
+        if copy_clipboard:
+            QApplication.clipboard().setText(clipboard_text)
+
+        # 7. Open browser
+        if open_browser:
+            try:
+                webbrowser.open("https://studio.youtube.com/channel/UC/videos/upload?d=ud")
+            except Exception:
+                pass
+
+        # 8. Open folder
+        if open_folder and out_dir.exists():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(out_dir)))
+
+        # 9. Show Guide Dialog
+        files_dict = {
+            "Video Media File": exported_media_path,
+            "Custom Thumbnail": exported_thumb_path,
+            "Subtitles (.srt)": exported_srt_path,
+            "YouTube Info Notes": str(info_file),
+        }
+        guide = YouTubeAssistedUploadGuideDialog(
+            self,
+            title=title,
+            description=description,
+            tags=tags,
+            files_dict=files_dict,
+            privacy=privacy,
+        )
+        guide.exec()
 
     def export_full_episode(self, custom_formats=None, custom_base=None, custom_options=None, directory=None, show_completion=True, progress_dialog=None, progress_value=0, is_custom_location=False):
         if not self.transcript and not self.audio_file:

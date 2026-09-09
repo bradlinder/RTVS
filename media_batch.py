@@ -23,6 +23,20 @@ class MediaBatchMixin:
         except Exception:
             return None
 
+    def _track_worker_thread(self, thread):
+        """Keep a strong reference to active worker threads so Python GC never destroys them while executing."""
+        if not hasattr(self, "_active_worker_threads"):
+            self._active_worker_threads = set()
+        if thread is not None:
+            self._active_worker_threads.add(thread)
+            def _cleanup():
+                if thread in self._active_worker_threads:
+                    if not thread.isRunning():
+                        self._active_worker_threads.discard(thread)
+                    else:
+                        QTimer.singleShot(200, _cleanup)
+            thread.finished.connect(lambda: QTimer.singleShot(100, _cleanup))
+
     def stop_waveform_worker(self, timeout_ms=5000):
         """Stop the current waveform worker completely before replacing it or closing."""
         thread = getattr(self, "wf_thread", None)
@@ -32,60 +46,93 @@ class MediaBatchMixin:
 
         if thread.isRunning():
             if worker is not None:
-                worker.cancel()
+                try:
+                    worker.cancel()
+                except Exception:
+                    pass
             thread.quit()
             if not thread.wait(timeout_ms):
-                self.log_activity("[WARNING] Waveform worker did not stop within the normal shutdown window; leaving it tracked until Qt finishes cleanup.", mark_dirty=False)
-                return False
+                if worker is not None:
+                    try:
+                        worker.cancel()
+                    except Exception:
+                        pass
+                if not thread.wait(1000):
+                    self.log_activity("[WARNING] Waveform worker did not stop within the normal shutdown window; leaving it tracked until Qt finishes cleanup.", mark_dirty=False)
+                    return False
 
-        # Do not leave references to a QThread that has already finished.
-        if not thread.isRunning():
-            if hasattr(self, "timeline"):
-                try:
-                    self.timeline.set_background_generation_active("waveform", False)
-                except Exception:
-                    pass
-            self.wf_thread = None
-            self.wf_worker = None
-            return True
-        return False
-
-    def start_video_thumbnail_generation(self):
-        if not self.current_media_is_video or not self.audio_file or self.duration <= 0:
-            if hasattr(self, "timeline"): self.timeline.set_video_thumbnails([])
-            return
-        if not self.stop_video_thumbnail_worker():
-            self._pending_thumbnail_restart = True
-            old_thread = getattr(self, "video_thumbnail_thread", None)
-            if old_thread is not None:
-                try:
-                    old_thread.finished.connect(lambda: QTimer.singleShot(100, self._retry_pending_thumbnails))
-                except Exception:
-                    pass
-            self.log_activity("[MEDIA] Previous thumbnail worker is still stopping; thumbnail generation will restart once it finishes.", mark_dirty=False)
-            return
-        base=Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails"
-        base.mkdir(parents=True, exist_ok=True)
-        job=base / hashlib.sha1(str(self.audio_file).encode("utf-8")).hexdigest()[:16]
-        if job.exists(): shutil.rmtree(job, ignore_errors=True)
-        job.mkdir(parents=True, exist_ok=True)
-        self.video_thumbnail_dir=job
-        thread=QThread(self); worker=VideoThumbnailWorker(self.audio_file, self.duration, job)
-        worker.moveToThread(thread); thread.started.connect(worker.run); worker.finished.connect(self._video_thumbnails_finished)
-        worker.error.connect(lambda msg: self.log_activity(f"[MEDIA] Video thumbnail generation failed: {msg}", mark_dirty=False))
-        worker.finished.connect(thread.quit); worker.error.connect(thread.quit); thread.finished.connect(worker.deleteLater); thread.finished.connect(thread.deleteLater)
-        self.video_thumbnail_thread=thread; self.video_thumbnail_worker=worker
         if hasattr(self, "timeline"):
             try:
-                self.timeline.set_background_generation_active("thumbnails", True)
+                self.timeline.set_background_generation_active("waveform", False)
             except Exception:
                 pass
-        thread.start()
+        self.wf_thread = None
+        self.wf_worker = None
+        return True
 
-    def _retry_pending_thumbnails(self):
+    def start_video_thumbnail_generation(self, force_regenerate: bool = False):
+        if not self.current_media_is_video or not self.audio_file or self.duration <= 0:
+            if hasattr(self, "timeline"):
+                self.timeline.set_video_thumbnails([])
+            return
+
+        if not force_regenerate:
+            cached_thumbs = read_video_thumbnail_cache(self.audio_file, self.duration)
+            if cached_thumbs:
+                self.video_thumbnail_dir = get_video_thumbnail_cache_dir(self.audio_file)
+                if hasattr(self, "timeline"):
+                    try:
+                        self.timeline.set_background_generation_active("thumbnails", False)
+                    except Exception:
+                        pass
+                    self.timeline.set_video_thumbnails(cached_thumbs)
+                self.log_activity(f"[MEDIA] Loaded {len(cached_thumbs)} cached video thumbnails.", mark_dirty=False)
+                return
+
+        if not self.stop_video_thumbnail_worker():
+            self._pending_thumbnail_restart = True
+            self.log_activity("[MEDIA] Previous thumbnail worker is still stopping; thumbnail generation will restart once it finishes.", mark_dirty=False)
+            return
+        try:
+            job = get_video_thumbnail_cache_dir(self.audio_file)
+            if job is None:
+                base = Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails"
+                base.mkdir(parents=True, exist_ok=True)
+                job = base / hashlib.sha1(str(self.audio_file).encode("utf-8")).hexdigest()[:16]
+            if job.exists():
+                shutil.rmtree(job, ignore_errors=True)
+            job.mkdir(parents=True, exist_ok=True)
+            self.video_thumbnail_dir = job
+            thread = QThread(self)
+            worker = VideoThumbnailWorker(self.audio_file, self.duration, job)
+            worker.moveToThread(thread)
+            self.video_thumbnail_thread = thread
+            self.video_thumbnail_worker = worker
+            self._track_worker_thread(thread)
+
+            thread.started.connect(worker.run)
+            worker.finished.connect(self._video_thumbnails_finished)
+            worker.finished.connect(thread.quit)
+            worker.error.connect(lambda msg: self.log_activity(f"[MEDIA] Video thumbnail generation failed: {msg}", mark_dirty=False))
+            worker.error.connect(thread.quit)
+            thread.finished.connect(self._video_thumbnail_thread_finished)
+            if hasattr(self, "timeline"):
+                try:
+                    self.timeline.set_background_generation_active("thumbnails", True)
+                except Exception:
+                    pass
+            thread.start()
+        except Exception as exc:
+            self.log_activity(f"[MEDIA] Could not start thumbnail generation: {exc}", mark_dirty=False)
+
+    def _video_thumbnail_thread_finished(self):
+        thread = self.sender()
+        if thread is getattr(self, "video_thumbnail_thread", None):
+            self.video_thumbnail_thread = None
+            self.video_thumbnail_worker = None
         if getattr(self, "_pending_thumbnail_restart", False):
             self._pending_thumbnail_restart = False
-            self.start_video_thumbnail_generation()
+            QTimer.singleShot(50, self.start_video_thumbnail_generation)
 
     def _video_thumbnails_finished(self, items):
         if hasattr(self, "timeline"):
@@ -94,32 +141,35 @@ class MediaBatchMixin:
             except Exception:
                 pass
             self.timeline.set_video_thumbnails(items)
-        self.video_thumbnail_worker=None
-        self.video_thumbnail_thread=None
-        if getattr(self, "_pending_thumbnail_restart", False):
-            self._pending_thumbnail_restart = False
-            QTimer.singleShot(100, self.start_video_thumbnail_generation)
 
-    def stop_video_thumbnail_worker(self):
-        thread=self.video_thumbnail_thread; worker=self.video_thumbnail_worker
+    def stop_video_thumbnail_worker(self, timeout_ms=3000):
+        thread = getattr(self, "video_thumbnail_thread", None)
+        worker = getattr(self, "video_thumbnail_worker", None)
+        if thread is None:
+            return True
         if worker:
-            try: worker.cancel()
-            except Exception: pass
-        if thread and thread.isRunning():
+            try:
+                worker.cancel()
+            except Exception:
+                pass
+        if thread.isRunning():
             thread.quit()
-            if not thread.wait(2000):
+            if not thread.wait(timeout_ms):
                 if worker:
-                    try: worker.cancel()
-                    except Exception: pass
-                if not thread.wait(2000):
-                    self.log_activity("[WARNING] Video thumbnail worker is still stopping; keeping it tracked to avoid a QThread lifetime crash.", mark_dirty=False)
+                    try:
+                        worker.cancel()
+                    except Exception:
+                        pass
+                if not thread.wait(1000):
+                    self.log_activity("[WARNING] Video thumbnail worker did not finish in time.", mark_dirty=False)
                     return False
         if hasattr(self, "timeline"):
             try:
                 self.timeline.set_background_generation_active("thumbnails", False)
             except Exception:
                 pass
-        self.video_thumbnail_thread=None; self.video_thumbnail_worker=None
+        self.video_thumbnail_thread = None
+        self.video_thumbnail_worker = None
         return True
 
     def regenerate_waveform(self):
@@ -132,7 +182,7 @@ class MediaBatchMixin:
         self.log_activity("[WAVEFORM] Manually regenerating waveform from audio source...")
         is_es = getattr(self, "language", "en") == "es"
         self.statusBar().showMessage("Regenerando forma de onda..." if is_es else "Regenerating waveform...")
-        self.load_waveform_async()
+        self.load_waveform_async(force_regenerate=True)
 
     def regenerate_video_thumbnails(self):
         """Force regeneration of video filmstrip thumbnails."""
@@ -141,20 +191,28 @@ class MediaBatchMixin:
         self.stop_video_thumbnail_worker()
         if hasattr(self, "timeline"):
             self.timeline.set_video_thumbnails([])
-        if getattr(self, "video_thumbnail_dir", None) and Path(self.video_thumbnail_dir).exists():
-            try:
-                shutil.rmtree(self.video_thumbnail_dir, ignore_errors=True)
-            except Exception:
-                pass
-            self.video_thumbnail_dir = None
+        invalidate_video_thumbnail_cache(self.audio_file)
+        self.video_thumbnail_dir = None
         self.log_activity("[MEDIA] Manually regenerating video thumbnails...")
         is_es = getattr(self, "language", "en") == "es"
         self.statusBar().showMessage("Regenerando miniaturas de video..." if is_es else "Regenerating video thumbnails...")
-        self.start_video_thumbnail_generation()
+        self.start_video_thumbnail_generation(force_regenerate=True)
 
-    def load_waveform_async(self):
+    def load_waveform_async(self, force_regenerate: bool = False):
         if not self.audio_file:
             return
+
+        if not force_regenerate:
+            cached_peaks = read_waveform_peak_cache(self.audio_file)
+            if cached_peaks:
+                if hasattr(self, "timeline"):
+                    try:
+                        self.timeline.set_background_generation_active("waveform", False)
+                    except Exception:
+                        pass
+                    self.timeline.set_waveform_peaks(cached_peaks)
+                self.log_activity(f"[WAVEFORM] Loaded cached waveform ({len(cached_peaks):,} peaks).", mark_dirty=False)
+                return
 
         # Never replace an active QThread. This is the critical lifetime rule
         # that prevents "QThread: Destroyed while thread is still running".
@@ -165,15 +223,13 @@ class MediaBatchMixin:
         thread = QThread(self)
         worker = WaveformWorker(self.audio_file)
         worker.moveToThread(thread)
-
         self.wf_thread = thread
         self.wf_worker = worker
+        self._track_worker_thread(thread)
 
         thread.started.connect(worker.run)
         worker.finished.connect(self._waveform_finished)
-        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
+        worker.finished.connect(thread.quit)
         thread.finished.connect(self._waveform_thread_finished)
         if hasattr(self, "timeline"):
             try:
@@ -1186,8 +1242,9 @@ class MediaBatchMixin:
             self.media_generation += 1
             self.story_job_token += 1
             self.stop_waveform_worker()
+            self.stop_video_thumbnail_worker()
 
-            # Immediately clear existing transcript and project state so stale text doesn't linger[cite: 1]
+            # Immediately clear existing transcript and project state so stale text doesn't linger
             self.transcript = None
             self.diarization = None
             self.stories = []
@@ -1202,9 +1259,14 @@ class MediaBatchMixin:
             self.audio_file = path
 
             probed_duration = self.probe_media_duration(path)
-            self.player.setSource(QUrl.fromLocalFile(str(path)))
+            try:
+                self.player.setSource(QUrl.fromLocalFile(str(path)))
+            except Exception as player_err:
+                self.log_activity(f"[MEDIA] Media player initialization notice: {player_err}", mark_dirty=False)
             self.current_media_is_video = self.is_video_file(path)
             self.update_video_preview_state()
+            if hasattr(self, "timeline") and hasattr(self.timeline, "set_is_video"):
+                self.timeline.set_is_video(self.current_media_is_video)
             if probed_duration is not None:
                 self.duration = probed_duration
                 self.timeline.set_duration(probed_duration)
@@ -1237,14 +1299,8 @@ class MediaBatchMixin:
             self.speaker_status.setText("Speaker detection has not been run.")
 
             self.log_activity(f"[FILE] Opened media: {path.name} ({source})")
-            if self.current_media_is_video:
-                self.log_activity("[MEDIA] Video detected; extracting its audio track for waveform generation.")
-            self.log_activity("[WAVEFORM] Starting local waveform generation.")
-            self.statusBar().showMessage(f"Loaded: {path.name}")
-            self.load_waveform_async()
-            self.start_video_thumbnail_generation()
 
-            # Look for an associated project file; if found, load it; otherwise show a blank slate[cite: 1]
+            # Look for an associated project file; if found, load it; otherwise show a blank slate
             if restore_adjacent_project:
                 project = self.find_adjacent_project(path)
                 if project:
@@ -1252,6 +1308,13 @@ class MediaBatchMixin:
                         self.log_activity(f"[PROJECT] Automatically restored project: {project.name}")
                         return True
                     self.log_activity(f"[WARNING] Adjacent project could not be restored: {project.name}")
+
+            if self.current_media_is_video:
+                self.log_activity("[MEDIA] Video detected; extracting its audio track for waveform generation.")
+            self.log_activity("[WAVEFORM] Starting local waveform generation.")
+            self.statusBar().showMessage(f"Loaded: {path.name}")
+            self.load_waveform_async()
+            self.start_video_thumbnail_generation()
 
             self.project_file = None
             self.project_dirty = False

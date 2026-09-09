@@ -179,11 +179,12 @@ class GpuAccelerationMixin:
         self._gpu_install_qthread = QThread(self)
         self._gpu_install_worker = GpuAccelerationInstallWorker(force_rebuild=True)
         self._gpu_install_worker.moveToThread(self._gpu_install_qthread)
+        if hasattr(self, "_track_worker_thread"):
+            self._track_worker_thread(self._gpu_install_qthread)
         self._gpu_install_qthread.started.connect(self._gpu_install_worker.run)
         self._gpu_install_worker.progress.connect(self._on_gpu_install_progress)
         self._gpu_install_worker.finished.connect(self._on_gpu_install_finished)
         self._gpu_install_worker.finished.connect(self._gpu_install_qthread.quit)
-        self._gpu_install_qthread.finished.connect(self._gpu_install_worker.deleteLater)
         self._gpu_install_qthread.finished.connect(self._gpu_install_thread_cleanup)
         self._gpu_install_thread = self._gpu_install_qthread
         self._gpu_install_qthread.start()
@@ -196,10 +197,6 @@ class GpuAccelerationMixin:
         self._gpu_install_error = error
 
     def _gpu_install_thread_cleanup(self):
-        thread = getattr(self, "_gpu_install_thread", None)
-        error = getattr(self, "_gpu_install_error", None)
-        if thread is not None:
-            thread.deleteLater()
         self._gpu_install_thread = None
         self._gpu_install_qthread = None
         self._gpu_install_worker = None

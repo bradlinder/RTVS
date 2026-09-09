@@ -21,15 +21,24 @@ class Plugin(BasePlugin):
         if self.app:
             if hasattr(self.app, "transcript_language_selector"):
                 self.app.transcript_language_selector.setVisible(True)
+            if hasattr(self.app, "translate_button"):
+                self.app.translate_button.setVisible(True)
+                self.app.translate_button.setEnabled(True)
             if hasattr(self.app, "translation_model_action"):
                 self.app.translation_model_action.setVisible(True)
+            if hasattr(self.app, "tools_translate_action"):
+                self.app.tools_translate_action.setVisible(True)
 
     def on_disable(self) -> None:
         if self.app:
             if hasattr(self.app, "transcript_language_selector"):
                 self.app.transcript_language_selector.setVisible(False)
+            if hasattr(self.app, "translate_button"):
+                self.app.translate_button.setVisible(False)
             if hasattr(self.app, "translation_model_action"):
                 self.app.translation_model_action.setVisible(False)
+            if hasattr(self.app, "tools_translate_action"):
+                self.app.tools_translate_action.setVisible(False)
 
     def get_tools_actions(self) -> List[tuple[str, Callable]]:
         actions = []

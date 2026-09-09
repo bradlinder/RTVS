@@ -55,7 +55,7 @@ try:
     )
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.6.0"
+    PROJECT_VERSION = "2.7.0"
     DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
     INTERNAL_APP_ID = "RadioTVStorySegmenter"
 
@@ -782,6 +782,8 @@ class UpdaterMixin:
 
         repo = get_github_repo()
         worker = CheckUpdateWorker(repo, self)
+        if hasattr(self, "_track_worker_thread"):
+            self._track_worker_thread(worker)
 
         def on_update(release_info, asset_info, is_newer):
             if is_newer:
