@@ -38,7 +38,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.5.1"
+    PROJECT_VERSION = "2.5.2"
 
 # Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]
@@ -361,7 +361,61 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
             print(f"[BUILD] Stripped unneeded symbols from {stripped_count} macOS dynamic libraries.")
 
 
+def sync_installer_scripts(project_version: str) -> None:
+    """Ensure Inno Setup and other installer packaging scripts match PROJECT_VERSION."""
+    iss_file = ROOT / "installer" / "Windows" / "RadioTVStorySegmenter.iss"
+    if iss_file.exists():
+        content = iss_file.read_text(encoding="utf-8")
+        import re
+        new_content = re.sub(
+            r'(#define\s+MyAppVersion\s+)"[^"]*"',
+            rf'\g<1>"{project_version}"',
+            content
+        )
+        if new_content != content:
+            iss_file.write_text(new_content, encoding="utf-8")
+            print(f"[BUILD] Synchronized Inno Setup script {iss_file.name} to version {project_version}")
+
+
+def compile_windows_installer(project_version: str) -> bool:
+    """Compile the Windows Inno Setup installer executable if ISCC is installed."""
+    iss_file = ROOT / "installer" / "Windows" / "RadioTVStorySegmenter.iss"
+    if not iss_file.exists():
+        return False
+
+    iscc_candidates = [
+        shutil.which("iscc"),
+        shutil.which("ISCC"),
+        Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Inno Setup 6" / "ISCC.exe",
+        Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Inno Setup 6" / "ISCC.exe",
+        Path("C:/Program Files (x86)/Inno Setup 6/ISCC.exe"),
+        Path("C:/Program Files/Inno Setup 6/ISCC.exe"),
+        Path(os.environ.get("ProgramData", "C:/ProgramData")) / "chocolatey" / "bin" / "iscc.exe",
+    ]
+    iscc_path = None
+    for cand in iscc_candidates:
+        if cand and Path(cand).is_file():
+            iscc_path = str(cand)
+            break
+
+    if not iscc_path:
+        print("\n[BUILD] Note: Inno Setup compiler (ISCC.exe) was not found in PATH or standard directories.")
+        print(f"[BUILD] To compile the Windows installer package, run: iscc /DMyAppVersion=\"{project_version}\" {iss_file}")
+        return False
+
+    print(f"\n[BUILD] Compiling Windows setup installer executable (v{project_version}) with {iscc_path}...")
+    cmd = [iscc_path, f"/DMyAppVersion={project_version}", str(iss_file)]
+    ret = subprocess.run(cmd, cwd=str(ROOT))
+    if ret.returncode == 0:
+        print(f"[SUCCESS] Windows Installer created for v{project_version} in dist/installer/")
+        return True
+    else:
+        print(f"[WARNING] Inno Setup compilation exited with code {ret.returncode}.")
+        return False
+
+
 def main() -> None:
+    sync_installer_scripts(PROJECT_VERSION)
     if sys.version_info[:2] != (3, 12):
         raise SystemExit("ERROR: Build with Python 3.12. The AI dependency set is not guaranteed to support other Python versions.")
     if not shutil.which("pyinstaller"):
@@ -561,6 +615,9 @@ def main() -> None:
             worker_in_subdir.chmod(0o755)
 
     print(f"\n[BUILD] {APP_DISPLAY_NAME} v{PROJECT_VERSION} build complete: {app_root.parent if sys.platform == 'darwin' else app_root}")
+
+    if sys.platform == "win32" or "--installer" in sys.argv:
+        compile_windows_installer(PROJECT_VERSION)
 
 
 if __name__ == "__main__":

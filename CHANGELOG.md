@@ -1,5 +1,25 @@
 # Changelog
 
+## v2.5.2
+
+### Timeline Video Thumbnails Layout & Vertical Resizing
+- **Thumbnails Positioned Below Waveform**: Relocated the video thumbnail track in `TimelineCanvas` so that thumbnails render cleanly beneath the audio waveform rather than above or overlaying it.
+- **Dynamic Vertical Resizing**: Replaced the static thumbnail scaling constraints with dynamic aspect-ratio-aware dimensions that automatically expand and contract proportionally as the user resizes the timeline widget vertically.
+- **Track Separation**: Added a subtle boundary divider between the audio waveform and video thumbnail strips for clear visual segmentation.
+- **Higher Resolution Thumbnails**: Increased thumbnail extraction scale to 320px width (`scale=320:-2`) to keep video frames sharp and clear on high-DPI displays and enlarged timeline heights.
+- **Preferences Configuration**: Added a "Thumbnail Placement" option under Preferences (Playback & Timeline) allowing users to choose between "Below audio waveform" (default) or "Above audio waveform".
+
+### Automated Windows Installer & Version Synchronization
+- **Strict Version Synchronization**: Updated `build_installer.py` with `sync_installer_scripts()` to automatically rewrite and verify the `#define MyAppVersion` directive in `installer/Windows/RadioTVStorySegmenter.iss` from the project's single source of truth (`PROJECT_VERSION` in `prs_shared.py`).
+- **Direct Inno Setup Compilation Support**: Integrated automated detection and invocation of `ISCC.exe` into `build_installer.py`, compiling the Windows installer executable with `/DMyAppVersion="{PROJECT_VERSION}"` without relying on manual command-line flags.
+- **Resilient Batch Extraction**: Hardened `build_windows.bat` to detect and use the active `!PYTHON_EXE!` runtime with regex extraction directly from `prs_shared.py`, preventing fallback issues when executing the Inno Setup compiler.
+- **Version Bump**: Bumped version to `2.5.2` across `prs_shared.py`, `RadioTVSegmenter.py`, `media_batch.py`, `playback_preferences.py`, `updater.py`, `build_installer.py`, `build_windows.bat`, `build_linux.sh`, `installer/Windows/RadioTVStorySegmenter.iss`, `installer/Linux/build_deb.sh`, `installer/macOS/build_app.sh`, and `.github/workflows/build.yml`.
+
+## v2.5.1
+
+### Version Bump & Maintenance
+- **Version Alignment**: Bumped project version to `2.5.1` across core modules, packaging scripts, and CI workflows.
+
 ## v2.4.2
 
 ### Timeline Interaction & Boundary Protection

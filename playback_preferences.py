@@ -1003,18 +1003,21 @@ class PlaybackPreferencesMixin:
             self.settings_store.setValue("skip_seconds", 5)
             self.settings_store.setValue("timeline_show_waveform", "true")
             self.settings_store.setValue("timeline_show_thumbnails", "true")
-            self.settings_store.setValue("timeline_thumbnail_position", "above")
+            self.settings_store.setValue("timeline_thumbnail_position", "below")
             self.settings_store.setValue("transcript_selection_mode", "replace")
             self.settings_store.setValue("show_speaker_labels", True)
             self.settings_store.setValue("show_timestamps", True)
             self.skip_seconds = 5
             self.timeline_show_waveform = True
             self.timeline_show_thumbnails = True
+            self.timeline_thumbnail_position = "below"
             self.transcript_selection_mode = "replace"
             if hasattr(self, "timeline"):
                 try:
                     self.timeline.set_skip_seconds(5)
                     self.timeline.set_timeline_views(True, True)
+                    if hasattr(self.timeline, "set_thumbnail_position"):
+                        self.timeline.set_thumbnail_position("below")
                 except Exception:
                     pass
             if hasattr(self, "transcript_view") and hasattr(self.transcript_view, "set_selection_mode"):
@@ -1028,6 +1031,10 @@ class PlaybackPreferencesMixin:
                 lw["wave_chk"].setChecked(True)
             if "thumb_chk" in lw and lw["thumb_chk"]:
                 lw["thumb_chk"].setChecked(True)
+            if "thumb_pos_combo" in lw and lw["thumb_pos_combo"]:
+                pos_idx = lw["thumb_pos_combo"].findData("below")
+                if pos_idx >= 0:
+                    lw["thumb_pos_combo"].setCurrentIndex(pos_idx)
             if "sel_mode_combo" in lw and lw["sel_mode_combo"]:
                 idx = lw["sel_mode_combo"].findData("replace")
                 if idx >= 0:
@@ -1469,6 +1476,15 @@ class PlaybackPreferencesMixin:
         thumb_chk.setChecked(self.timeline_show_thumbnails)
         play_form.addRow("Timeline Thumbnails:", thumb_chk)
 
+        thumb_pos_combo = QComboBox()
+        thumb_pos_combo.addItem("Below audio waveform", "below")
+        thumb_pos_combo.addItem("Above audio waveform", "above")
+        curr_thumb_pos = getattr(self, "timeline_thumbnail_position", str(self.settings_store.value("timeline_thumbnail_position", "below")).lower())
+        pos_idx = thumb_pos_combo.findData(curr_thumb_pos)
+        if pos_idx >= 0:
+            thumb_pos_combo.setCurrentIndex(pos_idx)
+        play_form.addRow("Thumbnail Placement:", thumb_pos_combo)
+
         sel_mode_combo = QComboBox()
         sel_mode_combo.addItem("Clear previous selection (Single selection)", "replace")
         sel_mode_combo.addItem("Keep previous selections (Multi-selection: create separate stories)", "keep")
@@ -1746,6 +1762,7 @@ class PlaybackPreferencesMixin:
             "skip_spin": skip_spin,
             "wave_chk": wave_chk,
             "thumb_chk": thumb_chk,
+            "thumb_pos_combo": thumb_pos_combo,
             "sel_mode_combo": sel_mode_combo,
             "gap_spin": gap_spin,
             "pad_spin": pad_spin,
@@ -1870,8 +1887,14 @@ class PlaybackPreferencesMixin:
             self.timeline_show_thumbnails = thumb_chk.isChecked()
             self.settings_store.setValue("timeline_show_thumbnails", str(self.timeline_show_thumbnails).lower())
 
+            new_thumb_pos = thumb_pos_combo.currentData() or "below"
+            self.timeline_thumbnail_position = new_thumb_pos
+            self.settings_store.setValue("timeline_thumbnail_position", new_thumb_pos)
+
             if hasattr(self, "timeline"):
                 self.timeline.set_timeline_views(self.timeline_show_waveform, self.timeline_show_thumbnails)
+                if hasattr(self.timeline, "set_thumbnail_position"):
+                    self.timeline.set_thumbnail_position(new_thumb_pos)
 
             # Save Selection Mode
             new_sel_mode = sel_mode_combo.currentData() or "replace"

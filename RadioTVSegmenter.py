@@ -202,7 +202,9 @@ class MainWindow(
         self.default_project_directory = str(self.settings_store.value("default_project_directory", "") or "")
         self.timeline_show_waveform = str(self.settings_store.value("timeline_show_waveform", "true")).lower() in {"1", "true", "yes"}
         self.timeline_show_thumbnails = str(self.settings_store.value("timeline_show_thumbnails", "true")).lower() in {"1", "true", "yes"}
-        self.timeline_thumbnail_position = "above"
+        self.timeline_thumbnail_position = str(self.settings_store.value("timeline_thumbnail_position", "below")).lower()
+        if self.timeline_thumbnail_position not in ("above", "below"):
+            self.timeline_thumbnail_position = "below"
         self.transcript_selection_mode = str(self.settings_store.value("transcript_selection_mode", "replace") or "replace")
         try:
             self.transcript_font_scale = max(0.80, min(1.80, float(self.settings_store.value("transcript_font_scale", 1.0))))

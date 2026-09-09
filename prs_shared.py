@@ -268,7 +268,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "2.5.1"
+PROJECT_VERSION = "2.5.2"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -2588,7 +2588,7 @@ class VideoThumbnailWorker(QObject):
         try:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             fps = self.count / self.duration
-            vf = f"fps={fps:.8f},scale=180:-2:force_original_aspect_ratio=decrease"
+            vf = f"fps={fps:.8f},scale=320:-2:force_original_aspect_ratio=decrease"
             pattern = str(self.output_dir / "thumb_%03d.jpg")
             cmd = [ffmpeg_path() or "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(self.media_path), "-vf", vf, "-q:v", "4", pattern]
             creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
@@ -2665,7 +2665,7 @@ class TimelineCanvas(QWidget):
         self.video_thumbnails = []
         self.show_waveform = True
         self.show_thumbnails = True
-        self.thumbnail_position = "above"
+        self.thumbnail_position = "below"
         self.selected_story_indices = []
         self.transcript_selection_range = None
 
@@ -3316,7 +3316,7 @@ class TimelineCanvas(QWidget):
         has_thumbs = bool(self.video_thumbnails and self.show_thumbnails)
 
         if has_thumbs and self.show_waveform:
-            thumbnail_height = int(available * 0.5)
+            thumbnail_height = int(available * 0.46)
             waveform_height = available - thumbnail_height
         elif has_thumbs:
             thumbnail_height = available
@@ -3337,12 +3337,23 @@ class TimelineCanvas(QWidget):
 
         middle_y = waveform_y + (waveform_height / 2.0)
 
+        # Draw subtle divider line between waveform and thumbnail tracks when both are visible
+        if has_thumbs and self.show_waveform and thumbnail_height > 0 and waveform_height > 0:
+            divider_y = thumbnail_y if self.thumbnail_position == "below" else waveform_y
+            painter.setPen(self.tokens.pen(self.tokens.border_subtle, 1.0))
+            painter.drawLine(QPointF(0, divider_y), QPointF(width, divider_y))
+
         if has_thumbs and thumbnail_height > 0:
-            thumb_w = max(90, int(width / max(8, len(self.video_thumbnails)) * 0.95))
-            target_h = max(16, thumbnail_height - 2)
+            target_h = max(16, thumbnail_height - 6)
             vis_dur = max(0.001, self.visible_duration())
-            # Buffer of 1.5x thumbnail time to prevent edge pop-in
-            dt_buffer = (thumb_w / max(1, width)) * vis_dur * 1.5
+
+            # Resizing logic: scale thumbnail width dynamically with track height
+            sample_pix = self.video_thumbnails[0][1] if self.video_thumbnails else None
+            aspect = (sample_pix.width() / max(1, sample_pix.height())) if (sample_pix and not sample_pix.isNull() and sample_pix.height() > 0) else (16.0 / 9.0)
+            target_w = max(28, int(target_h * aspect))
+
+            # Buffer based on scaled thumbnail width to avoid pop-in at borders
+            dt_buffer = (target_w / max(1, width)) * vis_dur * 1.5
             t_min = max(0.0, self.scroll_offset - dt_buffer)
             t_max = min(self.duration, self.scroll_offset + vis_dur + dt_buffer)
 
@@ -3353,18 +3364,19 @@ class TimelineCanvas(QWidget):
             for i in range(start_idx, end_idx):
                 timestamp, pix = self.video_thumbnails[i]
                 x = self.time_to_x(timestamp, width)
-                if x + thumb_w < 0 or x - thumb_w > width:
+                if x + target_w < 0 or x - target_w > width:
                     continue
                 scaled = pix.scaled(
-                    thumb_w,
+                    target_w,
                     target_h,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
+                draw_x = int(x - scaled.width() // 2)
                 draw_y = thumbnail_y + (thumbnail_height - scaled.height()) // 2
-                painter.drawPixmap(int(x - scaled.width() // 2), int(draw_y), scaled)
-                painter.setPen(self.tokens.pen(self.tokens.border_subtle, 1))
-                painter.drawRect(int(x - scaled.width() // 2), int(draw_y), scaled.width(), scaled.height())
+                painter.drawPixmap(draw_x, int(draw_y), scaled)
+                painter.setPen(self.tokens.pen(self.tokens.border_subtle, 1.0))
+                painter.drawRect(draw_x, int(draw_y), scaled.width(), scaled.height())
 
         if self.show_waveform and self.waveform_peaks and waveform_height > 0:
             painter.setPen(self.tokens.pen(self.tokens.waveform_stroke, 1.0))
