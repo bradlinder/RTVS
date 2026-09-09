@@ -1,5 +1,24 @@
 # Changelog
 
+## v2.7.1
+
+### Disk Cache Management & "Clear Temporary Cache" Dialog
+- **Temporary Cache Manager Dialog (`ClearCacheDialog`)**: Added a user-facing temporary cache inspection and cleanup dialog accessible via **Tools > Clear Temporary Cache...** and **Settings > Clear Temporary Cache...**.
+- **Per-Store Disk Usage Breakdown**: Computes real-time file counts and storage size across:
+  - **Video Thumbnails & Filmstrips**: Cached timeline thumbnail images in `%TEMP%/radio_tv_story_segmenter_thumbnails/`.
+  - **Audio Waveform Peaks**: Precomputed waveform envelopes (`.peaks`) in `%APPDATA%/RadioTVStorySegmenter/cache/peaks/`.
+  - **Temporary Audio Workfiles**: Temporary extracted audio tracks and work buffers (`prs_tmp_*.wav`, `rtvs_tmp_*.wav`).
+- **Selective & Full Purging**: Users can selectively clear specific stores or click the primary **Clear All Caches** button to immediately reclaim all temporary disk space.
+- **Bilingual Localization Support**: Full English and Spanish translation support for all cache dialog labels, feedback prompts, and menu actions.
+
+### Build Pipeline Transparency & Real-Time Logging
+- **Live Output Streaming**: Refactored `build_installer.py` subprocess runner to use unbuffered line-by-line live streaming via `subprocess.Popen(stdout=subprocess.PIPE, bufsize=1)`, eliminating log buffering delays in GitHub Actions CI runners.
+- **Unbuffered Python Environment**: Configured `PYTHONUNBUFFERED: "1"` in `.github/workflows/build.yml` to ensure continuous stdout flushing across Windows, Linux, and macOS runners.
+- **Stage Progress Banners**: Added explicit progress headers (`[1/5]` through `[5/5]`) and `--log-level INFO` verbosity to PyInstaller build steps, ensuring clear visibility into binary compilation stages.
+
+### Ecosystem Version Alignment
+- **Global v2.7.1 Synchronization**: Synchronized application, installer, and plugin versions across `prs_shared.py`, `package.json`, `RadioTVSegmenter.py`, `transcript_story.py`, `updater.py`, `build_installer.py`, `installer/Windows/RadioTVStorySegmenter.iss`, `build_windows.bat`, `build_linux.sh`, `installer/Linux/build_deb.sh`, `installer/macOS/build_app.sh`, `.github/workflows/build.yml`, and all plugin manifests (`plugins/wordpress/manifest.json`, `plugins/youtube/manifest.json`, `plugins/translation/manifest.json`).
+
 ## v2.7.0
 
 ### Video Thumbnail Caching & Instant Project Reloading

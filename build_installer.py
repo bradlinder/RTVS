@@ -22,6 +22,14 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
@@ -38,7 +46,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.7.0"
+    PROJECT_VERSION = "2.7.1"
 
 # Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]
@@ -216,9 +224,28 @@ def torch_windows_binary_flags() -> list[str]:
 
 
 def run(cmd: list[str]) -> None:
-    print("[BUILD]", " ".join(map(str, cmd)))
+    timestamp = time.strftime("%H:%M:%S")
+    cmd_str = " ".join(map(str, cmd))
+    print(f"\n[BUILD {timestamp}] Executing: {cmd_str}", flush=True)
     creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-    subprocess.run(cmd, cwd=ROOT, check=True, creationflags=creationflags)
+    
+    # Stream output in real-time line-by-line so CI logs never stall or buffer
+    process = subprocess.Popen(
+        cmd,
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        universal_newlines=True,
+        creationflags=creationflags,
+    )
+    if process.stdout:
+        for line in process.stdout:
+            print(line, end="", flush=True)
+    ret = process.wait()
+    if ret != 0:
+        raise subprocess.CalledProcessError(ret, cmd)
 
 
 def provision_optional_runtime_tools(app_root: Path) -> None:
@@ -604,9 +631,12 @@ def main() -> None:
 
     runtime_hook = ROOT / "installer" / "pyinstaller" / "torch_dll_hook.py"
 
-    print("[BUILD] Compiling unified application with PyInstaller (shared ML & GUI runtime)...")
+    print("\n" + "="*70, flush=True)
+    print("[BUILD STAGE 1/5] Compiling primary application with PyInstaller (GUI & AI runtime)...", flush=True)
+    print("="*70 + "\n", flush=True)
     run([
         "pyinstaller", "--noconfirm", "--onedir", "--windowed",
+        "--log-level", "INFO",
         "--name", APP_NAME,
         "--runtime-hook", str(runtime_hook),
         *torch_binary_flags,
@@ -668,6 +698,9 @@ def main() -> None:
                 shutil.copy2(doc_file, resources_bundle / doc)
 
     # Bundle plugins based on selected build target and options
+    print("\n" + "="*70, flush=True)
+    print("[BUILD STAGE 2/5] Bundling runtime tools, resources, and selected plugins...", flush=True)
+    print("="*70 + "\n", flush=True)
     if is_all:
         print("[BUILD] Target: 'Core App + Selected Plugins'. Bundling selected plugins...")
         package_plugins(
@@ -680,7 +713,9 @@ def main() -> None:
         print("[BUILD] Target: 'Core App Only'. Omitting bundled plugins from installer.")
 
     # Build dedicated worker binary sharing the same runtime
-    print("[BUILD] Generating dedicated AI worker entry point within the shared runtime...")
+    print("\n" + "="*70, flush=True)
+    print("[BUILD STAGE 3/5] Compiling dedicated AI background worker (prs_worker)...", flush=True)
+    print("="*70 + "\n", flush=True)
     worker_target_exe = exe_name("prs_worker")
     worker_dest = app_root / worker_target_exe
     worker_in_subdir = workers_dir / worker_target_exe
@@ -693,6 +728,7 @@ def main() -> None:
     
     run([
         "pyinstaller", "--noconfirm", "--onedir", "--console",
+        "--log-level", "INFO",
         "--name", "prs_worker",
         "--distpath", str(worker_dist),
         "--workpath", str(worker_build),
@@ -718,9 +754,15 @@ def main() -> None:
                 shutil.copy2(generated_worker, worker_in_subdir)
     shutil.rmtree(worker_dist, ignore_errors=True)
 
+    print("\n" + "="*70, flush=True)
+    print("[BUILD STAGE 4/5] Provisioning optional runtime tools & pruning asset bloat...", flush=True)
+    print("="*70 + "\n", flush=True)
     provision_optional_runtime_tools(app_root)
     prune_unneeded_bundled_files(app_root)
 
+    print("\n" + "="*70, flush=True)
+    print("[BUILD STAGE 5/5] Running frozen AI runtime smoke tests...", flush=True)
+    print("="*70 + "\n", flush=True)
     print("[BUILD] Running frozen AI worker self-test...")
     test_target = worker_dest if worker_dest.exists() else worker_in_subdir
     smoke = subprocess.run(

@@ -1,7 +1,7 @@
 {
   "id": "youtube",
   "name": "YouTube Video Publisher",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "description": "Publishes broadcast video stories to YouTube Studio (Zero-API Assisted upload) with automated chapter timestamps, custom thumbnails, captions (.srt), and tags.",
   "author": "Radio & TV Segmenter Team",
   "website": "https://github.com/bradlinder/RTVS",

@@ -635,6 +635,10 @@ class UiLayoutMixin:
         self.regen_thumbnails_action.triggered.connect(self.regenerate_video_thumbnails)
         tools_menu.addAction(self.regen_thumbnails_action)
 
+        self.clear_cache_action = QAction("&Clear Temporary Cache...", self)
+        self.clear_cache_action.triggered.connect(self.open_clear_cache_dialog)
+        tools_menu.addAction(self.clear_cache_action)
+
         tools_menu.addSeparator()
 
         self.manage_plugins_action = QAction("&Manage Plugins && Add-ons...", self)
@@ -651,6 +655,10 @@ class UiLayoutMixin:
         pref_act.setShortcut(platform_seq("Ctrl+P"))
         pref_act.triggered.connect(self.open_preferences_dialog)
         settings_menu.addAction(pref_act)
+
+        clear_cache_settings_act = QAction("Clear &Temporary Cache...", self)
+        clear_cache_settings_act.triggered.connect(self.open_clear_cache_dialog)
+        settings_menu.addAction(clear_cache_settings_act)
 
         self.translation_model_action = QAction("&Manage AI Models...", self)
         self.translation_model_action.setShortcut(platform_seq("Ctrl+M"))

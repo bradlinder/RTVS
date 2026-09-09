@@ -834,6 +834,10 @@ class MediaBatchMixin:
         self.statusBar().showMessage(f"Document loaded: {path.name}")
         return True
 
+    def open_clear_cache_dialog(self):
+        dialog = ClearCacheDialog(self, language=getattr(self, "language", "en"))
+        dialog.exec()
+
     def open_glossary_dialog(self):
         dialog=QDialog(self); dialog.setWindowTitle("Custom Vocabulary / Glossary"); dialog.resize(520,420)
         layout=QVBoxLayout(dialog); layout.addWidget(QLabel("Words and proper nouns are retained as preferred spellings for future transcription."))
@@ -900,6 +904,7 @@ class MediaBatchMixin:
             "Add Story": "Agregar historia", "Split Story": "Dividir historia", "Merge Stories": "Combinar historias", "Delete Story": "Eliminar historia",
             "Update Selected Story": "Actualizar historia seleccionada", "Delete Selected Story": "Eliminar historia seleccionada",
             "&Regenerate Waveform": "&Regenerar forma de onda", "Regenerate Video &Thumbnails": "Regenerar minia&turas de video",
+            "&Clear Temporary Cache...": "&Limpiar caché temporal...", "Clear &Temporary Cache...": "Limpiar caché &temporal...",
             "Cancel Process": "Cancelar proceso", "Export Activity Log": "Exportar registro de actividad", "Clear Log": "Borrar registro", "Speaker Sensitivity": "Sensibilidad de hablantes",
             "▶ Play": "▶ Reproducir", "❚❚ Pause": "❚❚ Pausa", "■ Stop": "■ Detener",
         }
