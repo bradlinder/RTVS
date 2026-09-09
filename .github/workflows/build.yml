@@ -113,6 +113,16 @@ jobs:
         shell: pwsh
         run: |
           Set-MpPreference -ExclusionPath (Get-Location).Path
+          if ($env:pythonLocation) {
+            # This is where `uv pip install --system` actually installs
+            # everything (site-packages) -- excluding only the repo
+            # checkout and the pip/uv download caches above leaves every
+            # file PyInstaller's analysis phase touches across torch,
+            # transformers, scipy, scikit-learn, onnxruntime, sherpa-onnx,
+            # etc. subject to real-time scanning, which is what was making
+            # the build look stalled.
+            Set-MpPreference -ExclusionPath $env:pythonLocation -ErrorAction SilentlyContinue
+          }
           if ($env:LOCALAPPDATA) {
             Set-MpPreference -ExclusionPath "$env:LOCALAPPDATA\pip" -ErrorAction SilentlyContinue
             Set-MpPreference -ExclusionPath "$env:LOCALAPPDATA\uv" -ErrorAction SilentlyContinue
