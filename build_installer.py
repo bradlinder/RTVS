@@ -14,10 +14,17 @@ not something bundled into the installer.
 
 from __future__ import annotations
 
+import argparse
+import importlib
+import importlib.util
+import json
 import os
+import plistlib
+import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
