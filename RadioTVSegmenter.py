@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter — v2.4.2
+"""Radio & TV Segmenter — v2.6.0
 
 This is the thin application composition root. UI/processing responsibilities
 are implemented in focused mixins so future changes can target smaller files
@@ -240,8 +240,14 @@ class MainWindow(
         self.batch_document_state = None
         self._install_diagnostic_logging()
 
+        from plugins.manager import PluginManager
+        self.plugin_manager = PluginManager(self)
+        self.plugins_project_data = {}
+
         self.build_ui()
         self.build_menus()
+        self.plugin_manager.load_all_plugins()
+        self.refresh_plugin_menus()
         self._check_external_dependencies()
 
         self.update_window_title()

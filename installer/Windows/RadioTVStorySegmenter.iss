@@ -1,7 +1,7 @@
 #define MyAppName "Radio & TV Segmenter"
 
 #ifndef MyAppVersion
-#define MyAppVersion "2.5.2"
+#define MyAppVersion "2.6.0"
 #endif
 
 #define MyAppPublisher "Radio & TV Segmenter"
@@ -24,11 +24,11 @@ DisableProgramGroupPage=yes
 OutputDir=..\..\dist\installer
 OutputBaseFilename=RadioTVSegmenter-{#MyAppVersion}-Windows-Setup
 SetupIconFile=..\..\resources\icon.ico
-Compression=lzma2/max
+Compression=lzma2/fast
 SolidCompression=yes
 LZMAUseSeparateProcess=yes
-LZMANumBlockThreads=2
-LZMADictionarySize=16384
+LZMANumBlockThreads=max
+LZMADictionarySize=65536
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 Uninstallable=yes

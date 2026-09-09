@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.6.0
+
+### Modular Plugin System
+- **Plugin Management Engine**: Introduced modular plugin architecture (`plugins/manager.py`) with `BasePlugin`, `PluginManifest`, and `PluginManager` supporting auto-discovery, lifecycle controls, and dynamic loading from both bundled and user-level plugin directories.
+- **WordPress Publisher Plugin**: Migrated WordPress publishing capabilities into a modular add-on (`plugins/wordpress/`) with category/tag syncing, excerpt formatting, featured image uploads, and background worker threads.
+- **YouTube Video Publisher Plugin**: Implemented dedicated YouTube publisher plugin (`plugins/youtube/`) featuring OAuth 2.0 PKCE authentication with local callback server, chunked resumable video uploads, metadata/tag management, video frame thumbnail capture, and privacy settings.
+- **Language Translation Plugin**: Encapsulated local neural machine translation into a modular add-on (`plugins/translation/`) with MarianMT and NLLB models and bilingual split-view editing.
+- **Dynamic UI Menus**: Added dynamic action populator for `File -> Publishing & Plugins` and dynamic tool entries under `Tools`, plus the `Tools -> Manage Plugins & Add-ons...` management dialog.
+
+### Project Storage & Backward Compatibility
+- **Forward & Backward Compatibility**: Enhanced `.rtvs` project serialization and `Story` models with extensible `metadata` and top-level `plugins_data` dictionaries. Projects created in v2.6.0 open seamlessly in v2.5.2 without parsing errors, and legacy projects open in v2.6.0 without data loss.
+
+### CI/CD Workflow & Selective Build Matrix
+- **Selective Plugin Packaging & Building**: Extended `build_installer.py` and GitHub Actions (`.github/workflows/build.yml`) with build target options (`Core App + Selected Plugins`, `Core App Only`, and `Plugins Only`) and individual plugin checkboxes (`plugin_wordpress`, `plugin_youtube`, `plugin_translation`).
+- **Standalone Release Artifacts**: Generated standalone `.zip` packages for each plugin (`rtvs-plugin-<id>-v2.6.0.zip`) ready for direct release distribution or in-app installation.
+- **Version Bump**: Bumped version to `2.6.0` across `prs_shared.py`, `RadioTVSegmenter.py`, `media_batch.py`, `playback_preferences.py`, `updater.py`, `build_installer.py`, `build_windows.bat`, `build_linux.sh`, `installer/Windows/RadioTVStorySegmenter.iss`, `installer/Linux/build_deb.sh`, `installer/macOS/build_app.sh`, `.github/workflows/build.yml`, `package.json`, and all plugin manifests.
+
 ## v2.5.2
 
 ### Timeline Video Thumbnails Layout & Vertical Resizing

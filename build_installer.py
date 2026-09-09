@@ -38,7 +38,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.5.2"
+    PROJECT_VERSION = "2.6.0"
 
 # Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]
@@ -63,10 +63,11 @@ TEST_AND_BENCHMARK_EXCLUDES = [
     "scipy.cluster.tests", "scipy.interpolate.tests", "scipy.signal.tests",
     "scipy.sparse.tests", "scipy.special.tests", "scipy.ndimage.tests",
     "scipy.optimize.tests", "scipy.linalg.tests", "scipy.stats.tests",
+    "scipy._lib.tests", "numpy.tests", "numpy.f2py.tests",
     "transformers.commands", "transformers.testing_utils",
     "sklearn.tests", "sklearn.datasets.tests", "sklearn.feature_extraction.tests",
     "pytest", "unittest.test", "test", "tests",
-    "triton", "nvidia", "tkinter", "tcl",
+    "triton", "nvidia", "tkinter", "tcl", "docutils", "IPython", "jupyter",
 ]
 
 
@@ -296,7 +297,8 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
                 shutil.rmtree(target, ignore_errors=True)
 
     pruned_files = 0
-    test_dir_names = {"tests", "testing", "test", "benchmark", "benchmarks", "docs", "doc"}
+    test_dir_names = {"tests", "testing", "test", "benchmark", "benchmarks", "docs", "doc", "sample_files"}
+    dist_info_junk = {"RECORD", "INSTALLER", "REQUESTED", "WHEEL", "direct_url.json"}
     for base in internal_dirs:
         if not base.exists():
             continue
@@ -305,6 +307,9 @@ def prune_unneeded_bundled_files(app_root: Path) -> None:
                 continue
             if item.is_file():
                 if item.suffix in (".pdb", ".pyi", ".c", ".cpp", ".h", ".hpp", ".pyx", ".pxd"):
+                    item.unlink(missing_ok=True)
+                    pruned_files += 1
+                elif item.name in dist_info_junk and ".dist-info" in str(item):
                     item.unlink(missing_ok=True)
                     pruned_files += 1
             elif item.is_dir() and item.name.lower() in test_dir_names:
@@ -414,8 +419,125 @@ def compile_windows_installer(project_version: str) -> bool:
         return False
 
 
+def parse_build_args():
+    import argparse
+    parser = argparse.ArgumentParser(description="Build Radio & TV Segmenter and plugins.")
+    parser.add_argument(
+        "--target",
+        default=os.environ.get("BUILD_TARGET", "all"),
+        help="Build target: 'all' / 'Core App + Selected Plugins', 'core' / 'Core App Only', or 'plugins' / 'Plugins Only'.",
+    )
+    parser.add_argument(
+        "--plugin-wordpress",
+        type=lambda x: str(x).lower() in ("true", "1", "yes"),
+        default=os.environ.get("BUILD_PLUGIN_WORDPRESS", "true").lower() in ("true", "1", "yes"),
+        help="Include WordPress Publisher plugin.",
+    )
+    parser.add_argument(
+        "--plugin-youtube",
+        type=lambda x: str(x).lower() in ("true", "1", "yes"),
+        default=os.environ.get("BUILD_PLUGIN_YOUTUBE", "true").lower() in ("true", "1", "yes"),
+        help="Include YouTube Video Publisher plugin.",
+    )
+    parser.add_argument(
+        "--plugin-translation",
+        type=lambda x: str(x).lower() in ("true", "1", "yes"),
+        default=os.environ.get("BUILD_PLUGIN_TRANSLATION", "true").lower() in ("true", "1", "yes"),
+        help="Include Language Translation plugin.",
+    )
+    parser.add_argument(
+        "--installer",
+        action="store_true",
+        help="Force compilation of Windows setup installer executable.",
+    )
+    parser.add_argument(
+        "--no-installer",
+        action="store_true",
+        help="Skip automatic compilation of Windows installer (useful when CI compiles in a separate step).",
+    )
+    return parser.parse_known_args()[0]
+
+
+def package_plugins(
+    app_root: Path | None = None,
+    include_wp: bool = True,
+    include_yt: bool = True,
+    include_tr: bool = True,
+) -> list[Path]:
+    """Package plugins into standalone .zip release artifacts in dist/plugins/
+    and optionally bundle them into app_root/plugins/.
+    """
+    plugins_src = ROOT / "plugins"
+    dist_plugins = DIST / "plugins"
+    dist_plugins.mkdir(parents=True, exist_ok=True)
+    generated_zips = []
+
+    plugin_configs = [
+        ("wordpress", include_wp),
+        ("youtube", include_yt),
+        ("translation", include_tr),
+    ]
+
+    for plugin_id, enabled in plugin_configs:
+        p_dir = plugins_src / plugin_id
+        if not p_dir.is_dir() or not enabled:
+            continue
+
+        p_ver = PROJECT_VERSION
+        manifest_file = p_dir / "manifest.json"
+        if manifest_file.exists():
+            try:
+                import json
+                m_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+                p_ver = m_data.get("version", PROJECT_VERSION)
+            except Exception:
+                pass
+
+        zip_path = dist_plugins / f"rtvs-plugin-{plugin_id}-v{p_ver}.zip"
+        print(f"[BUILD] Packaging plugin '{plugin_id}' (v{p_ver}) -> {zip_path.name}")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for item in p_dir.rglob("*"):
+                if item.is_file() and "__pycache__" not in item.parts:
+                    arcname = Path(plugin_id) / item.relative_to(p_dir)
+                    zf.write(item, arcname)
+        generated_zips.append(zip_path)
+
+        if app_root is not None:
+            dest_plugin_dir = app_root / "plugins" / plugin_id
+            dest_plugin_dir.mkdir(parents=True, exist_ok=True)
+            for item in p_dir.rglob("*"):
+                if item.is_file() and "__pycache__" not in item.parts:
+                    rel = item.relative_to(p_dir)
+                    target = dest_plugin_dir / rel
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item, target)
+            print(f"[BUILD] Bundled plugin '{plugin_id}' into {dest_plugin_dir}")
+
+    return generated_zips
+
+
 def main() -> None:
     sync_installer_scripts(PROJECT_VERSION)
+    args = parse_build_args()
+    target = str(args.target).strip().lower()
+    is_plugins_only = target in ("plugins", "plugins only")
+    is_core_only = target in ("core", "core app only")
+    is_all = not is_plugins_only and not is_core_only
+
+    if is_plugins_only:
+        print("[BUILD] Target: 'Plugins Only'. Packaging selected plugins...")
+        DIST.mkdir(parents=True, exist_ok=True)
+        zips = package_plugins(
+            app_root=None,
+            include_wp=args.plugin_wordpress,
+            include_yt=args.plugin_youtube,
+            include_tr=args.plugin_translation,
+        )
+        print(f"\n[SUCCESS] Packaged {len(zips)} plugins into dist/plugins/:")
+        for z in zips:
+            print(f"  - {z.name}")
+        return
+
     if sys.version_info[:2] != (3, 12):
         raise SystemExit("ERROR: Build with Python 3.12. The AI dependency set is not guaranteed to support other Python versions.")
     if not shutil.which("pyinstaller"):
@@ -530,6 +652,18 @@ def main() -> None:
                 resources_bundle.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(doc_file, resources_bundle / doc)
 
+    # Bundle plugins based on selected build target and options
+    if is_all:
+        print("[BUILD] Target: 'Core App + Selected Plugins'. Bundling selected plugins...")
+        package_plugins(
+            app_root=app_root,
+            include_wp=args.plugin_wordpress,
+            include_yt=args.plugin_youtube,
+            include_tr=args.plugin_translation,
+        )
+    elif is_core_only:
+        print("[BUILD] Target: 'Core App Only'. Omitting bundled plugins from installer.")
+
     # Build dedicated worker binary sharing the same runtime
     print("[BUILD] Generating dedicated AI worker entry point within the shared runtime...")
     worker_target_exe = exe_name("prs_worker")
@@ -551,7 +685,6 @@ def main() -> None:
         *torch_binary_flags,
         *icon_flags,
         *exclude_flags,
-        *collect_flags,
         str(ROOT / "radio_tv_story_segmenter_worker.py"),
     ])
 
@@ -616,7 +749,7 @@ def main() -> None:
 
     print(f"\n[BUILD] {APP_DISPLAY_NAME} v{PROJECT_VERSION} build complete: {app_root.parent if sys.platform == 'darwin' else app_root}")
 
-    if sys.platform == "win32" or "--installer" in sys.argv:
+    if not getattr(args, "no_installer", False) and (sys.platform == "win32" or getattr(args, "installer", False)):
         compile_windows_installer(PROJECT_VERSION)
 
 

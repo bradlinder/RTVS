@@ -268,7 +268,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "2.5.2"
+PROJECT_VERSION = "2.6.0"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the
@@ -707,27 +707,38 @@ class Story:
         end=0,
         title="Untitled Story",
         suggestion=False,
+        metadata=None,
     ):
         self.start = float(start)
         self.end = float(end)
         self.title = title
         self.suggestion = suggestion
+        self.metadata = dict(metadata) if isinstance(metadata, dict) else {}
 
     def to_dict(self):
-        return {
+        d = {
             "start": self.start,
             "end": self.end,
             "title": self.title,
             "suggestion": self.suggestion,
         }
+        if self.metadata:
+            d["metadata"] = dict(self.metadata)
+        return d
 
     @classmethod
     def from_dict(cls, data):
+        known = {"start", "end", "title", "suggestion", "metadata"}
+        meta = dict(data.get("metadata", {})) if isinstance(data.get("metadata"), dict) else {}
+        for k, v in data.items():
+            if k not in known:
+                meta[k] = v
         return cls(
             start=data.get("start", 0),
             end=data.get("end", 0),
             title=data.get("title", "Untitled Story"),
             suggestion=data.get("suggestion", False),
+            metadata=meta,
         )
 
 

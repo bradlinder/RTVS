@@ -1221,6 +1221,7 @@ class ProjectExportMixin:
             "translations": self.translations,
             "translation_display_mode": self.translation_display_mode,
             "stories": [story.to_dict() for story in self.stories],
+            "plugins_data": getattr(self, "plugins_project_data", {}),
             "settings": {
                 "auto_save_minutes": self.auto_save_minutes,
                 "skip_seconds": self.skip_seconds,
@@ -1761,6 +1762,7 @@ class ProjectExportMixin:
         self.speaker_names = {str(k): str(v) for k, v in data.get("speaker_names", {}).items() if str(v).strip()}
         self.segment_speaker_overrides = {int(k): str(v) for k, v in data.get("segment_speaker_overrides", {}).items()}
         self.stories = [Story.from_dict(item) for item in data.get("stories", [])]
+        self.plugins_project_data = dict(data.get("plugins_data", {})) if isinstance(data.get("plugins_data"), dict) else {}
         self.translations = data.get("translations", {}) if isinstance(data.get("translations", {}), dict) else {}
         self.translation_display_mode = str(data.get("translation_display_mode", "en"))
         if self.translation_display_mode == "bilingual":

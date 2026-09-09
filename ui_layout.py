@@ -455,6 +455,8 @@ class UiLayoutMixin:
         batch_act.triggered.connect(self.open_batch_processing_dialog)
         file_menu.addAction(batch_act)
 
+        self.plugins_export_menu = file_menu.addMenu("Publishing & Plugins")
+
         file_menu.addSeparator()
 
         # 5. Application Exit
@@ -574,6 +576,8 @@ class UiLayoutMixin:
         # Tools Menu (AI Pipeline)
         # ==========================================
         tools_menu = menubar.addMenu("&Tools")
+        self.tools_menu = tools_menu
+        self.plugin_tools_actions = []
 
         self.transcribe_action = QAction("&Transcribe Audio...", self)
         self.transcribe_action.setShortcut(platform_seq("Ctrl+T"))
@@ -630,6 +634,12 @@ class UiLayoutMixin:
         self.regen_thumbnails_action.setEnabled(False)
         self.regen_thumbnails_action.triggered.connect(self.regenerate_video_thumbnails)
         tools_menu.addAction(self.regen_thumbnails_action)
+
+        tools_menu.addSeparator()
+
+        self.manage_plugins_action = QAction("&Manage Plugins && Add-ons...", self)
+        self.manage_plugins_action.triggered.connect(self.open_plugins_manager)
+        tools_menu.addAction(self.manage_plugins_action)
 
        # ==========================================
         # Settings Menu
@@ -1098,3 +1108,44 @@ class UiLayoutMixin:
         layout.addWidget(button_box)
 
         dialog.exec()
+
+    def open_plugins_manager(self):
+        """Open the Plugin Manager dialog to enable, disable, or inspect plugins."""
+        if not hasattr(self, "plugin_manager"):
+            return
+        from plugins.manager import PluginManagerDialog
+        dlg = PluginManagerDialog(self.plugin_manager, self)
+        dlg.exec()
+        self.refresh_plugin_menus()
+
+    def refresh_plugin_menus(self):
+        """Dynamically populate plugin export actions and tools menu actions."""
+        if not hasattr(self, "plugin_manager"):
+            return
+
+        # 1. Refresh Export & Publishing menu
+        if hasattr(self, "plugins_export_menu"):
+            self.plugins_export_menu.clear()
+            has_export_actions = False
+            for p in self.plugin_manager.plugins.values():
+                if p.is_enabled:
+                    for label, callback in p.get_export_actions():
+                        act = self.plugins_export_menu.addAction(label)
+                        act.triggered.connect(callback)
+                        has_export_actions = True
+            self.plugins_export_menu.menuAction().setVisible(has_export_actions)
+
+        # 2. Refresh Tools menu dynamic actions
+        if hasattr(self, "plugin_tools_actions") and hasattr(self, "tools_menu"):
+            for act in self.plugin_tools_actions:
+                self.tools_menu.removeAction(act)
+            self.plugin_tools_actions.clear()
+
+            for p in self.plugin_manager.plugins.values():
+                if p.is_enabled:
+                    for label, callback in p.get_tools_actions():
+                        act = QAction(label, self)
+                        act.triggered.connect(callback)
+                        self.tools_menu.addAction(act)
+                        self.plugin_tools_actions.append(act)
+
