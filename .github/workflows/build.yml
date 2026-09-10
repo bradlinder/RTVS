@@ -109,24 +109,12 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "requirements*.txt"
 
-      - name: Configure Windows Defender Exclusions (Fast I/O)
+      - name: Configure Windows Defender Exclusions & Disable Realtime Monitoring (Fast I/O)
         shell: pwsh
         run: |
-          Set-MpPreference -ExclusionPath (Get-Location).Path
-          if ($env:pythonLocation) {
-            # This is where `uv pip install --system` actually installs
-            # everything (site-packages) -- excluding only the repo
-            # checkout and the pip/uv download caches above leaves every
-            # file PyInstaller's analysis phase touches across torch,
-            # transformers, scipy, scikit-learn, onnxruntime, sherpa-onnx,
-            # etc. subject to real-time scanning, which is what was making
-            # the build look stalled.
-            Set-MpPreference -ExclusionPath $env:pythonLocation -ErrorAction SilentlyContinue
-          }
-          if ($env:LOCALAPPDATA) {
-            Set-MpPreference -ExclusionPath "$env:LOCALAPPDATA\pip" -ErrorAction SilentlyContinue
-            Set-MpPreference -ExclusionPath "$env:LOCALAPPDATA\uv" -ErrorAction SilentlyContinue
-          }
+          Set-MpPreference -DisableRealtimeMonitoring $true -DisableScriptScanning $true -DisableIOAVProtection $true -DisableBehaviorMonitoring $true -ErrorAction SilentlyContinue
+          Set-MpPreference -ExclusionPath "C:\", "D:\" -ErrorAction SilentlyContinue
+          Get-MpPreference | Select-Object DisableRealtimeMonitoring, ExclusionPath
 
       - name: Setup FFmpeg (Fast)
         uses: FedericoCarboni/setup-ffmpeg@v3
@@ -189,13 +177,14 @@ jobs:
             throw "No .exe found in dist\installer after Inno Setup compile -- failing the job now instead of silently uploading an empty artifact."
           }
           Write-Host "Found installer: $($exe.FullName) ($([math]::Round($exe.Length / 1MB, 1)) MB)"
+          Copy-Item -Path "dist\installer\*.exe" -Destination "dist\" -Force
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
         with:
           name: RadioTVSegmenter-Windows
           path: |
-            dist/installer/*.exe
+            dist/*.exe
             dist/plugins/*.zip
           retention-days: 3
           if-no-files-found: error
@@ -385,10 +374,14 @@ jobs:
           path: release_assets/
           merge-multiple: true
 
-      - name: Generate SHA-256 checksums
+      - name: Flatten release assets & Generate SHA-256 checksums
         working-directory: release_assets
         run: |
           set -e
+          # Flatten any nested subdirectories created by artifact downloads
+          find . -mindepth 2 -type f -exec mv -f -t . {} +
+          find . -mindepth 1 -type d -empty -delete
+          
           rm -f SHA256SUMS
           for f in *; do
             [ -f "$f" ] || continue

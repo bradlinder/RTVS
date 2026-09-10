@@ -77,7 +77,8 @@ PYSIDE6_EXCLUDES = [
 
 # Heavy internal test and benchmarking trees to exclude from packaging
 TEST_AND_BENCHMARK_EXCLUDES = [
-    "torch.testing._internal", "torch.utils.benchmark", "torch.utils.tensorboard",
+    "torch.testing._internal", "torch.testing", "torch.utils.benchmark", "torch.utils.tensorboard",
+    "torch.distributed", "torch._inductor", "torch._dynamo",
     "torchaudio.prototype",
     "scipy.cluster.tests", "scipy.interpolate.tests", "scipy.signal.tests",
     "scipy.sparse.tests", "scipy.special.tests", "scipy.ndimage.tests",
@@ -252,7 +253,10 @@ def run(cmd: list[str]) -> None:
         creationflags=creationflags,
     )
     if process.stdout:
-        for line in process.stdout:
+        while True:
+            line = process.stdout.readline()
+            if not line:
+                break
             print(line, end="", flush=True)
     ret = process.wait()
     if ret != 0:
@@ -675,10 +679,9 @@ def main() -> None:
         exclude_flags += ["--exclude-module", module]
 
     collect_all_packages = [
-        "numpy", "faster_whisper", "ctranslate2", "huggingface_hub", "torch", "torchaudio",  "soundfile",
+        "faster_whisper", "ctranslate2", "huggingface_hub", "soundfile",
         "diarize", "silero_vad", "wespeakerruntime", "onnxruntime", "sherpa_onnx",
-        "scipy", "sklearn", "psutil", "keyring", "docx", "pypdf", 
-        "requests", "cryptography",
+        "keyring", "docx", "pypdf",
     ]
     collect_flags = []
     import importlib.util
