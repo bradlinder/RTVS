@@ -51,7 +51,26 @@ def model_is_installed(from_code: str, to_code: str, variant: str = "tiny") -> b
 def setup_windows_dll_directories() -> None:
     os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
     os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+    os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+    os.environ["TQDM_DISABLE"] = "1"
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+    class NullWriter:
+        def write(self, *args, **kwargs): pass
+        def flush(self, *args, **kwargs): pass
+        def isatty(self): return False
+
+    if getattr(sys, "stdout", None) is None:
+        sys.stdout = NullWriter()
+    if getattr(sys, "stderr", None) is None:
+        sys.stderr = NullWriter()
+
+    try:
+        from huggingface_hub.utils import disable_progress_bars
+        disable_progress_bars()
+    except Exception:
+        pass
+
     if sys.platform != "win32":
         return
     try:

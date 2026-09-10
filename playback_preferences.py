@@ -478,6 +478,8 @@ class PlaybackPreferencesMixin:
         elif stage_key == "translation":
             num_segs = len(getattr(self, "transcript", {}).get("segments", [])) if getattr(self, "transcript", None) else 50
             return max(5.0, num_segs * 0.08)
+        elif "model" in stage_key or "download" in stage_key:
+            return 120.0
         return 15.0
 
     def calculate_processing_eta(self, percent: float) -> tuple[float, float, str]:
@@ -517,7 +519,9 @@ class PlaybackPreferencesMixin:
             return
         if stage:
             stage_lower = stage.lower()
-            if "transcri" in stage_lower:
+            if "model" in stage_lower or "download" in stage_lower:
+                stage_key = "model_download"
+            elif "transcri" in stage_lower:
                 stage_key = "transcription"
             elif "speaker" in stage_lower or "diari" in stage_lower:
                 stage_key = "diarization"
@@ -593,6 +597,11 @@ class PlaybackPreferencesMixin:
             stage_desc += f" ({stage_detail})"
 
         import time
+        if message:
+            self.last_reported_stage_message = message
+        else:
+            message = getattr(self, "last_reported_stage_message", "")
+
         if is_batch:
             batch_file_start = getattr(self, "batch_file_start_time", None) or getattr(self, "stage_start_monotonic", None) or time.monotonic()
             file_elapsed = max(0.0, time.monotonic() - batch_file_start)
@@ -632,8 +641,12 @@ class PlaybackPreferencesMixin:
             stage_elapsed = max(0.0, time.monotonic() - stage_start)
             elapsed_str = self._format_elapsed_time(stage_elapsed)
 
-            label_text = f"{stage_desc} — Elapsed: {elapsed_str} | Remaining: {eta_str}"
-            prog_format = f"%p% — Elapsed: {elapsed_str} | Remaining: {eta_str}"
+            if message:
+                label_text = f"{stage_desc}: {message} — Elapsed: {elapsed_str} | Remaining: {eta_str}"
+                prog_format = f"{message} (%p%)"
+            else:
+                label_text = f"{stage_desc} — Elapsed: {elapsed_str} | Remaining: {eta_str}"
+                prog_format = f"%p% — Elapsed: {elapsed_str} | Remaining: {eta_str}"
             
         if hasattr(self, "processing_stage_label"):
             self.processing_stage_label.setText(label_text)

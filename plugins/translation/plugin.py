@@ -24,8 +24,6 @@ class Plugin(BasePlugin):
             if hasattr(self.app, "translate_button"):
                 self.app.translate_button.setVisible(True)
                 self.app.translate_button.setEnabled(True)
-            if hasattr(self.app, "translation_model_action"):
-                self.app.translation_model_action.setVisible(True)
             if hasattr(self.app, "translate_action"):
                 self.app.translate_action.setVisible(True)
             if hasattr(self.app, "tools_translate_action"):
@@ -37,8 +35,6 @@ class Plugin(BasePlugin):
                 self.app.transcript_language_selector.setVisible(False)
             if hasattr(self.app, "translate_button"):
                 self.app.translate_button.setVisible(False)
-            if hasattr(self.app, "translation_model_action"):
-                self.app.translation_model_action.setVisible(False)
             if hasattr(self.app, "translate_action"):
                 self.app.translate_action.setVisible(False)
             if hasattr(self.app, "tools_translate_action"):

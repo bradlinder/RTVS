@@ -7,6 +7,33 @@ maintaining the established MainWindow-facing API while responsibilities are iso
 from prs_shared import *
 
 
+class NullWriter:
+    """Safe no-op stream object for windowed GUI executables where stdout/stderr are None."""
+    def write(self, *args, **kwargs):
+        pass
+    def flush(self, *args, **kwargs):
+        pass
+    def isatty(self):
+        return False
+
+
+if getattr(sys, "stdout", None) is None:
+    sys.stdout = NullWriter()
+if getattr(sys, "stderr", None) is None:
+    sys.stderr = NullWriter()
+
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+os.environ.setdefault("TQDM_DISABLE", "1")
+
+try:
+    from huggingface_hub.utils import disable_progress_bars
+    disable_progress_bars()
+except Exception:
+    pass
+
+
 def _translation_worker_class():
     """Load translation implementation only when the translation plugin is installed."""
     from plugins.translation.worker import TranslationWorker
@@ -18,11 +45,91 @@ def _translation_plugin_installed(self) -> bool:
 
 
 class WhisperModelInstallWorker(QObject):
+    progress = Signal(int, str)
     finished = Signal(object)
 
     def __init__(self, model_name):
         super().__init__()
         self.model_name = str(model_name)
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def _download_http_file(self, url: str, destination: Path, progress_start: int, progress_end: int, label: str):
+        import urllib.request
+        import urllib.error
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp = destination.with_name(destination.name + ".download")
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Radio-TV-Story-Segmenter/1.0 (Whisper Downloader)",
+                "Accept-Encoding": "identity",
+            }
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=45) as response, temp.open("wb") as out:
+                total_str = response.headers.get("Content-Length")
+                total = int(total_str) if total_str and total_str.isdigit() else 0
+                downloaded = 0
+                last_emit = 0
+                while True:
+                    if self._cancelled:
+                        raise InterruptedError("Download cancelled.")
+                    chunk = response.read(256 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    downloaded += len(chunk)
+                    if total > 0:
+                        fraction = min(1.0, downloaded / total)
+                        pct = int(progress_start + (progress_end - progress_start) * fraction)
+                        if pct != last_emit or downloaded == total:
+                            last_emit = pct
+                            mb_down = downloaded / (1024 * 1024)
+                            mb_tot = total / (1024 * 1024)
+                            self.progress.emit(pct, f"{label}: {mb_down:.1f}/{mb_tot:.1f} MB ({pct}%)")
+                    else:
+                        mb_down = downloaded / (1024 * 1024)
+                        self.progress.emit(progress_start, f"{label}: {mb_down:.1f} MB")
+                out.flush()
+                os.fsync(out.fileno())
+
+            if not temp.exists() or temp.stat().st_size == 0:
+                raise RuntimeError(f"Downloaded file '{destination.name}' is empty.")
+            if destination.exists():
+                try:
+                    destination.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            temp.rename(destination)
+        except Exception as exc:
+            try:
+                temp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise exc
+
+    def _download_file_with_fallback(self, repo_id: str, filename: str, destination: Path, progress_start: int, progress_end: int, label: str):
+        url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}?download=true"
+        try:
+            self._download_http_file(url, destination, progress_start, progress_end, label)
+        except Exception as http_err:
+            try:
+                from huggingface_hub import hf_hub_download
+                self.progress.emit(progress_start, f"{label} (Hub API)...")
+                hf_hub_download(
+                    repo_id=repo_id,
+                    filename=filename,
+                    local_dir=str(destination.parent),
+                    local_dir_use_symlinks=False,
+                    resume_download=True,
+                )
+                self.progress.emit(progress_end, f"{label} completed.")
+            except Exception as hf_err:
+                raise RuntimeError(f"Could not download {filename} from {repo_id}: {http_err}") from hf_err
 
     def run(self):
         error = None
@@ -31,23 +138,24 @@ class WhisperModelInstallWorker(QObject):
             if target_model.startswith("parakeet"):
                 target_dir = get_models_storage_dir() / "parakeet_onnx"
                 target_dir.mkdir(parents=True, exist_ok=True)
-                from huggingface_hub import hf_hub_download
                 repo_id = "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
-                downloaded_any = False
-                for fname in ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]:
-                    try:
-                        hf_hub_download(
-                            repo_id=repo_id,
-                            filename=fname,
-                            local_dir=str(target_dir),
-                            local_dir_use_symlinks=False,
-                            resume_download=True,
-                        )
-                        downloaded_any = True
-                    except Exception as dl_err:
-                        raise RuntimeError(f"Could not download {fname} from {repo_id}: {dl_err}")
-                if not downloaded_any:
-                    raise RuntimeError(f"Failed to download Parakeet ONNX artifacts from {repo_id}")
+
+                self.progress.emit(2, "Downloading Parakeet ONNX tokens...")
+                self._download_file_with_fallback(repo_id, "tokens.txt", target_dir / "tokens.txt", 2, 5, "tokens.txt")
+
+                self.progress.emit(5, "Downloading Parakeet ONNX decoder...")
+                self._download_file_with_fallback(repo_id, "decoder.int8.onnx", target_dir / "decoder.int8.onnx", 5, 10, "decoder.int8.onnx")
+
+                self.progress.emit(10, "Downloading Parakeet ONNX joiner...")
+                self._download_file_with_fallback(repo_id, "joiner.int8.onnx", target_dir / "joiner.int8.onnx", 10, 15, "joiner.int8.onnx")
+
+                self.progress.emit(15, "Downloading Parakeet ONNX encoder...")
+                self._download_file_with_fallback(repo_id, "encoder.int8.onnx", target_dir / "encoder.int8.onnx", 15, 95, "encoder.int8.onnx")
+
+                marker = target_dir / ".complete"
+                marker.write_text(f"{repo_id}\n{datetime.now().isoformat()}\n", encoding="utf-8")
+                self.progress.emit(100, "Parakeet ONNX model verified.")
+
             elif target_model in ("distil-medium.en", "distil-large-v3") or target_model.startswith("distil-") or target_model in ("tiny", "base", "small", "medium", "large-v3"):
                 if target_model == "distil-medium.en":
                     resolved = "Systran/faster-distil-whisper-medium.en"
@@ -63,59 +171,52 @@ class WhisperModelInstallWorker(QObject):
 
                 target_dir = get_models_storage_dir() / "huggingface" / "hub" / f"models--{resolved.replace('/', '--')}"
                 target_dir.mkdir(parents=True, exist_ok=True)
-                download_success = False
+
+                self.progress.emit(2, f"Downloading Whisper {self.model_name} configuration...")
+                self._download_file_with_fallback(resolved, "config.json", target_dir / "config.json", 2, 5, "config.json")
+
+                self.progress.emit(5, f"Downloading Whisper {self.model_name} tokenizer...")
+                self._download_file_with_fallback(resolved, "tokenizer.json", target_dir / "tokenizer.json", 5, 10, "tokenizer.json")
+
+                # Try vocabulary.json or vocabulary.txt
                 try:
-                    from huggingface_hub import snapshot_download
-                    snapshot_download(
-                        repo_id=resolved,
-                        local_dir=str(target_dir),
-                        local_dir_use_symlinks=False,
-                        resume_download=True,
-                    )
-                    download_success = True
-                except Exception as snap_err:
-                    # Windows privilege / WinError 1314 fallback: download files directly without symlinks
-                    from huggingface_hub import hf_hub_download
-                    essential_files = ["config.json", "model.bin", "tokenizer.json", "vocabulary.json", "vocabulary.txt"]
-                    for fname in essential_files:
-                        try:
-                            hf_hub_download(
-                                repo_id=resolved,
-                                filename=fname,
-                                local_dir=str(target_dir),
-                                local_dir_use_symlinks=False,
-                                resume_download=True,
-                            )
-                            download_success = True
-                        except Exception:
-                            pass
-                    if not download_success:
-                        raise snap_err
+                    self._download_file_with_fallback(resolved, "vocabulary.json", target_dir / "vocabulary.json", 10, 15, "vocabulary.json")
+                except Exception:
+                    try:
+                        self._download_file_with_fallback(resolved, "vocabulary.txt", target_dir / "vocabulary.txt", 10, 15, "vocabulary.txt")
+                    except Exception:
+                        pass
+
+                self.progress.emit(15, f"Downloading Whisper {self.model_name} model weights...")
+                self._download_file_with_fallback(resolved, "model.bin", target_dir / "model.bin", 15, 95, f"Whisper {self.model_name} weights")
+
+                # Try optional auxiliary files
+                for opt_file in ["preprocessor_config.json", "special_tokens_map.json"]:
+                    try:
+                        self._download_file_with_fallback(resolved, opt_file, target_dir / opt_file, 95, 98, opt_file)
+                    except Exception:
+                        pass
+
+                marker = target_dir / ".complete"
+                marker.write_text(f"{resolved}\n{datetime.now().isoformat()}\n", encoding="utf-8")
+                self.progress.emit(100, f"Whisper {self.model_name} verified.")
             else:
                 resolved = self.model_name
                 target_dir = get_models_storage_dir() / "huggingface" / "hub" / f"models--{resolved.replace('/', '--')}"
                 target_dir.mkdir(parents=True, exist_ok=True)
-                try:
-                    from huggingface_hub import snapshot_download
-                    snapshot_download(
-                        repo_id=resolved,
-                        local_dir=str(target_dir),
-                        local_dir_use_symlinks=False,
-                        resume_download=True,
-                    )
-                except Exception:
-                    from huggingface_hub import hf_hub_download
-                    for fname in ["config.json", "model.bin", "tokenizer.json", "vocabulary.json"]:
-                        try:
-                            hf_hub_download(
-                                repo_id=resolved,
-                                filename=fname,
-                                local_dir=str(target_dir),
-                                local_dir_use_symlinks=False,
-                                resume_download=True,
-                            )
-                        except Exception:
-                            pass
+
+                self.progress.emit(2, f"Downloading {self.model_name} config...")
+                self._download_file_with_fallback(resolved, "config.json", target_dir / "config.json", 2, 8, "config.json")
+
+                self.progress.emit(8, f"Downloading {self.model_name} tokenizer...")
+                self._download_file_with_fallback(resolved, "tokenizer.json", target_dir / "tokenizer.json", 8, 15, "tokenizer.json")
+
+                self.progress.emit(15, f"Downloading {self.model_name} weights...")
+                self._download_file_with_fallback(resolved, "model.bin", target_dir / "model.bin", 15, 95, f"{self.model_name} weights")
+
+                marker = target_dir / ".complete"
+                marker.write_text(f"{resolved}\n{datetime.now().isoformat()}\n", encoding="utf-8")
+                self.progress.emit(100, f"{self.model_name} verified.")
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
         self.finished.emit(error)
@@ -490,7 +591,7 @@ class ModelManagementMixin:
 
         # Show main window progress indicator
         self.set_processing_stage("Model Download", f"Whisper {model_name}")
-        self.progress.setValue(10)
+        self.progress.setValue(0)
         self.progress.show()
 
         self.log_activity(f"[MODELS] Starting download/install for Whisper '{model_name}'...")
@@ -501,12 +602,19 @@ class ModelManagementMixin:
         if hasattr(self, "_track_worker_thread"):
             self._track_worker_thread(self._model_install_qthread)
         self._model_install_qthread.started.connect(self._model_install_worker.run)
+        self._model_install_worker.progress.connect(self._on_model_install_progress)
         self._model_install_worker.finished.connect(self._model_install_finished)
         self._model_install_worker.finished.connect(self._model_install_qthread.quit)
         self._model_install_qthread.finished.connect(self._model_install_thread_finished)
         self._model_install_thread = self._model_install_qthread
         self._model_install_qthread.start()
         dialog.refresh_models()
+
+    def _on_model_install_progress(self, percent: int, message: str):
+        if hasattr(self, "update_processing_progress"):
+            self.update_processing_progress(percent, message)
+        elif hasattr(self, "progress"):
+            self.progress.setValue(percent)
 
     def _install_whisper_model_background(self, model_name):
         # Retained as a compatibility method for callers; the actual work now

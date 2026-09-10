@@ -14,6 +14,28 @@ import importlib.util
 import subprocess
 from pathlib import Path
 
+
+class NullWriter:
+    """Safe no-op stream object for windowed GUI executables where stdout/stderr are None."""
+    def write(self, *args, **kwargs):
+        pass
+    def flush(self, *args, **kwargs):
+        pass
+    def isatty(self):
+        return False
+
+
+if sys.stdout is None:
+    sys.stdout = NullWriter()
+if sys.stderr is None:
+    sys.stderr = NullWriter()
+
+# Prevent tqdm and huggingface_hub from attempting to write progress bars to non-existent console streams
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+os.environ.setdefault("TQDM_DISABLE", "1")
+
 APP_NAME = "RadioTVStorySegmenter"
 
 def app_data_dir() -> Path:
@@ -161,6 +183,13 @@ def configure_runtime_environment() -> Path:
     # in prs_shared.py and its use in processing.py/model_management.py.
     os.environ.setdefault("HF_HOME", str(models / "huggingface"))
     os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+    os.environ["TQDM_DISABLE"] = "1"
+    try:
+        from huggingface_hub.utils import disable_progress_bars
+        disable_progress_bars()
+    except Exception:
+        pass
     return root
 
 

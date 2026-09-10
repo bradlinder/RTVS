@@ -230,16 +230,58 @@ class TranslationWorker(QObject):
         try:
             if staging_dir.exists(): shutil.rmtree(staging_dir, ignore_errors=True)
             staging_dir.mkdir(parents=True, exist_ok=True)
+            download_success = False
             try:
-                snapshot_download(repo_id=repo, local_dir=str(staging_dir))
-            except TypeError:
-                snapshot_download(repo_id=repo, local_dir=str(staging_dir), resume_download=True)
+                from huggingface_hub import snapshot_download
+                snapshot_download(
+                    repo_id=repo,
+                    local_dir=str(staging_dir),
+                    local_dir_use_symlinks=False,
+                    resume_download=True,
+                )
+                if self._model_is_installed_in_dir(staging_dir):
+                    download_success = True
+            except Exception:
+                download_success = False
+
+            if not download_success:
+                # Direct HTTP streaming fallback for all required OPUS-MT files
+                candidate_files = [
+                    "config.json",
+                    "generation_config.json",
+                    "tokenizer_config.json",
+                    "source.spm",
+                    "target.spm",
+                    "special_tokens_map.json",
+                    "model.safetensors",
+                    "pytorch_model.bin",
+                    "vocab.json",
+                    "vocab.spm",
+                ]
+                total_files = len(candidate_files)
+                for idx, fname in enumerate(candidate_files):
+                    if self._cancelled:
+                        raise InterruptedError("Model download canceled.")
+                    p_start = 10 + int(75 * (idx / total_files))
+                    p_end = 10 + int(75 * ((idx + 1) / total_files))
+                    try:
+                        self._download_file(
+                            repo,
+                            fname,
+                            staging_dir / fname,
+                            p_start,
+                            p_end,
+                            f"Downloading {fname}",
+                        )
+                    except Exception:
+                        pass
+
             if self._cancelled: raise InterruptedError("Model download canceled.")
             marker = staging_dir / ".complete"
             marker.write_text(f"{repo}\n{self.model_variant}\n{datetime.now().isoformat()}\n", encoding="utf-8")
             self.progress.emit(90, f"Verifying OPUS-MT {self.model_variant} model files…")
             if not self._model_is_installed_in_dir(staging_dir):
-                raise RuntimeError("The translation model download completed, but required model files are missing or empty.")
+                raise RuntimeError(f"The translation model download for {repo} completed, but required model files (config, tokenizer, weights) are missing or empty.")
             if backup_dir.exists(): shutil.rmtree(backup_dir, ignore_errors=True)
             if final_dir.exists(): final_dir.rename(backup_dir)
             staging_dir.rename(final_dir)

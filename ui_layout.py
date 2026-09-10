@@ -647,6 +647,12 @@ class UiLayoutMixin:
 
         tools_menu.addSeparator()
 
+        self.manage_models_action = QAction("&Manage AI Models...", self)
+        self.manage_models_action.setShortcut(platform_seq("Ctrl+M"))
+        self.manage_models_action.triggered.connect(self.open_model_cleanup_dialog)
+        self.translation_model_action = self.manage_models_action
+        tools_menu.addAction(self.manage_models_action)
+
         self.manage_plugins_action = QAction("&Manage Plugins && Add-ons...", self)
         self.manage_plugins_action.triggered.connect(self.open_plugins_manager)
         tools_menu.addAction(self.manage_plugins_action)
@@ -666,10 +672,7 @@ class UiLayoutMixin:
         clear_cache_settings_act.triggered.connect(self.open_clear_cache_dialog)
         settings_menu.addAction(clear_cache_settings_act)
 
-        self.translation_model_action = QAction("&Manage AI Models...", self)
-        self.translation_model_action.setShortcut(platform_seq("Ctrl+M"))
-        self.translation_model_action.triggered.connect(self.open_translation_model_manager)
-        settings_menu.addAction(self.translation_model_action)
+        settings_menu.addAction(self.manage_models_action)
 
         gpu_act = QAction("&GPU Acceleration Settings...", self)
         gpu_act.setShortcut(platform_seq("Ctrl+G"))
@@ -1175,8 +1178,6 @@ class UiLayoutMixin:
             self.translate_button.setVisible(is_translation_enabled)
         if hasattr(self, "transcript_language_selector"):
             self.transcript_language_selector.setVisible(is_translation_enabled)
-        if hasattr(self, "translation_model_action"):
-            self.translation_model_action.setVisible(is_translation_enabled)
         if hasattr(self, "translate_action"):
             self.translate_action.setVisible(is_translation_enabled)
         if hasattr(self, "tools_translate_action"):
