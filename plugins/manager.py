@@ -114,16 +114,34 @@ class PluginManager:
         return self.manifests
 
     def ensure_packaged_addons(self) -> None:
-        """Ensures that all bundled directory-based plugins have .rtvs-addon files created."""
+        """Ensures that all bundled directory-based plugins have up-to-date .rtvs-addon files created."""
         bundled_dir = self.get_bundled_plugins_dir()
         if bundled_dir.exists() and bundled_dir.is_dir():
             for item in bundled_dir.iterdir():
                 if item.is_dir() and (item / "manifest.json").exists():
                     plugin_id = item.name
                     bundled_addon = bundled_dir / f"{plugin_id}.rtvs-addon"
-                    if not bundled_addon.exists():
+                    sub_addon = item / f"{plugin_id}.rtvs-addon"
+                    manifest_path = item / "manifest.json"
+                    needs_package = not bundled_addon.exists()
+                    if not needs_package:
+                        try:
+                            with zipfile.ZipFile(bundled_addon, "r") as zf:
+                                if "manifest.json" in zf.namelist():
+                                    data = json.loads(zf.read("manifest.json").decode("utf-8"))
+                                    dir_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                                    if data.get("version") != dir_data.get("version"):
+                                        needs_package = True
+                                else:
+                                    needs_package = True
+                        except Exception:
+                            needs_package = True
+
+                    if needs_package:
                         try:
                             self.package_addon(item, bundled_addon)
+                            if sub_addon.exists() or bundled_addon.exists():
+                                self.package_addon(item, sub_addon)
                         except Exception as exc:
                             print(f"[PLUGINS] Could not auto-package {bundled_addon}: {exc}")
 
@@ -159,6 +177,12 @@ class PluginManager:
         if isinstance(val, bool):
             return val
         return str(val).lower() in {"1", "true", "yes"}
+
+    def plugin_runtime(self, plugin_id: str) -> dict:
+        manifest = self.manifests.get(plugin_id)
+        if not manifest:
+            return {"type": "core", "name": ""}
+        return {"type": manifest.runtime_type, "name": manifest.runtime_name or manifest.id}
 
     def set_plugin_enabled(self, plugin_id: str, enabled: bool) -> None:
         self.settings.setValue(f"plugins/{plugin_id}/enabled", enabled)
@@ -237,6 +261,14 @@ class PluginManager:
 
         # Clear enabled status and plugin settings
         self.set_plugin_enabled(plugin_id, False)
+        manifest = self.manifests.get(plugin_id)
+        if manifest and manifest.runtime_type == "isolated":
+            try:
+                from runtime_manager import RuntimeManager
+                runtime_name = manifest.runtime_name or manifest.id
+                RuntimeManager().remove_environment(runtime_name)
+            except Exception as exc:
+                print(f"[PLUGINS] Could not remove isolated runtime for {plugin_id}: {exc}")
         self.settings.remove(f"plugins/{plugin_id}")
         self.settings.sync()
 

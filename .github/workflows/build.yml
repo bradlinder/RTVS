@@ -35,7 +35,7 @@ on:
         type: boolean
         default: true
       release_tag:
-        description: 'Release Tag (e.g., v2.7.1 - optional, defaults to git tag)'
+        description: 'Release Tag (e.g., v2.8 - optional, defaults to git tag)'
         type: string
         default: ''
 
@@ -149,7 +149,7 @@ jobs:
         id: get_version
         shell: bash
         run: |
-          VERSION=$(python -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text()).group(1))" 2>/dev/null || echo "2.7.1")
+          VERSION=$(python -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text()).group(1))" 2>/dev/null || echo "2.8")
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Run PyInstaller build
@@ -337,7 +337,7 @@ jobs:
       - name: Package Debian (.deb) & Distributable Tarball (.tar.gz)
         run: |
           bash installer/Linux/build_deb.sh
-          VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text()).group(1))" 2>/dev/null || echo "2.7.1")
+          VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text()).group(1))" 2>/dev/null || echo "2.8")
           cd dist
           GZIP=-9 tar -czvf "RadioTVSegmenter-${VERSION}-Linux-x86_64.tar.gz" RadioTVSegmenter/
           cd ..
@@ -389,32 +389,13 @@ jobs:
         run: |
           set -e
           rm -f SHA256SUMS
-          
-          # Flatten any subdirectories produced by download-artifact
-          find . -mindepth 2 -type f -exec mv -t . {} + 2>/dev/null || true
-          find . -mindepth 1 -type d -empty -delete 2>/dev/null || true
-
-          shopt -s nullglob
-          files=(*)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "::warning::No release asset files found in release_assets/ to generate checksums."
-            exit 0
-          fi
-
-          for f in "${files[@]}"; do
+          for f in *; do
             [ -f "$f" ] || continue
-            [ "$f" = "SHA256SUMS" ] && continue
-            [[ "$f" == *.sha256 ]] && continue
             sha256sum "$f" | tee -a SHA256SUMS
             sha256sum "$f" > "$f.sha256"
           done
-
-          if [ -f SHA256SUMS ]; then
-            echo "Generated checksums:"
-            cat SHA256SUMS
-          else
-            echo "::warning::No regular files processed for checksums."
-          fi
+          echo "Generated checksums:"
+          cat SHA256SUMS
 
       - name: Determine Release Tag
         id: vars
@@ -427,7 +408,7 @@ jobs:
           elif [ -n "$RELEASE_TAG" ]; then
             echo "tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
           else
-            echo "tag=v2.7.1" >> $GITHUB_OUTPUT
+            echo "tag=v2.8" >> $GITHUB_OUTPUT
           fi
 
       - name: Create GitHub Release & Upload Binaries

@@ -1173,6 +1173,7 @@ class PlaybackPreferencesMixin:
             QDialogButtonBox, QLabel, QFileDialog, QSlider
         )
         from PySide6.QtCore import Qt
+        from translation import _translation_worker_class
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Preferences — {APP_DISPLAY_NAME}")
         dialog.resize(700, 500)
@@ -1435,22 +1436,39 @@ class PlaybackPreferencesMixin:
 
         # Translation Model (OPUS-MT) selector
         pref_trans_combo = QComboBox()
-        trans_variants = [
-            ("tiny", "OPUS-MT-tiny"),
-            ("standard", "OPUS-MT (Standard)")
-        ]
-        for v_id, label in trans_variants:
-            installed_en_es = TranslationWorker.model_is_installed("en", "es", v_id)
-            installed_es_en = TranslationWorker.model_is_installed("es", "en", v_id)
-            installed = installed_en_es and installed_es_en
-            display = f"{label} ✓" if installed else label
-            pref_trans_combo.addItem(display, v_id)
+        translation_installed = hasattr(self, "plugin_manager") and self.plugin_manager.is_plugin_installed("translation")
+        if translation_installed:
+            trans_variants = [
+                ("tiny", "OPUS-MT-tiny"),
+                ("standard", "OPUS-MT (Standard)")
+            ]
+            try:
+                from plugins.translation.support import model_is_installed as _trans_model_is_installed
+            except Exception:
+                def _trans_model_is_installed(f, t, v):
+                    w_cls = _translation_worker_class(self) if callable(_translation_worker_class) else None
+                    if w_cls and hasattr(w_cls, "model_is_installed"):
+                        return w_cls.model_is_installed(f, t, v)
+                    return False
 
-        curr_trans = getattr(self, "translation_model_variant", "tiny")
-        t_idx = pref_trans_combo.findData(curr_trans)
-        if t_idx >= 0:
-            pref_trans_combo.setCurrentIndex(t_idx)
-        mod_form.addRow("Default Translation Model:", pref_trans_combo)
+            for v_id, label in trans_variants:
+                try:
+                    installed_en_es = _trans_model_is_installed("en", "es", v_id)
+                    installed_es_en = _trans_model_is_installed("es", "en", v_id)
+                except Exception:
+                    installed_en_es, installed_es_en = False, False
+                installed = installed_en_es and installed_es_en
+                display = f"{label} ✓" if installed else label
+                pref_trans_combo.addItem(display, v_id)
+            curr_trans = getattr(self, "translation_model_variant", "tiny")
+            t_idx = pref_trans_combo.findData(curr_trans)
+            if t_idx >= 0:
+                pref_trans_combo.setCurrentIndex(t_idx)
+            mod_form.addRow("Default Translation Model:", pref_trans_combo)
+        else:
+            unavailable = QLabel("Translation plugin is not installed.")
+            unavailable.setStyleSheet("color: #888;")
+            mod_form.addRow("Translation Model:", unavailable)
 
         mod_layout.addLayout(mod_form)
 
@@ -1835,13 +1853,30 @@ class PlaybackPreferencesMixin:
 
         # Switch page on category selection
         cat_list.currentRowChanged.connect(stack.setCurrentIndex)
-        cat_search = str(initial_category).strip().lower()[:4] if initial_category else "gene"
+        aliases = {
+            "general": "general",
+            "audio": "audio hardware",
+            "updates": "updates & github",
+            "github": "updates & github",
+            "models": "ai models",
+            "ai": "ai models",
+            "ai models": "ai models",
+            "playback": "playback & timeline",
+            "timeline": "playback & timeline",
+            "detection": "detection",
+            "detect": "detection",
+            "batch": "batch processing",
+            "wordpress": "wordpress",
+            "youtube": "youtube",
+        }
+        requested = str(initial_category).strip().lower() if initial_category else "general"
+        target = aliases.get(requested, requested)
+        selected_index = 0
         for i, c in enumerate(categories):
-            if c.lower().startswith(cat_search):
-                cat_list.setCurrentRow(i)
+            if c.lower() == target or c.lower().startswith(target):
+                selected_index = i
                 break
-        else:
-            cat_list.setCurrentRow(0)
+        cat_list.setCurrentRow(selected_index)
 
         # Dialog bottom bar
         live_widgets = {

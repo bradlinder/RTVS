@@ -22,6 +22,11 @@ class PluginManifest:
     dependencies: List[str] = field(default_factory=list)
     icon: Optional[str] = None
     enabled_by_default: bool = False
+    runtime_type: str = "core"
+    runtime_name: str = ""
+    runtime_entry_point: str = ""
+    runtime_requirements: str = ""
+    models: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> PluginManifest:
@@ -38,6 +43,12 @@ class PluginManifest:
             dependencies=list(data.get("dependencies", [])),
             icon=data.get("icon"),
             enabled_by_default=bool(data.get("enabled_by_default", False)),
+            runtime_type=str(data.get("runtime", {}).get("type", data.get("runtime_type", "core"))),
+            runtime_name=str(data.get("runtime", {}).get("name", data.get("runtime_name", ""))),
+            runtime_entry_point=str(data.get("runtime", {}).get("entry_point", "")),
+            runtime_requirements=str(data.get("runtime", {}).get("requirements", "")),
+            models=dict(data.get("models", {})),
+
         )
 
     @classmethod

@@ -205,15 +205,15 @@ class UiLayoutMixin:
 
         splitter.addWidget(left_widget)
 
-        # Right Container: Stories List, Story Detail Inputs, and Activity History
-        right_widget = QWidget(self)
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(6)
+        # Right Container: Vertical Splitter dividing Stories List and Activity History
+        self.right_splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self.right_splitter.setObjectName("right_splitter")
+        self.right_splitter.setChildrenCollapsible(False)
 
         # Stories Box
         self.stories_panel = QWidget(self)
         self.stories_panel.setObjectName("stories_panel")
+        self.stories_panel.setMinimumHeight(150)
         stories_box = self.stories_panel
         stories_box_layout = QVBoxLayout(stories_box)
         stories_box_layout.setContentsMargins(8, 8, 8, 8)
@@ -305,11 +305,12 @@ class UiLayoutMixin:
         story_btns_row.addWidget(self.export_stories_btn)
         
         stories_box_layout.addLayout(story_btns_row)
-        right_layout.addWidget(stories_box, 2)
+        self.right_splitter.addWidget(stories_box)
 
         # Activity / History Box
         self.activity_panel = QWidget(self)
         self.activity_panel.setObjectName("activity_panel")
+        self.activity_panel.setMinimumHeight(90)
         activity_box = self.activity_panel
         activity_box_layout = QVBoxLayout(activity_box)
         activity_box_layout.setContentsMargins(8, 8, 8, 8)
@@ -336,9 +337,12 @@ class UiLayoutMixin:
         act_btns_row.addWidget(export_act_btn)
 
         activity_box_layout.addLayout(act_btns_row)
-        right_layout.addWidget(activity_box, 1)
+        self.right_splitter.addWidget(activity_box)
 
-        splitter.addWidget(right_widget)
+        self.right_splitter.setStretchFactor(0, 3)
+        self.right_splitter.setStretchFactor(1, 2)
+
+        splitter.addWidget(self.right_splitter)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
 
@@ -601,6 +605,8 @@ class UiLayoutMixin:
         self.translate_action.setShortcut(platform_seq("Ctrl+Shift+L"))
         self.translate_action.setEnabled(False)
         self.translate_action.triggered.connect(lambda: self.start_translation("en", "es"))
+        self.tools_translate_action = self.translate_action
+        self.translate_action.setVisible(False)
         tools_menu.addAction(self.translate_action)
 
         tools_menu.addSeparator()
@@ -1171,6 +1177,8 @@ class UiLayoutMixin:
             self.transcript_language_selector.setVisible(is_translation_enabled)
         if hasattr(self, "translation_model_action"):
             self.translation_model_action.setVisible(is_translation_enabled)
+        if hasattr(self, "translate_action"):
+            self.translate_action.setVisible(is_translation_enabled)
         if hasattr(self, "tools_translate_action"):
             self.tools_translate_action.setVisible(is_translation_enabled)
 

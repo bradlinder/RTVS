@@ -1,0 +1,9 @@
+# Dependencies used only by the isolated translation runtime.
+numpy>=1.26.0,<2.0.0
+psutil>=5.9,<7
+transformers>=4.40,<5
+huggingface-hub>=0.23,<2
+ctranslate2>=4.0,<5
+sentencepiece>=0.2,<1
+sacremoses>=0.0.53
+torch>=2.0.0,<2.4.0

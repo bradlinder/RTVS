@@ -47,13 +47,17 @@ UV_VERSION = "0.12.7"
 UV_URLS = {
     "win32-x86_64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-x86_64-pc-windows-msvc.zip",
     "win32-arm64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-aarch64-pc-windows-msvc.zip",
+    "darwin-x86_64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-x86_64-apple-darwin.tar.gz",
+    "darwin-arm64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-aarch64-apple-darwin.tar.gz",
+    "linux-x86_64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz",
+    "linux-aarch64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-aarch64-unknown-linux-gnu.tar.gz",
 }
 
 try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.7.1"
+    PROJECT_VERSION = "2.8"
 
 # Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]
@@ -256,29 +260,69 @@ def run(cmd: list[str]) -> None:
 
 
 def provision_optional_runtime_tools(app_root: Path) -> None:
-    if sys.platform != "win32":
-        return
+    import platform
+    import tarfile
 
-    machine = os.environ.get("PROCESSOR_ARCHITECTURE", "").lower()
-    arch_key = "win32-arm64" if "arm64" in machine else "win32-x86_64"
-    url = UV_URLS[arch_key]
     dest_dir = app_root / "optional_runtime"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    uv_dest = dest_dir / "uv.exe"
+    binary_name = "uv.exe" if sys.platform == "win32" else "uv"
+    uv_dest = dest_dir / binary_name
     if uv_dest.exists():
+        if sys.platform != "win32":
+            try:
+                uv_dest.chmod(uv_dest.stat().st_mode | 0o755)
+            except Exception:
+                pass
+        return
+
+    # Determine platform architecture key
+    machine = (os.environ.get("PROCESSOR_ARCHITECTURE", "") or platform.machine()).lower()
+    is_arm = "arm" in machine or "aarch64" in machine
+    if sys.platform == "win32":
+        arch_key = "win32-arm64" if is_arm else "win32-x86_64"
+    elif sys.platform == "darwin":
+        arch_key = "darwin-arm64" if is_arm else "darwin-x86_64"
+    else:
+        arch_key = "linux-aarch64" if is_arm else "linux-x86_64"
+
+    url = UV_URLS.get(arch_key)
+    if not url:
+        print(f"[BUILD] Warning: No uv download URL found for platform key '{arch_key}'.")
         return
 
     BUILD.mkdir(parents=True, exist_ok=True)
-    archive = BUILD / "uv.zip"
-    print(f"[BUILD] Downloading uv {UV_VERSION} for optional runtime provisioning...")
-    urllib.request.urlretrieve(url, archive)
-    with zipfile.ZipFile(archive) as zf:
-        member = next((n for n in zf.namelist() if n.lower().endswith("/uv.exe") or n.lower() == "uv.exe"), None)
-        if not member:
-            raise SystemExit("ERROR: The downloaded uv archive did not contain uv.exe.")
-        with zf.open(member) as src, uv_dest.open("wb") as dst:
-            shutil.copyfileobj(src, dst)
-    archive.unlink(missing_ok=True)
+    archive_ext = ".zip" if url.endswith(".zip") else ".tar.gz"
+    archive = BUILD / f"uv{archive_ext}"
+    print(f"[BUILD] Downloading uv {UV_VERSION} ({arch_key}) for optional runtime provisioning...")
+    try:
+        urllib.request.urlretrieve(url, archive)
+        if archive_ext == ".zip":
+            with zipfile.ZipFile(archive) as zf:
+                member = next((n for n in zf.namelist() if n.lower().endswith("/" + binary_name) or n.lower() == binary_name), None)
+                if not member:
+                    raise SystemExit(f"ERROR: The downloaded uv archive did not contain {binary_name}.")
+                with zf.open(member) as src, uv_dest.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        else:
+            with tarfile.open(archive, "r:gz") as tf:
+                member = next((m for m in tf.getmembers() if m.name.endswith("/" + binary_name) or m.name == binary_name), None)
+                if not member:
+                    raise SystemExit(f"ERROR: The downloaded uv archive did not contain {binary_name}.")
+                extracted = tf.extractfile(member)
+                if extracted:
+                    with extracted as src, uv_dest.open("wb") as dst:
+                        shutil.copyfileobj(src, dst)
+
+        if sys.platform != "win32":
+            try:
+                uv_dest.chmod(0o755)
+            except Exception:
+                pass
+        print(f"[BUILD] Successfully bundled {binary_name} into {dest_dir}.")
+    except Exception as exc:
+        print(f"[BUILD] Warning: Could not download or extract uv: {exc}")
+    finally:
+        archive.unlink(missing_ok=True)
 
 
 def prune_unneeded_bundled_files(app_root: Path) -> None:
@@ -614,10 +658,9 @@ def main() -> None:
         exclude_flags += ["--exclude-module", module]
 
     collect_all_packages = [
-        "numpy", "faster_whisper", "ctranslate2", "transformers", "tokenizers",
-        "huggingface_hub", "torch", "torchaudio", "sentencepiece", "soundfile",
+        "numpy", "faster_whisper", "ctranslate2", "huggingface_hub", "torch", "torchaudio",  "soundfile",
         "diarize", "silero_vad", "wespeakerruntime", "onnxruntime", "sherpa_onnx",
-        "scipy", "sklearn", "psutil", "keyring", "docx", "pypdf", "sacremoses",
+        "scipy", "sklearn", "psutil", "keyring", "docx", "pypdf", 
         "requests", "cryptography",
     ]
     collect_flags = []

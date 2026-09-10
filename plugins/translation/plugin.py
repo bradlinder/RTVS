@@ -26,6 +26,8 @@ class Plugin(BasePlugin):
                 self.app.translate_button.setEnabled(True)
             if hasattr(self.app, "translation_model_action"):
                 self.app.translation_model_action.setVisible(True)
+            if hasattr(self.app, "translate_action"):
+                self.app.translate_action.setVisible(True)
             if hasattr(self.app, "tools_translate_action"):
                 self.app.tools_translate_action.setVisible(True)
 
@@ -37,16 +39,15 @@ class Plugin(BasePlugin):
                 self.app.translate_button.setVisible(False)
             if hasattr(self.app, "translation_model_action"):
                 self.app.translation_model_action.setVisible(False)
+            if hasattr(self.app, "translate_action"):
+                self.app.translate_action.setVisible(False)
             if hasattr(self.app, "tools_translate_action"):
                 self.app.tools_translate_action.setVisible(False)
 
     def get_tools_actions(self) -> List[tuple[str, Callable]]:
-        actions = []
-        if self.app and hasattr(self.app, "show_translation_model_chooser"):
-            actions.append(("Translation Model Settings...", self.app.show_translation_model_chooser))
-        if self.app and hasattr(self.app, "start_translation"):
-            actions.append(("Translate Transcript...", lambda: self.app.start_translation("en", "es")))
-        return actions
+        # The main Tools menu contains the single '&Translate...' action (self.translate_action)
+        # which is toggled with plugin state, avoiding redundant duplicate buttons.
+        return []
 
     def get_preferences_widget(self, parent: Any = None) -> Any:
         box = QGroupBox("Bilingual Translation", parent)

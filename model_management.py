@@ -7,6 +7,16 @@ maintaining the established MainWindow-facing API while responsibilities are iso
 from prs_shared import *
 
 
+def _translation_worker_class():
+    """Load translation implementation only when the translation plugin is installed."""
+    from plugins.translation.worker import TranslationWorker
+    return TranslationWorker
+
+def _translation_plugin_installed(self) -> bool:
+    manager = getattr(self, "plugin_manager", None)
+    return bool(manager and manager.is_plugin_installed("translation"))
+
+
 class WhisperModelInstallWorker(QObject):
     finished = Signal(object)
 
@@ -258,7 +268,7 @@ class ModelManagementMixin:
         return "OPUS-MT-tiny" if variant == "tiny" else "OPUS-MT"
 
     def translation_model_root(self, variant=None):
-        return TranslationWorker.model_root(variant or self.translation_model_variant)
+        return _translation_worker_class().model_root(variant or self.translation_model_variant)
 
     def refresh_translation_model_chooser(self):
         if not hasattr(self, "translation_model_input"): return
@@ -373,16 +383,18 @@ class ModelManagementMixin:
             add_row("whisper", model_id, label, path, installed,
                     lambda _, m=model_id: self.install_whisper_model_for_manager(m, dialog))  # Added '_' here
 
-        layout.addSpacing(8)
-        layout.addWidget(QLabel("<b>Translation models</b>"))
-        for variant, variant_label in (("tiny", "OPUS-MT-tiny"), ("standard", "OPUS-MT")):
-            for pair, pair_label in ((("en", "es"), "English → Spanish"), (("es", "en"), "Spanish → English")):
-                from_code, to_code = pair
-                path = TranslationWorker.model_dir(from_code, to_code, variant)
-                installed = TranslationWorker.model_is_installed(from_code, to_code, variant)
-                label = f"{variant_label} — {pair_label}"
-                add_row("translation", f"{variant}:{from_code}-{to_code}", label, path, installed,
-                        lambda _, f=from_code, t=to_code, d=variant: self.install_translation_models_for_manager(f, t, d, dialog))  # Added '_' here
+        translation_rows = []
+        if _translation_plugin_installed(self):
+            layout.addSpacing(8)
+            layout.addWidget(QLabel("<b>Translation models</b>"))
+            for variant, variant_label in (("tiny", "OPUS-MT-tiny"), ("standard", "OPUS-MT")):
+                for pair, pair_label in ((("en", "es"), "English → Spanish"), (("es", "en"), "Spanish → English")):
+                    from_code, to_code = pair
+                    path = _translation_worker_class().model_dir(from_code, to_code, variant)
+                    installed = _translation_worker_class().model_is_installed(from_code, to_code, variant)
+                    label = f"{variant_label} — {pair_label}"
+                    translation_rows.append(add_row("translation", f"{variant}:{from_code}-{to_code}", label, path, installed,
+                            lambda _, f=from_code, t=to_code, d=variant: self.install_translation_models_for_manager(f, t, d, dialog)))
 
         layout.addSpacing(8)
         layout.addWidget(QLabel("Select <b>Remove</b> beside any installed model you no longer need, then click Remove Selected."))
@@ -394,7 +406,7 @@ class ModelManagementMixin:
         close_btn.clicked.connect(dialog.reject)
 
         def refresh_rows():
-            busy = self.translation_thread is not None or getattr(self, "_model_install_thread", None) is not None
+            busy = getattr(self, "translation_process", None) is not None or getattr(self, "_model_install_process", None) is not None or getattr(self, "_model_install_thread", None) is not None
             for item in rows:
                 if item["kind"] == "whisper":
                     item["path"] = self.model_cache_path(item["model_id"])
@@ -402,8 +414,8 @@ class ModelManagementMixin:
                 else:
                     variant, pair = item["model_id"].split(":", 1)
                     f, t = pair.split("-", 1)
-                    item["path"] = TranslationWorker.model_dir(f, t, variant)
-                    installed_now = TranslationWorker.model_is_installed(f, t, variant)
+                    item["path"] = _translation_worker_class().model_dir(f, t, variant)
+                    installed_now = _translation_worker_class().model_is_installed(f, t, variant)
                 item["status"].setText("✓ Installed" if installed_now else "Not installed")
                 item["size"].setText(size_text(item["path"]) if installed_now else "—")
                 item["button"].setText("Repair / Reinstall" if installed_now else "Download / Install")
@@ -435,7 +447,8 @@ class ModelManagementMixin:
                     self.log_activity(f"[MODELS] Could not remove {item['label']}: {exc}", mark_dirty=False)
                     QMessageBox.warning(dialog, "Remove Model", f"Could not remove {item['label']}:\n\n{exc}")
             self.refresh_whisper_model_chooser()
-            self.refresh_translation_model_chooser()
+            if _translation_plugin_installed(self):
+                self.refresh_translation_model_chooser()
             refresh_rows()
 
         remove_btn.clicked.connect(remove_selected)
@@ -548,77 +561,45 @@ class ModelManagementMixin:
         return
 
     def install_translation_models_for_manager(self, from_code, to_code, variant, dialog):
-        """Install the selected OPUS-MT direction with main window progress reporting safely."""
-        if getattr(self, "_model_install_thread", None) is not None or self.translation_thread is not None:
+        """Install an OPUS-MT model through the translation plugin's isolated runtime."""
+        if getattr(self, "_model_install_process", None) is not None or getattr(self, "translation_process", None) is not None:
             return
-
-        # Parameter guards to catch any stray Qt boolean signals:
-        if isinstance(from_code, bool):
-            from_code = "en"
-        if isinstance(to_code, bool):
-            to_code = "es"
-
-        from_code = str(from_code)
-        to_code = str(to_code)
-        variant = str(variant)
+        if isinstance(from_code, bool): from_code = "en"
+        if isinstance(to_code, bool): to_code = "es"
+        from_code, to_code, variant = str(from_code), str(to_code), str(variant)
 
         self._model_install_dialog = dialog
-        model_label = f"OPUS-MT-{variant} ({from_code.upper()} → {to_code.upper()})"
-        self._model_install_model = model_label
-        self._model_install_kind = "translation"
+        self._model_install_model = f"OPUS-MT-{variant} ({from_code.upper()} → {to_code.upper()})"
+        self._model_install_error = None
+        self.set_processing_stage("Model Download", self._model_install_model)
+        self.progress.setValue(0); self.progress.show()
+        self.log_activity(f"[MODELS] Starting isolated download/install for {self._model_install_model}...")
 
-        # Show main window progress indicator
-        self.set_processing_stage("Model Download", model_label)
-        self.progress.setValue(0)
-        self.progress.show()
+        request = {
+            "segments": [], "from_code": from_code, "to_code": to_code,
+            "install_if_missing": True, "installation_only": True,
+            "model_variant": variant, "variant": variant, "device": "cpu"
+        }
 
-        self.log_activity(f"[MODELS] Starting download/install for {model_label}...")
+        # Reuse the translation runtime launcher, but keep model-install state separate.
+        if not hasattr(self, "_start_translation_runtime_request"):
+            self._model_install_error = "Translation runtime support is unavailable."
+            self._model_install_thread_finished()
+            return
 
-        self.translation_thread = QThread(self)
-        self.translation_worker = TranslationWorker(
-            [], from_code, to_code,
-            install_if_missing=True,
-            installation_only=True,
-            model_variant=variant
-        )
+        self._model_install_process = True
+        def done(exit_code, stderr, output):
+            self._model_install_error = stderr if exit_code != 0 else None
+            self._model_install_process = None
+            self._model_install_thread_finished()
 
-        self.translation_worker.moveToThread(self.translation_thread)
-        if hasattr(self, "_track_worker_thread"):
-            self._track_worker_thread(self.translation_thread)
+        # The common launcher tracks translation_process; temporarily use it while
+        # model installation is active, then clear it in the completion callback.
+        started = self._start_translation_runtime_request(request, on_finished=done)
+        if not started:
+            self._model_install_process = None
+            return
 
-        self.translation_thread.started.connect(self.translation_worker.run)
-
-        # Thread-safe GUI updates via explicit QueuedConnection slots
-        def _safe_update_progress(pct, msg):
-            self.progress.setValue(pct)
-            self.set_processing_stage("Model Download", msg)
-
-        self.translation_worker.progress.connect(_safe_update_progress, Qt.ConnectionType.QueuedConnection)
-
-        self.translation_worker.finished.connect(
-            lambda res, key: self._translation_manager_install_finished(from_code, to_code, variant, dialog),
-            Qt.ConnectionType.QueuedConnection
-        )
-        self.translation_worker.error.connect(
-            lambda msg: self._translation_manager_install_error(msg, dialog),
-            Qt.ConnectionType.QueuedConnection
-        )
-
-        self.translation_worker.finished.connect(self.translation_thread.quit)
-        self.translation_worker.error.connect(self.translation_thread.quit)
-        cleanup_fn = getattr(self, "_on_translation_thread_finished", getattr(self, "_translation_thread_finished", None))
-        if cleanup_fn:
-            self.translation_thread.finished.connect(cleanup_fn)
-        else:
-            def _fallback_cleanup():
-                self.translation_thread = None
-                self.translation_worker = None
-            self.translation_thread.finished.connect(_fallback_cleanup)
-
-        self.translation_thread.start()
-
-        # Defer model manager UI refresh until next event loop tick
-        QTimer.singleShot(0, dialog.refresh_models)
 
     def _translation_manager_install_finished(self, from_code, to_code, variant, dialog):
         self.progress.setValue(100)

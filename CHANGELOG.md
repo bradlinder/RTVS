@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.8.0
+- Updated application and plugin versions to v2.8 across core, installers, and manifests.
+- **Decoupled Translation Worker from PySide6**: Isolated translation runtime no longer requires or installs PySide6. Implemented a pure-Python `Signal` descriptor and `QObject` fallback in `worker.py` and guarded `QCoreApplication` in `runtime_entry.py`.
+- **Dynamic Plugin Runtime Requirements**: `RuntimeManager` now dynamically reads `requirements-runtime.txt` from plugin directories rather than relying strictly on static configuration.
+- **CPU PyTorch Wheel Configuration**: Isolated translation environment utilizes `--extra-index-url https://download.pytorch.org/whl/cpu` to avoid multi-gigabyte CUDA wheel downloads on CPU-only machines.
+- **Cross-Platform `uv` Provisioning**: Added standalone `uv` binaries for Windows (x86_64, arm64), macOS (x86_64, arm64), and Linux (x86_64, aarch64) in `build_installer.py`, enabling automated managed Python provisioning across all platforms.
+- **Enhanced Diagnostic Reporting**: Added detailed subprocess error capture in `RuntimeManager` and surfaced detailed error diagnostics in the translation UI.
+- **Synchronized Plugin Add-on Archives**: Updated and re-packaged `.rtvs-addon` packages (`translation`, `wordpress`, `youtube`) and enhanced `PluginManager.ensure_packaged_addons()` to auto-refresh outdated archives when plugin source manifests change.
+
+## v2.76c
+- Reworked the plugin architecture around explicit core/shared versus isolated runtimes.
+- Moved the OPUS-MT translation worker implementation out of the core application.
+- Translation now runs through the plugin-owned isolated Python runtime.
+- Removed translation-only `transformers`, `sentencepiece`, and `sacremoses` dependencies from the core Python requirements and core PyInstaller collection.
+- Added `plugins/translation/requirements-runtime.txt` and isolated runtime metadata.
+- Translation models are owned by the translation plugin's model registry and are hidden from Manage Models when the plugin is uninstalled.
+- Uninstalling the translation plugin removes its isolated runtime but deliberately preserves downloaded translation models.
+- Fixed Preferences category navigation so aliases such as `Models`, `AI Models`, `Detection`, and `Batch` select the correct page.
+- WordPress and YouTube remain lightweight core-runtime plugins and use the same manifest architecture.
+- Updated release version references to 2.76c.
+
+
 ## v2.7.1
 
 ### Disk Cache Management & "Clear Temporary Cache" Dialog

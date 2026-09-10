@@ -10,20 +10,58 @@ import copy
 import json
 import os
 import threading
+import json
+import tempfile
+from pathlib import Path
 from typing import Any
 
-from prs_shared import (
-    TranslationWorker,
-    format_time,
-)
+from prs_shared import format_time
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer
+
+def _translation_worker_class():
+    """Load the translation worker only when the translation plugin is installed."""
+    from plugins.translation.worker import TranslationWorker
+    return TranslationWorker
+
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, QProcess, QProcessEnvironment
 from PySide6.QtWidgets import (
     QApplication,
     QMessageBox,
     QProgressDialog,
 )
 
+
+def _translation_runtime_entry_path(app=None) -> Path:
+    manager = getattr(app, "plugin_manager", None) if app is not None else None
+    if manager is not None:
+        folder = manager.plugin_paths.get("translation")
+        if folder:
+            folder = Path(folder)
+            if folder.is_dir():
+                candidate = folder / "runtime_entry.py"
+                if candidate.exists():
+                    return candidate
+
+    try:
+        from plugins.manager import PluginManager
+        candidates = [
+            Path(__file__).resolve().parent / "plugins" / "translation" / "runtime_entry.py",
+            PluginManager.get_user_plugins_dir() / "translation" / "runtime_entry.py",
+            PluginManager.get_bundled_plugins_dir() / "translation" / "runtime_entry.py",
+        ]
+        for c in candidates:
+            if c.is_file():
+                return c
+    except Exception:
+        fallback = Path(__file__).resolve().parent / "plugins" / "translation" / "runtime_entry.py"
+        if fallback.is_file():
+            return fallback
+
+    return Path()
+
+def _translation_runtime_manager():
+    from runtime_manager import RuntimeManager
+    return RuntimeManager()
 
 class TranslationMixin:
     """Mixin class managing transcript translation, language toggling, and worker lifecycle."""
@@ -179,7 +217,12 @@ class TranslationMixin:
         """Asynchronously verify if required translation models are installed."""
         def _check():
             variant = getattr(self, "translation_model_variant", "tiny")
-            is_installed = TranslationWorker.model_is_installed("en", "es", variant)
+            try:
+                if hasattr(self, "plugin_manager") and not self.plugin_manager.is_plugin_installed("translation"):
+                    return
+                is_installed = _translation_worker_class().model_is_installed("en", "es", variant)
+            except Exception:
+                return
             cache_key = f"{variant}:en-es"
             if hasattr(self, "translation_model_status_cache"):
                 self.translation_model_status_cache[cache_key] = is_installed
@@ -188,114 +231,162 @@ class TranslationMixin:
         t.start()
 
     def stop_translation_worker(self, timeout_ms: int = 5000) -> bool:
-        """Gracefully stop any running translation worker and wait for thread exit."""
-        if getattr(self, "translation_worker", None) is not None:
+        proc = getattr(self, "translation_process", None)
+        if proc is not None:
             try:
-                self.translation_worker.cancel()
+                proc.terminate()
+                if not proc.waitForFinished(timeout_ms):
+                    proc.kill()
+                    proc.waitForFinished(1000)
             except Exception:
                 pass
-        if getattr(self, "translation_thread", None) is not None:
-            try:
-                self.translation_thread.quit()
-                if not self.translation_thread.wait(timeout_ms):
-                    self.translation_thread.terminate()
-                    self.translation_thread.wait(1000)
-            except Exception:
-                pass
-            finally:
-                self.translation_thread = None
-                self.translation_worker = None
+        self.translation_process = None
+        self.translation_thread = None
+        self.translation_worker = None
         if hasattr(self, "cancel_button") and self.cancel_button is not None:
             self.cancel_button.hide()
         return True
 
-    def start_translation(self, from_code: str = "en", to_code: str = "es", install_if_missing: bool = True):
-        """Start local translation worker in a background QThread."""
-        if hasattr(self, "plugin_manager") and not self.plugin_manager.is_plugin_enabled("translation"):
-            QMessageBox.warning(
-                self,
-                "Plugin Disabled",
-                "The Language Translation plugin is currently disabled.\n"
-                "You can enable it in Settings > Manage Plugins & Add-ons."
-            )
-            return
+    def _start_translation_runtime_request(self, request: dict, on_finished=None) -> bool:
+        """Run translation code in the plugin-owned isolated Python environment."""
+        if getattr(self, "translation_process", None) is not None:
+            return False
+        entry = _translation_runtime_entry_path(self)
+        if not entry.exists():
+            self._on_translation_error("The translation plugin runtime entry point is missing.")
+            return False
 
-        if getattr(self, "translation_thread", None) is not None:
+        manager = _translation_runtime_manager()
+        self.set_processing_stage("Translation Runtime", "Preparing isolated translation environment…")
+        QApplication.processEvents()
+        plugin_dir = entry.parent if entry and entry.exists() else None
+        if not manager.ensure_environment("translate", progress_cb=lambda msg: self.set_processing_stage("Translation Runtime", msg), plugin_dir=plugin_dir):
+            err_detail = manager.get_last_error()
+            msg = "The isolated translation runtime could not be installed or updated."
+            if err_detail:
+                msg = f"{msg}\n\nDetails:\n{err_detail}"
+            self._on_translation_error(msg)
+            return False
+        python_exe = manager.get_executable("translate")
+        if not python_exe or not Path(python_exe).exists():
+            self._on_translation_error("The isolated translation Python runtime is unavailable.")
+            return False
+
+        fd, request_path = tempfile.mkstemp(prefix="rtvs_translate_", suffix=".json")
+        os.close(fd)
+        request_file = Path(request_path)
+        request_file.write_text(json.dumps(request, ensure_ascii=False), encoding="utf-8")
+
+        proc = QProcess(self)
+        proc_env = QProcessEnvironment.systemEnvironment()
+        proc_env.insert("KMP_DUPLICATE_LIB_OK", "TRUE")
+        proc_env.insert("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+        proc_env.insert("TOKENIZERS_PARALLELISM", "false")
+        proc.setProcessEnvironment(proc_env)
+        proc.setProgram(python_exe)
+        proc.setArguments([str(entry), str(request_file)])
+        proc.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+        proc._rtvs_request_file = request_file
+        proc._rtvs_output = ""
+        proc._rtvs_line_buffer = ""
+        proc._rtvs_callback = on_finished
+        self.translation_process = proc
+        # Keep compatibility with existing busy checks.
+        self.translation_thread = proc
+
+        def read_output():
+            data = bytes(proc.readAllStandardOutput()).decode("utf-8", errors="replace")
+            proc._rtvs_output += data
+            proc._rtvs_line_buffer += data
+            lines = proc._rtvs_line_buffer.split("\n")
+            proc._rtvs_line_buffer = lines.pop() if lines else ""
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except Exception:
+                    continue
+                kind = msg.get("type")
+                if kind == "progress":
+                    self._on_translation_progress(msg.get("percent", 0), msg.get("message", ""))
+                elif kind == "finished":
+                    if not request.get("installation_only"):
+                        self._on_translation_finished(msg.get("result", []), msg.get("key", ""))
+                elif kind == "cancelled":
+                    self._on_translation_cancelled(msg.get("result", []), msg.get("key", ""))
+
+        def finished(exit_code, exit_status):
+            stderr = bytes(proc.readAllStandardError()).decode("utf-8", errors="replace").strip()
+            if proc._rtvs_callback:
+                try:
+                    proc._rtvs_callback(exit_code, stderr, proc._rtvs_output)
+                except Exception as exc:
+                    self.log_activity(f"[TRANSLATION] Runtime callback error: {exc}", mark_dirty=False)
+            if exit_code != 0 and stderr:
+                self._on_translation_error(stderr[-4000:])
+            try:
+                proc._rtvs_request_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+            self.translation_process = None
+            self.translation_thread = None
+            self.translation_worker = None
+            proc.deleteLater()
+
+        proc.readyReadStandardOutput.connect(read_output)
+        proc.finished.connect(finished)
+        proc.start()
+        if not proc.waitForStarted(10000):
+            try: request_file.unlink(missing_ok=True)
+            except Exception: pass
+            self.translation_process = None
+            self.translation_thread = None
+            self._on_translation_error("Could not start the isolated translation runtime.")
+            proc.deleteLater()
+            return False
+        return True
+
+    def start_translation(self, from_code: str = "en", to_code: str = "es", install_if_missing: bool = True):
+        """Start local translation in the translation plugin's isolated runtime."""
+        if hasattr(self, "plugin_manager") and not self.plugin_manager.is_plugin_enabled("translation"):
+            QMessageBox.warning(self, "Plugin Disabled", "The Language Translation plugin is currently disabled.\nYou can enable it in Settings > Manage Plugins & Add-ons.")
+            return
+        if getattr(self, "translation_process", None) is not None:
             QMessageBox.information(self, "Translation Busy", "A translation task is already running.")
             return
 
-        raw_segments = []
-        if isinstance(self.transcript, dict):
-            raw_segments = self.transcript.get("segments", [])
-        elif isinstance(self.transcript, list):
-            raw_segments = self.transcript
-
+        raw_segments = self.transcript.get("segments", []) if isinstance(self.transcript, dict) else (self.transcript if isinstance(self.transcript, list) else [])
         if not raw_segments:
             QMessageBox.warning(self, "No Transcript", "A transcript is required before running translation.")
-            if getattr(self, "pipeline_active", False):
-                self.pipeline_active = False
-                self.pipeline_queue = []
-                self.pipeline_rerun_confirmed = False
             return
 
         variant = getattr(self, "translation_model_variant", "tiny")
-        if not TranslationWorker.model_is_installed(from_code, to_code, variant):
-            if not install_if_missing:
-                QMessageBox.warning(
-                    self,
-                    "Translation Model Missing",
-                    f"The {variant} translation model ({from_code}->{to_code}) is not installed.\n"
-                    "Please install it via Settings > Manage Models."
-                )
-                if getattr(self, "pipeline_active", False):
-                    self.pipeline_active = False
-                    self.pipeline_queue = []
-                    self.pipeline_rerun_confirmed = False
-                return
+        if not _translation_worker_class().model_is_installed(from_code, to_code, variant) and not install_if_missing:
+            QMessageBox.warning(self, "Translation Model Missing", f"The {variant} translation model ({from_code}->{to_code}) is not installed.\nPlease install it via Settings > Manage Models.")
+            return
 
         self.set_processing_stage("Translating transcript", f"{from_code} → {to_code}")
         if hasattr(self, "cancel_button") and self.cancel_button is not None:
-            self.cancel_button.show()
-            self.cancel_button.setEnabled(True)
+            self.cancel_button.show(); self.cancel_button.setEnabled(True)
         self.set_tools_actions_enabled(False)
 
-        device = getattr(self, "translation_device", "cpu")
-        segments = raw_segments
-
-        worker = TranslationWorker(
-            segments=copy.deepcopy(segments),
-            from_code=from_code,
-            to_code=to_code,
-            install_if_missing=install_if_missing,
-            model_variant=variant,
-            transcript=copy.deepcopy(self.transcript),
-            variant=variant,
-            device=device,
-        )
-        thread = QThread(self)
-        worker.moveToThread(thread)
-
-        self.translation_worker = worker
-        self.translation_thread = thread
-        if hasattr(self, "_track_worker_thread"):
-            self._track_worker_thread(thread)
-
-        thread.started.connect(worker.run)
-        worker.progress.connect(self._on_translation_progress)
-        worker.finished.connect(self._on_translation_finished)
-        worker.cancelled.connect(self._on_translation_cancelled)
-        worker.error.connect(self._on_translation_error)
-
-        worker.finished.connect(thread.quit)
-        worker.cancelled.connect(thread.quit)
-        worker.error.connect(thread.quit)
-        thread.finished.connect(self._on_translation_thread_finished)
-
-        thread.start()
-        self.log_activity(f"[TRANSLATION] Started {from_code}->{to_code} local translation ({variant}).")
+        request = {
+            "segments": copy.deepcopy(raw_segments),
+            "from_code": from_code, "to_code": to_code,
+            "install_if_missing": install_if_missing,
+            "model_variant": variant, "variant": variant,
+            "transcript": copy.deepcopy(self.transcript),
+            "device": getattr(self, "translation_device", "cpu"),
+        }
+        self.log_activity(f"[TRANSLATION] Starting isolated {from_code}->{to_code} translation ({variant}).")
+        if not self._start_translation_runtime_request(request):
+            self.set_tools_actions_enabled(True)
+            if hasattr(self, "cancel_button") and self.cancel_button is not None: self.cancel_button.hide()
 
     def _on_translation_progress(self, percent: float, message: str):
-        """Handle progress updates from TranslationWorker."""
+        """Handle progress updates from _translation_worker_class()."""
         self.update_processing_progress(percent, message)
 
     def _on_translation_finished(self, translated_transcript: Any, translation_key: str):

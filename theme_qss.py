@@ -123,8 +123,8 @@ QMenu::separator { height: 1px; background: #282c35; margin: 5px 7px; }
    ======================================================================== */
 QSplitter::handle { background: #282c35; }
 QSplitter::handle:hover, QSplitter::handle:pressed { background: #38bdf8; }
-QSplitter[orientation="horizontal"]::handle { width: 1px; margin: 0 1px; }
-QSplitter[orientation="vertical"]::handle { height: 1px; margin: 1px 0; }
+QSplitter[orientation="horizontal"]::handle { width: 4px; margin: 0 1px; }
+QSplitter[orientation="vertical"]::handle { height: 6px; margin: 2px 0; }
 
 /* ========================================================================
    TRANSPORT / PLAYBACK
