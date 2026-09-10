@@ -99,12 +99,7 @@ class WhisperModelInstallWorker(QObject):
 
             if not temp.exists() or temp.stat().st_size == 0:
                 raise RuntimeError(f"Downloaded file '{destination.name}' is empty.")
-            if destination.exists():
-                try:
-                    destination.unlink(missing_ok=True)
-                except Exception:
-                    pass
-            temp.rename(destination)
+            os.replace(temp, destination)
         except Exception as exc:
             try:
                 temp.unlink(missing_ok=True)
@@ -120,13 +115,20 @@ class WhisperModelInstallWorker(QObject):
             try:
                 from huggingface_hub import hf_hub_download
                 self.progress.emit(progress_start, f"{label} (Hub API)...")
-                hf_hub_download(
-                    repo_id=repo_id,
-                    filename=filename,
-                    local_dir=str(destination.parent),
-                    local_dir_use_symlinks=False,
-                    resume_download=True,
-                )
+                try:
+                    hf_hub_download(
+                        repo_id=repo_id,
+                        filename=filename,
+                        local_dir=str(destination.parent),
+                        local_dir_use_symlinks=False,
+                        resume_download=True,
+                    )
+                except TypeError:
+                    hf_hub_download(
+                        repo_id=repo_id,
+                        filename=filename,
+                        local_dir=str(destination.parent),
+                    )
                 self.progress.emit(progress_end, f"{label} completed.")
             except Exception as hf_err:
                 raise RuntimeError(f"Could not download {filename} from {repo_id}: {http_err}") from hf_err
@@ -300,10 +302,10 @@ class ModelManagementMixin:
             return False
         if model_name.startswith("parakeet"):
             required = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
-            return all(any(path.rglob(name)) for name in required)
+            return all(any(p.is_file() and p.stat().st_size > 0 for p in path.rglob(name)) for name in required)
         if path.is_dir():
-            has_bin = any(path.rglob("model.bin")) or any(path.rglob("*.bin"))
-            has_safetensors = any(path.rglob("*.safetensors"))
+            has_bin = any(p.is_file() and p.stat().st_size > 1024 for p in path.rglob("*.bin"))
+            has_safetensors = any(p.is_file() and p.stat().st_size > 1024 for p in path.rglob("*.safetensors"))
             return has_bin or has_safetensors
         return False
 

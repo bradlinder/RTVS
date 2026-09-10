@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.8.1
+- **Model Downloader Reliability**:
+  - Implemented real-time chunked streaming downloads for Whisper and Parakeet models in `WhisperModelInstallWorker`, replacing stalled opaque downloads with live byte/MB counters and percentage tracking.
+  - Resolved frozen-process `NoneType.write` crashes on clean Windows installs by introducing `NullWriter` stream guards and disabling terminal progress bars (`tqdm`, `huggingface_hub`) in GUI environments.
+  - Hardened file finalization with atomic `os.replace` operations across temporary `.download` artifacts to prevent Windows file-sharing errors.
+  - Added non-zero integrity checks (`stat().st_size > 1024`) in model availability verification to prevent interrupted 0-byte files from being identified as valid installations.
+- **Translation Staging & Add-on Delivery**:
+  - Disabled symlinks (`local_dir_use_symlinks=False`) in translation downloads to eliminate Windows non-admin privilege errors (`WinError 1314`).
+  - Added multi-file HTTP streaming fallback for all standard OPUS-MT assets (`config.json`, tokenizers, `source.spm`, `model.safetensors`, and `pytorch_model.bin`).
+- **Tools Menu Accessibility**:
+  - Added direct **Tools > Manage AI Models...** menu entry alongside existing Preferences navigation.
+- **Version Alignment**:
+  - Updated application, installer scripts, and plugin manifests to v2.8.1.
+
 ## v2.8.0
 - Updated application and plugin versions to v2.8 across core, installers, and manifests.
 - **Decoupled Translation Worker from PySide6**: Isolated translation runtime no longer requires or installs PySide6. Implemented a pure-Python `Signal` descriptor and `QObject` fallback in `worker.py` and guarded `QCoreApplication` in `runtime_entry.py`.
