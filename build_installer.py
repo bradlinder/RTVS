@@ -77,16 +77,13 @@ PYSIDE6_EXCLUDES = [
 
 # Heavy internal test and benchmarking trees to exclude from packaging
 TEST_AND_BENCHMARK_EXCLUDES = [
-    "torch.testing._internal", "torch.testing", "torch.utils.benchmark", "torch.utils.tensorboard",
-    "torch._inductor", "torch._dynamo",
-    "torchaudio.prototype",
     "scipy.cluster.tests", "scipy.interpolate.tests", "scipy.signal.tests",
     "scipy.sparse.tests", "scipy.special.tests", "scipy.ndimage.tests",
     "scipy.optimize.tests", "scipy.linalg.tests", "scipy.stats.tests",
     "scipy._lib.tests", "numpy.tests", "numpy.f2py.tests",
     "transformers.commands", "transformers.testing_utils",
     "sklearn.tests", "sklearn.datasets.tests", "sklearn.feature_extraction.tests",
-    "pytest", "unittest.test", "test", "tests",
+    "pytest", "unittest.test",
     "triton", "nvidia", "tkinter", "tcl", "docutils", "IPython", "jupyter",
 ]
 
@@ -694,6 +691,7 @@ def main() -> None:
         collect_flags.extend(["--copy-metadata", meta])
     collect_flags.extend([
         "--hidden-import", "torch._C",
+        "--hidden-import", "torch.testing",
         "--hidden-import", "torch.distributed",
         "--hidden-import", "torch.distributed.rpc",
     ])
@@ -815,6 +813,7 @@ def main() -> None:
         *icon_flags,
         *exclude_flags,
         "--hidden-import", "torch._C",
+        "--hidden-import", "torch.testing",
         "--hidden-import", "torch.distributed",
         "--hidden-import", "torch.distributed.rpc",
         str(ROOT / "radio_tv_story_segmenter_worker.py"),
