@@ -1577,10 +1577,14 @@ def main(argv=None):
         _check("PyTorch tensor operation", lambda: str(__import__("torch").tensor([1, 2, 3]).tolist()))
         _check("torchaudio", lambda: __import__("torchaudio").__version__)
         _check("CTranslate2", lambda: __import__("ctranslate2").__version__)
-        _check("Transformers", lambda: __import__("transformers").__version__)
         _check("Silero VAD", lambda: __import__("silero_vad").__name__)
         _check("diarize", lambda: __import__("diarize").__name__)
         _check("NumPy", lambda: __import__("numpy").__version__)
+        try:
+            import transformers
+            checks.append(f"[SELF-TEST] Transformers (Optional/Plugin): PASS ({transformers.__version__})")
+        except ImportError:
+            checks.append("[SELF-TEST] Transformers (Optional/Plugin): Skipped (Isolated in translation plugin runtime)")
         for line in checks:
             print(line, flush=True)
         return 1 if failures else 0

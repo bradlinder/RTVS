@@ -40,8 +40,12 @@ if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
     _check("PyTorch", lambda: __import__("torch").__version__)
     _check("PyTorch C extension", lambda: str(__import__("torch")._C))
     _check("CTranslate2", lambda: __import__("ctranslate2").__version__)
-    _check("Transformers", lambda: __import__("transformers").__version__)
     _check("Silero VAD", lambda: __import__("silero_vad").__name__)
+    try:
+        import transformers
+        checks.append(f"[SELF-TEST] Transformers (Optional/Plugin): PASS ({transformers.__version__})")
+    except ImportError:
+        checks.append("[SELF-TEST] Transformers (Optional/Plugin): Skipped (Isolated in translation plugin runtime)")
     # Windowed PyInstaller builds may have no stdout/stderr. Persist the
     # diagnostic beside the executable so the build can inspect it.
     test_file = Path(sys.executable).resolve().parent / "ai_self_test.txt" if getattr(sys, "frozen", False) else Path("ai_self_test.txt")

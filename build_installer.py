@@ -275,6 +275,21 @@ def provision_optional_runtime_tools(app_root: Path) -> None:
                 pass
         return
 
+    # Check if uv is already in PATH on the host (e.g. installed by setup-uv in CI)
+    host_uv = shutil.which("uv") or shutil.which("uv.exe")
+    if host_uv and Path(host_uv).is_file():
+        try:
+            shutil.copy2(host_uv, uv_dest)
+            if sys.platform != "win32":
+                try:
+                    uv_dest.chmod(0o755)
+                except Exception:
+                    pass
+            print(f"[BUILD] Bundled host uv from {host_uv} into {dest_dir}.")
+            return
+        except Exception as exc:
+            print(f"[BUILD] Warning copying host uv: {exc}")
+
     # Determine platform architecture key
     machine = (os.environ.get("PROCESSOR_ARCHITECTURE", "") or platform.machine()).lower()
     is_arm = "arm" in machine or "aarch64" in machine
@@ -295,7 +310,9 @@ def provision_optional_runtime_tools(app_root: Path) -> None:
     archive = BUILD / f"uv{archive_ext}"
     print(f"[BUILD] Downloading uv {UV_VERSION} ({arch_key}) for optional runtime provisioning...")
     try:
-        urllib.request.urlretrieve(url, archive)
+        req = urllib.request.Request(url, headers={"User-Agent": "Radio-TV-Story-Segmenter-Build"})
+        with urllib.request.urlopen(req) as resp, archive.open("wb") as out:
+            shutil.copyfileobj(resp, out)
         if archive_ext == ".zip":
             with zipfile.ZipFile(archive) as zf:
                 member = next((n for n in zf.namelist() if n.lower().endswith("/" + binary_name) or n.lower() == binary_name), None)
@@ -664,8 +681,12 @@ def main() -> None:
         "requests", "cryptography",
     ]
     collect_flags = []
+    import importlib.util
     for pkg in collect_all_packages:
-        collect_flags.extend(["--collect-all", pkg])
+        if importlib.util.find_spec(pkg):
+            collect_flags.extend(["--collect-all", pkg])
+        else:
+            print(f"[BUILD] Note: package '{pkg}' not installed in build environment; skipping --collect-all.")
     for meta in ["numpy", "torch", "torchaudio", "silero_vad", "onnxruntime"]:
         collect_flags.extend(["--copy-metadata", meta])
     collect_flags.extend(["--hidden-import", "torch._C"])
