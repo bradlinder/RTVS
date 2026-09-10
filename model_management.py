@@ -307,8 +307,11 @@ class ModelManagementMixin:
         """Unified local model manager for Whisper and OPUS-MT models."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Manage Models")
-        dialog.setMinimumWidth(820)
+        dialog.setMinimumSize(860, 600)
+        dialog.resize(900, 660)
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
         layout.addWidget(QLabel(
             "Download, install, inspect, or remove local transcription and translation models. "
             "Models are never removed automatically."
@@ -333,6 +336,15 @@ class ModelManagementMixin:
         storage_layout.addWidget(pref_link_btn)
         layout.addWidget(storage_box)
 
+        # Scrollable area for model rows to prevent vertical crowding on any DPI
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.StyledPanel)
+        scroll_content = QWidget()
+        models_layout = QVBoxLayout(scroll_content)
+        models_layout.setContentsMargins(12, 10, 12, 10)
+        models_layout.setSpacing(8)
+
         rows = []
 
         def size_text(path):
@@ -344,22 +356,25 @@ class ModelManagementMixin:
 
         def add_row(kind, model_id, label, path, installed, install_fn):
             row = QHBoxLayout()
+            row.setSpacing(10)
             name = QLabel(label)
-            name.setMinimumWidth(250)
+            name.setMinimumWidth(260)
             status = QLabel("✓ Installed" if installed else "Not installed")
-            status.setMinimumWidth(145)
+            status.setMinimumWidth(130)
             size = QLabel(size_text(path) if installed else "—")
-            size.setMinimumWidth(85)
+            size.setMinimumWidth(80)
             install_btn = QPushButton("Repair / Reinstall" if installed else "Download / Install")
+            install_btn.setMinimumHeight(28)
+            install_btn.setStyleSheet("QPushButton { min-height: 28px; padding: 4px 12px; }")
             install_btn.clicked.connect(install_fn)  # Fixed: Connected button click signal
             remove_cb = QCheckBox("Remove")
             remove_cb.setEnabled(installed)
-            row.addWidget(name)
+            row.addWidget(name, 1)
             row.addWidget(status)
             row.addWidget(size)
             row.addWidget(install_btn)
             row.addWidget(remove_cb)
-            layout.addLayout(row)
+            models_layout.addLayout(row)
             rows.append({
                 "kind": kind, "model_id": model_id, "label": label, "path": Path(path),
                 "status": status, "size": size, "button": install_btn, "remove": remove_cb,
@@ -367,7 +382,7 @@ class ModelManagementMixin:
             })
             return row
 
-        layout.addWidget(QLabel("<b>Transcription models</b>"))
+        models_layout.addWidget(QLabel("<b>Transcription models</b>"))
         whisper_models = [
             ("tiny", "Whisper Tiny"), ("base", "Whisper Base"),
             ("small", "Whisper Small"),
@@ -385,8 +400,8 @@ class ModelManagementMixin:
 
         translation_rows = []
         if _translation_plugin_installed(self):
-            layout.addSpacing(8)
-            layout.addWidget(QLabel("<b>Translation models</b>"))
+            models_layout.addSpacing(10)
+            models_layout.addWidget(QLabel("<b>Translation models</b>"))
             for variant, variant_label in (("tiny", "OPUS-MT-tiny"), ("standard", "OPUS-MT")):
                 for pair, pair_label in ((("en", "es"), "English → Spanish"), (("es", "en"), "Spanish → English")):
                     from_code, to_code = pair
@@ -396,7 +411,11 @@ class ModelManagementMixin:
                     translation_rows.append(add_row("translation", f"{variant}:{from_code}-{to_code}", label, path, installed,
                             lambda _, f=from_code, t=to_code, d=variant: self.install_translation_models_for_manager(f, t, d, dialog)))
 
-        layout.addSpacing(8)
+        models_layout.addStretch()
+        scroll_area.setWidget(scroll_content)
+        layout.addWidget(scroll_area, 1)
+
+        layout.addSpacing(4)
         layout.addWidget(QLabel("Select <b>Remove</b> beside any installed model you no longer need, then click Remove Selected."))
         buttons = QHBoxLayout()
         remove_btn = QPushButton("Remove Selected")

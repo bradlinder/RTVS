@@ -546,7 +546,8 @@ class GitHubPluginsDialog(QDialog):
         self.fetch_worker: Optional[GitHubPluginsWorker] = None
 
         self.setWindowTitle("Download Plugins & Extensions from GitHub")
-        self.resize(780, 520)
+        self.setMinimumSize(820, 560)
+        self.resize(860, 600)
         self.setup_ui()
         self.fetch_plugins()
 
@@ -573,6 +574,8 @@ class GitHubPluginsDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.table.verticalHeader().setDefaultSectionSize(48)
+        self.table.verticalHeader().setMinimumSectionSize(44)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -584,7 +587,8 @@ class GitHubPluginsDialog(QDialog):
         desc_layout = QVBoxLayout(desc_box)
         self.desc_text = QTextEdit()
         self.desc_text.setReadOnly(True)
-        self.desc_text.setMaximumHeight(85)
+        self.desc_text.setMinimumHeight(100)
+        self.desc_text.setMaximumHeight(130)
         desc_layout.addWidget(self.desc_text)
         layout.addWidget(desc_box)
 
@@ -635,6 +639,7 @@ class GitHubPluginsDialog(QDialog):
 
         for row, item in enumerate(self.catalog):
             self.table.insertRow(row)
+            self.table.setRowHeight(row, 48)
             plugin_id = item["id"]
             is_installed = self.manager.is_plugin_installed(plugin_id)
             is_enabled = self.manager.is_plugin_enabled(plugin_id)
@@ -654,20 +659,24 @@ class GitHubPluginsDialog(QDialog):
 
             action_widget = QWidget()
             action_layout = QHBoxLayout(action_widget)
-            action_layout.setContentsMargins(4, 2, 4, 2)
-            action_layout.setSpacing(6)
+            action_layout.setContentsMargins(6, 4, 6, 4)
+            action_layout.setSpacing(8)
+            action_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
+            btn_style = "QPushButton { min-height: 28px; padding: 4px 12px; }"
             if not is_installed:
                 download_btn = QPushButton("Download & Install")
-                download_btn.setStyleSheet("font-weight: bold;")
+                download_btn.setStyleSheet("QPushButton { font-weight: bold; min-height: 28px; padding: 4px 12px; }")
                 download_btn.clicked.connect(lambda _, it=item: self.download_and_install_plugin(it))
                 action_layout.addWidget(download_btn)
             else:
                 toggle_btn = QPushButton("Disable" if is_enabled else "Enable")
+                toggle_btn.setStyleSheet(btn_style)
                 toggle_btn.clicked.connect(lambda _, pid=plugin_id, cur=is_enabled: self.toggle_plugin(pid, not cur))
                 action_layout.addWidget(toggle_btn)
 
                 uninstall_btn = QPushButton("Uninstall")
+                uninstall_btn.setStyleSheet(btn_style)
                 uninstall_btn.clicked.connect(lambda _, pid=plugin_id, nm=item["name"]: self.uninstall_plugin(pid, nm))
                 action_layout.addWidget(uninstall_btn)
 
@@ -790,7 +799,8 @@ class PluginManagerDialog(QDialog):
         super().__init__(parent)
         self.manager = manager
         self.setWindowTitle("Manage Plugins & Add-ons")
-        self.setMinimumSize(740, 480)
+        self.setMinimumSize(800, 540)
+        self.resize(840, 580)
         self.setup_ui()
         self.refresh_list()
 
@@ -813,6 +823,8 @@ class PluginManagerDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.table.verticalHeader().setDefaultSectionSize(42)
+        self.table.verticalHeader().setMinimumSectionSize(38)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -833,7 +845,8 @@ class PluginManagerDialog(QDialog):
         desc_layout = QVBoxLayout(desc_box)
         self.desc_text = QTextEdit()
         self.desc_text.setReadOnly(True)
-        self.desc_text.setMaximumHeight(90)
+        self.desc_text.setMinimumHeight(95)
+        self.desc_text.setMaximumHeight(130)
         desc_layout.addWidget(self.desc_text)
         layout.addWidget(desc_box)
 
@@ -882,6 +895,7 @@ class PluginManagerDialog(QDialog):
         row = 0
         for plugin_id, manifest in sorted(self.manager.manifests.items(), key=lambda x: x[1].name):
             self.table.insertRow(row)
+            self.table.setRowHeight(row, 42)
 
             # Checkbox
             chk = QCheckBox()
