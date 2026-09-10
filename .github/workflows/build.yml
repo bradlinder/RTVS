@@ -389,13 +389,23 @@ jobs:
         run: |
           set -e
           rm -f SHA256SUMS
-          for f in *; do
+          shopt -s nullglob
+          files=(*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::warning::No release asset files found in release_assets/ to generate checksums."
+            exit 0
+          fi
+          for f in "${files[@]}"; do
             [ -f "$f" ] || continue
             sha256sum "$f" | tee -a SHA256SUMS
             sha256sum "$f" > "$f.sha256"
           done
-          echo "Generated checksums:"
-          cat SHA256SUMS
+          if [ -f SHA256SUMS ]; then
+            echo "Generated checksums:"
+            cat SHA256SUMS
+          else
+            echo "::warning::No regular files processed for checksums."
+          fi
 
       - name: Determine Release Tag
         id: vars
