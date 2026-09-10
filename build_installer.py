@@ -642,7 +642,7 @@ def main() -> None:
     print("[BUILD STAGE 1/5] Compiling primary application with PyInstaller (GUI & AI runtime)...", flush=True)
     print("="*70 + "\n", flush=True)
     run([
-        "pyinstaller", "--noconfirm", "--onedir", "--windowed",
+        "pyinstaller", "--noconfirm", "--onedir", "--windowed", "--noupx",
         "--log-level", "INFO",
         "--name", APP_NAME,
         "--runtime-hook", str(runtime_hook),
@@ -734,7 +734,7 @@ def main() -> None:
     shutil.rmtree(worker_dist, ignore_errors=True)
     
     run([
-        "pyinstaller", "--noconfirm", "--onedir", "--console",
+        "pyinstaller", "--noconfirm", "--onedir", "--console", "--noupx",
         "--log-level", "INFO",
         "--name", "prs_worker",
         "--distpath", str(worker_dist),
