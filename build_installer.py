@@ -78,7 +78,7 @@ PYSIDE6_EXCLUDES = [
 # Heavy internal test and benchmarking trees to exclude from packaging
 TEST_AND_BENCHMARK_EXCLUDES = [
     "torch.testing._internal", "torch.testing", "torch.utils.benchmark", "torch.utils.tensorboard",
-    "torch.distributed", "torch._inductor", "torch._dynamo",
+    "torch._inductor", "torch._dynamo",
     "torchaudio.prototype",
     "scipy.cluster.tests", "scipy.interpolate.tests", "scipy.signal.tests",
     "scipy.sparse.tests", "scipy.special.tests", "scipy.ndimage.tests",
@@ -692,7 +692,11 @@ def main() -> None:
             print(f"[BUILD] Note: package '{pkg}' not installed in build environment; skipping --collect-all.")
     for meta in ["numpy", "torch", "torchaudio", "silero_vad", "onnxruntime"]:
         collect_flags.extend(["--copy-metadata", meta])
-    collect_flags.extend(["--hidden-import", "torch._C"])
+    collect_flags.extend([
+        "--hidden-import", "torch._C",
+        "--hidden-import", "torch.distributed",
+        "--hidden-import", "torch.distributed.rpc",
+    ])
 
     icon_file = ROOT / "resources" / ("icon.ico" if sys.platform == "win32" else "icon.png")
     icon_flags = ["--icon", str(icon_file)] if icon_file.exists() else []
@@ -810,6 +814,9 @@ def main() -> None:
         *torch_binary_flags,
         *icon_flags,
         *exclude_flags,
+        "--hidden-import", "torch._C",
+        "--hidden-import", "torch.distributed",
+        "--hidden-import", "torch.distributed.rpc",
         str(ROOT / "radio_tv_story_segmenter_worker.py"),
     ])
 
