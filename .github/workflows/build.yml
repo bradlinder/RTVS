@@ -180,6 +180,15 @@ jobs:
           Write-Host "Using Inno Setup compiler: $isccPath"
           & "$isccPath" /DMyAppVersion="${{ steps.get_version.outputs.version }}" installer\Windows\RadioTVStorySegmenter.iss
 
+      - name: Verify installer was produced
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path "dist\installer" -Filter "*.exe" -ErrorAction SilentlyContinue
+          if (-not $exe) {
+            throw "No .exe found in dist\installer after Inno Setup compile -- failing the job now instead of silently uploading an empty artifact."
+          }
+          Write-Host "Found installer: $($exe.FullName) ($([math]::Round($exe.Length / 1MB, 1)) MB)"
+
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -188,7 +197,7 @@ jobs:
             dist/installer/*.exe
             dist/plugins/*.zip
           retention-days: 3
-          if-no-files-found: ignore
+          if-no-files-found: error
 
   # =========================================================================
   # MACOS BUILD
@@ -266,6 +275,14 @@ jobs:
       - name: Package .app into .dmg
         run: bash installer/macOS/build_app.sh
 
+      - name: Verify installer was produced
+        run: |
+          if ! ls dist/*.dmg >/dev/null 2>&1; then
+            echo "::error::No .dmg found in dist/ after build_app.sh -- failing the job now instead of silently uploading an empty artifact."
+            exit 1
+          fi
+          ls -lh dist/*.dmg
+
       - name: Upload macOS Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -274,7 +291,7 @@ jobs:
             dist/*.dmg
             dist/plugins/*.zip
           retention-days: 3
-          if-no-files-found: ignore
+          if-no-files-found: error
 
   # =========================================================================
   # LINUX BUILD
@@ -328,6 +345,10 @@ jobs:
       - name: Verify Asset Sizes (<2GB GitHub Release Limit)
         run: |
           echo "Checking generated package sizes:"
+          if ! ls dist/*.deb dist/*.tar.gz >/dev/null 2>&1; then
+            echo "::error::Missing .deb or .tar.gz in dist/ -- failing the job now instead of silently uploading an empty artifact."
+            exit 1
+          fi
           ls -lh dist/*.deb dist/*.tar.gz
 
       - name: Upload Linux Artifact
@@ -339,7 +360,7 @@ jobs:
             dist/*.tar.gz
             dist/plugins/*.zip
           retention-days: 3
-          if-no-files-found: ignore
+          if-no-files-found: error
 
   # =========================================================================
   # PUBLISH GITHUB RELEASE

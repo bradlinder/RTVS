@@ -212,7 +212,7 @@ def _find_release_checksum(release_info: dict, asset_name: str) -> str | None:
 
 def select_best_asset_for_platform(assets: list[dict], target_version: str = "") -> dict | None:
     """Select the most suitable release asset dictionary for the current operating system,
-    boosting assets that explicitly match the target version tag.
+    boosting assets that explicitly match the target version tag or general installer extensions.
     """
     if not assets:
         return None
@@ -223,7 +223,7 @@ def select_best_asset_for_platform(assets: list[dict], target_version: str = "")
 
     for asset in assets:
         name = asset.get("name", "").lower()
-        score = 0
+        score = 1  # Base score so any valid platform asset matches if no version match
 
         # Prioritize assets containing the specific target version string
         if clean_ver and clean_ver in name:
@@ -231,27 +231,19 @@ def select_best_asset_for_platform(assets: list[dict], target_version: str = "")
 
         if current_os == "win32":
             if name.endswith(".exe"):
-                score += 10
-                if "radiotv" in name or "segmenter" in name:
-                    score += 15
-                if "setup" in name or "installer" in name:
-                    score += 10
-                if "win" in name or "windows" in name:
-                    score += 5
+                score += 20
+                if "setup" in name or "installer" in name or "radiotv" in name or "segmenter" in name:
+                    score += 20
                 candidates.append((score, asset))
-            elif name.endswith(".zip") and "win" in name:
-                candidates.append((3, asset))
+            elif name.endswith(".zip") and ("win" in name or "windows" in name):
+                candidates.append((5, asset))
 
         elif current_os == "darwin":
             if name.endswith(".dmg"):
-                score += 10
-                if "radiotv" in name or "segmenter" in name:
-                    score += 15
-                if "macos" in name or "mac" in name or "darwin" in name:
-                    score += 5
+                score += 30
                 candidates.append((score, asset))
-            elif name.endswith(".pkg") or (name.endswith(".zip") and "mac" in name):
-                candidates.append((5, asset))
+            elif name.endswith(".pkg") or (name.endswith(".zip") and ("mac" in name or "darwin" in name)):
+                candidates.append((10, asset))
 
         else:
             is_debian = (
@@ -260,20 +252,10 @@ def select_best_asset_for_platform(assets: list[dict], target_version: str = "")
                 or ("debian" in Path("/etc/os-release").read_text(errors="ignore").lower() if Path("/etc/os-release").exists() else False)
             )
             if name.endswith(".deb"):
-                score += 30 if is_debian else 18
-                if "radiotv" in name or "segmenter" in name:
-                    score += 5
-                candidates.append((score, asset))
-            elif name.endswith(".appimage"):
-                score += 25
+                score += 35 if is_debian else 15
                 candidates.append((score, asset))
             elif name.endswith(".tar.gz") or name.endswith(".tgz"):
-                score += 15
-                if "linux" in name or "x86_64" in name:
-                    score += 5
-                candidates.append((score, asset))
-            elif name.endswith(".rpm"):
-                score += 30 if not is_debian and Path("/etc/redhat-release").exists() else 8
+                score += 20
                 candidates.append((score, asset))
 
     if candidates:
