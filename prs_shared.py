@@ -242,6 +242,18 @@ class ResizableTextEdit(QWidget):
     def setText(self, text: str):
         self.text_edit.setPlainText(text)
 
+    def text(self) -> str:
+        return self.text_edit.toPlainText()
+
+    def clear(self):
+        self.text_edit.clear()
+
+    def setPlaceholderText(self, text: str):
+        self.text_edit.setPlaceholderText(text)
+
+    def placeholderText(self) -> str:
+        return self.text_edit.placeholderText()
+
     def setToolTip(self, tip: str):
         self.text_edit.setToolTip(tip)
 
@@ -258,6 +270,29 @@ class ResizableTextEdit(QWidget):
 
     def setReadOnly(self, ro: bool):
         self.text_edit.setReadOnly(ro)
+
+    def isReadOnly(self) -> bool:
+        return self.text_edit.isReadOnly()
+
+    def setFocus(self, *args, **kwargs):
+        self.text_edit.setFocus(*args, **kwargs)
+
+    def hasFocus(self) -> bool:
+        return self.text_edit.hasFocus()
+
+    def document(self):
+        return self.text_edit.document()
+
+    def textCursor(self):
+        return self.text_edit.textCursor()
+
+    def setTextCursor(self, cursor):
+        self.text_edit.setTextCursor(cursor)
+
+    def __getattr__(self, name: str):
+        if "text_edit" in self.__dict__ and hasattr(self.text_edit, name):
+            return getattr(self.text_edit, name)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     @property
     def textChanged(self):

@@ -134,10 +134,78 @@ class PluginManager:
                     except Exception as exc:
                         print(f"[PLUGINS] Failed to read addon manifest from {item}: {exc}")
 
+        # Auto-update any previously-installed plugins if a newer version is shipped with the app update
+        self.sync_bundled_updates()
+
         # Ensure .rtvs-addon packages are generated in bundled directory for export/download
         self.ensure_packaged_addons()
 
         return self.manifests
+
+    def sync_bundled_updates(self) -> None:
+        """Automatically updates installed plugins in the user directory if a newer version is bundled with an app update."""
+        bundled_dir = self.get_bundled_plugins_dir()
+        user_dir = self.get_user_plugins_dir()
+        if not bundled_dir.exists() or not bundled_dir.is_dir():
+            return
+
+        for item in bundled_dir.iterdir():
+            if item.name.startswith("."):
+                continue
+            bundled_manifest: Optional[PluginManifest] = None
+            source_to_install: Optional[Path] = None
+
+            if item.is_dir() and (item / "manifest.json").exists():
+                try:
+                    bundled_manifest = PluginManifest.from_file(item / "manifest.json")
+                    source_to_install = item
+                except Exception:
+                    pass
+            elif item.is_file() and item.name.endswith(".rtvs-addon"):
+                try:
+                    with zipfile.ZipFile(item, "r") as zf:
+                        if "manifest.json" in zf.namelist():
+                            m_data = json.loads(zf.read("manifest.json").decode("utf-8"))
+                            bundled_manifest = PluginManifest.from_dict(m_data)
+                            source_to_install = item
+                except Exception:
+                    pass
+
+            if not bundled_manifest or not source_to_install:
+                continue
+
+            pid = bundled_manifest.id
+            if pid in self.manifests:
+                current_user_manifest = self.manifests[pid]
+                if is_newer_plugin_version(bundled_manifest.version, current_user_manifest.version):
+                    print(f"[PLUGINS] App update detected newer bundled plugin for '{pid}' (v{current_user_manifest.version} -> v{bundled_manifest.version}). Auto-updating...")
+                    try:
+                        dest = user_dir / pid
+                        if source_to_install.is_dir():
+                            if dest.exists():
+                                shutil.rmtree(dest, ignore_errors=True)
+                            shutil.copytree(source_to_install, dest)
+                        elif source_to_install.is_file():
+                            if dest.exists():
+                                shutil.rmtree(dest, ignore_errors=True)
+                            dest.mkdir(parents=True, exist_ok=True)
+                            with zipfile.ZipFile(source_to_install, "r") as z:
+                                z.extractall(dest)
+                            if not (dest / "manifest.json").exists():
+                                for sub in list(dest.iterdir()):
+                                    if sub.is_dir() and (sub / "manifest.json").exists():
+                                        for f in sub.iterdir():
+                                            shutil.move(str(f), str(dest / f.name))
+                                        shutil.rmtree(sub, ignore_errors=True)
+                                        break
+                        old_addon = user_dir / f"{pid}.rtvs-addon"
+                        if old_addon.exists():
+                            old_addon.unlink(missing_ok=True)
+
+                        self.manifests[pid] = bundled_manifest
+                        self.plugin_paths[pid] = dest
+                    except Exception as e:
+                        print(f"[PLUGINS] Failed to auto-update installed plugin '{pid}' from bundled package: {e}")
 
     def ensure_packaged_addons(self) -> None:
         """Ensures that all bundled directory-based plugins have up-to-date .rtvs-addon files created."""
