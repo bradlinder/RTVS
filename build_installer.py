@@ -55,9 +55,14 @@ UV_URLS = {
 
 try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
-except Exception:
+    print(f"[BUILD] Loaded metadata from prs_shared: APP_DISPLAY_NAME='{APP_DISPLAY_NAME}', PROJECT_VERSION='{PROJECT_VERSION}'")
+except ImportError as e:
+    print(f"[BUILD] Warning: Could not import prs_shared ({e}), using fallback values")
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
     PROJECT_VERSION = "2.8.7"
+except Exception as e:
+    print(f"[BUILD] Unexpected error importing prs_shared: {type(e).__name__}: {e}")
+    raise
 
 # Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]
@@ -642,6 +647,12 @@ def package_plugins(
 
 
 def main() -> None:
+    prs_shared_file = ROOT / "prs_shared.py"
+    if not prs_shared_file.exists():
+        raise SystemExit(
+            f"[FATAL BUILD ERROR] Required file not found: {prs_shared_file}\n"
+            "This file must exist in the project root and contain PROJECT_VERSION and APP_DISPLAY_NAME."
+        )
     sync_installer_scripts(PROJECT_VERSION)
     args = parse_build_args()
     target = str(args.target).strip().lower()
@@ -701,12 +712,24 @@ def main() -> None:
             collect_flags.extend(["--collect-all", pkg])
         else:
             print(f"[BUILD] Note: package '{pkg}' not installed in build environment; skipping --collect-all.")
+    import importlib.metadata
     for meta in [
-        "numpy", "scipy", "scikit-learn", "sklearn", "torch", "torchaudio",
+        "numpy", "scipy", "scikit-learn", "torch", "torchaudio",
         "silero_vad", "onnxruntime", "wespeakerruntime", "diarize",
         "sherpa-onnx", "ctranslate2", "faster_whisper", "soundfile",
     ]:
-        collect_flags.extend(["--copy-metadata", meta])
+        found_name = None
+        for candidate in (meta, meta.replace("_", "-"), meta.replace("-", "_")):
+            try:
+                importlib.metadata.distribution(candidate)
+                found_name = candidate
+                break
+            except Exception:
+                continue
+        if found_name:
+            collect_flags.extend(["--copy-metadata", found_name])
+        else:
+            print(f"[BUILD] Note: distribution metadata '{meta}' not found in build environment; skipping --copy-metadata.")
     collect_flags.extend([
         "--hidden-import", "torch._C",
         "--hidden-import", "torch.testing",
