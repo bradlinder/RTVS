@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.8.8
+## v2.9.0
 - **Independent Plugin Update Checker ("Check for Updates...")**:
   - Added a dedicated **Check for Updates...** action to the Plugin Manager (`Tools > Manage Plugins & Add-ons`), enabling users to check GitHub releases for newer versions of installed plugins and update them in-place without needing to rebuild or reinstall the core application.
   - Automatically compares installed plugin versions against the latest release assets published on GitHub (`.rtvs-addon` and `.zip` packages).
