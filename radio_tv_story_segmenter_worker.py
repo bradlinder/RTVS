@@ -79,6 +79,25 @@ def _setup_windows_dll_directories():
         candidate_dirs.add(exe_dir / "torch" / "lib")
         candidate_dirs.add(exe_dir / "torch")
 
+    # Add NumPy, SciPy, Scikit-Learn, and WeSpeaker runtime folders
+    for base in list(candidate_dirs):
+        candidate_dirs.add(base / "numpy")
+        candidate_dirs.add(base / "numpy" / "core")
+        candidate_dirs.add(base / "numpy" / "_core")
+        candidate_dirs.add(base / "scipy")
+        candidate_dirs.add(base / "sklearn")
+        candidate_dirs.add(base / "wespeakerruntime")
+        try:
+            if base.is_dir():
+                for lib_dir in base.glob("*.libs"):
+                    if lib_dir.is_dir():
+                        candidate_dirs.add(lib_dir)
+                for lib_dir in base.glob("*/*.libs"):
+                    if lib_dir.is_dir():
+                        candidate_dirs.add(lib_dir)
+        except Exception:
+            pass
+
     for entry in list(sys.path):
         if not entry:
             continue
@@ -1578,8 +1597,18 @@ def main(argv=None):
         _check("torchaudio", lambda: __import__("torchaudio").__version__)
         _check("CTranslate2", lambda: __import__("ctranslate2").__version__)
         _check("Silero VAD", lambda: __import__("silero_vad").__name__)
-        _check("diarize", lambda: __import__("diarize").__name__)
         _check("NumPy", lambda: __import__("numpy").__version__)
+        _check("SciPy", lambda: __import__("scipy").__version__)
+        _check("Scikit-Learn", lambda: __import__("sklearn").__version__)
+        _check("WeSpeaker Runtime", lambda: __import__("wespeakerruntime").__name__)
+        def _check_diarize_full():
+            import diarize
+            import diarize.embeddings
+            import diarize.clustering
+            import diarize.vad
+            import diarize.utils
+            return diarize.__name__
+        _check("diarize (full pipeline)", _check_diarize_full)
         try:
             import transformers
             checks.append(f"[SELF-TEST] Transformers (Optional/Plugin): PASS ({transformers.__version__})")

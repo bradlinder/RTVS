@@ -57,7 +57,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.8.6"
+    PROJECT_VERSION = "2.8.7"
 
 # Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]
@@ -692,7 +692,7 @@ def main() -> None:
     collect_all_packages = [
         "faster_whisper", "ctranslate2", "huggingface_hub", "soundfile",
         "diarize", "silero_vad", "wespeakerruntime", "onnxruntime", "sherpa_onnx",
-        "keyring", "docx", "pypdf",
+        "keyring", "docx", "pypdf", "numpy", "scipy", "sklearn", "torchaudio",
     ]
     collect_flags = []
     import importlib.util
@@ -701,13 +701,40 @@ def main() -> None:
             collect_flags.extend(["--collect-all", pkg])
         else:
             print(f"[BUILD] Note: package '{pkg}' not installed in build environment; skipping --collect-all.")
-    for meta in ["numpy", "torch", "torchaudio", "silero_vad", "onnxruntime"]:
+    for meta in [
+        "numpy", "scipy", "scikit-learn", "sklearn", "torch", "torchaudio",
+        "silero_vad", "onnxruntime", "wespeakerruntime", "diarize",
+        "sherpa-onnx", "ctranslate2", "faster_whisper", "soundfile",
+    ]:
         collect_flags.extend(["--copy-metadata", meta])
     collect_flags.extend([
         "--hidden-import", "torch._C",
         "--hidden-import", "torch.testing",
         "--hidden-import", "torch.distributed",
         "--hidden-import", "torch.distributed.rpc",
+        "--hidden-import", "numpy",
+        "--hidden-import", "numpy.core",
+        "--hidden-import", "numpy.core._multiarray_umath",
+        "--hidden-import", "numpy.core.multiarray",
+        "--hidden-import", "numpy._core",
+        "--hidden-import", "numpy._core._multiarray_umath",
+        "--hidden-import", "numpy._core.multiarray",
+        "--hidden-import", "scipy",
+        "--hidden-import", "scipy.signal",
+        "--hidden-import", "scipy.spatial",
+        "--hidden-import", "scipy.spatial.distance",
+        "--hidden-import", "scipy.cluster",
+        "--hidden-import", "scipy.cluster.hierarchy",
+        "--hidden-import", "sklearn",
+        "--hidden-import", "sklearn.cluster",
+        "--hidden-import", "sklearn.utils",
+        "--hidden-import", "sklearn.neighbors",
+        "--hidden-import", "diarize",
+        "--hidden-import", "diarize.clustering",
+        "--hidden-import", "diarize.embeddings",
+        "--hidden-import", "diarize.vad",
+        "--hidden-import", "diarize.utils",
+        "--hidden-import", "wespeakerruntime",
     ])
 
     icon_file = ROOT / "resources" / ("icon.ico" if sys.platform == "win32" else "icon.png")
@@ -826,10 +853,7 @@ def main() -> None:
         *torch_binary_flags,
         *icon_flags,
         *exclude_flags,
-        "--hidden-import", "torch._C",
-        "--hidden-import", "torch.testing",
-        "--hidden-import", "torch.distributed",
-        "--hidden-import", "torch.distributed.rpc",
+        *collect_flags,
         str(ROOT / "radio_tv_story_segmenter_worker.py"),
     ])
 

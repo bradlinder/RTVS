@@ -18,6 +18,7 @@ if sys.platform == "win32":
     root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     dirs = [
         root,
+        root / "_internal",
         root / "torch" / "lib",
         root / "torch",
         root / "torchaudio" / "lib",
@@ -25,7 +26,24 @@ if sys.platform == "win32":
         root / "onnxruntime" / "capi",
         root / "sherpa_onnx" / "lib",
         root / "sherpa_onnx",
+        root / "numpy",
+        root / "numpy" / "core",
+        root / "numpy" / "_core",
+        root / "scipy",
+        root / "sklearn",
+        root / "wespeakerruntime",
     ]
+
+    # Dynamically scan and register all *.libs directory structures (numpy.libs, scipy.libs, etc.)
+    for search_base in (root, root / "_internal"):
+        if search_base.is_dir():
+            for lib_dir in search_base.glob("*.libs"):
+                if lib_dir.is_dir():
+                    dirs.append(lib_dir)
+            for lib_dir in search_base.glob("*/*.libs"):
+                if lib_dir.is_dir():
+                    dirs.append(lib_dir)
+
     paths = []
     for directory in dirs:
         try:

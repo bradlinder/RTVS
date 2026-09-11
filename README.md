@@ -149,6 +149,12 @@ Run_RadioTVSegmenter.bat
 
 ---
 
+## AI Studio Web Preview
+
+The web preview in Google AI Studio is configured to serve as the live, interactive **Changelog & Release Notes Viewer** for the project (sourced from `CHANGELOG.md`). It provides search, version filtering, collapsible release cards, and markdown copying capabilities for desktop application updates.
+
+---
+
 ## Third-Party Notices & License
 
 Radio & TV Story Segmenter is released under the MIT License.
