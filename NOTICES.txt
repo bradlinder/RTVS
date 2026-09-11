@@ -129,4 +129,10 @@ terms are reproduced below.
                  Copyright (c) Individual contributors.
    keyring:      License: MIT License
                  Copyright Jason R. Coombs and contributors.
+
+-------------------------------------------------------------------------------
+11. uv (Astral Software)
+   License: Dual-licensed under MIT License and Apache License, Version 2.0
+   Copyright (c) 2024 Astral Software Inc.
+   https://github.com/astral-sh/uv
 ===============================================================================

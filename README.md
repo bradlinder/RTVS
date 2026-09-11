@@ -98,20 +98,54 @@ Run_RadioTVSegmenter.bat
 
 ## Keyboard Shortcuts
 
-| Action | Windows / Linux | macOS |
-| --- | --- | --- |
-| Play / Pause | Space | Space |
-| Seek Forward / Backward | Right / Left | Right / Left |
-| Timeline Zoom | + / - | + / - |
-| Transcript Font Scale | Ctrl++ / Ctrl+- / Ctrl+0 | Cmd++ / Cmd+- / Cmd+0 |
-| New / Open Project | Ctrl+N / Ctrl+Shift+O | Cmd+N / Cmd+Shift+O |
-| Save Project | Ctrl+S | Cmd+S |
-| Export Dialog | Ctrl+E | Cmd+E |
-| Find and Replace | Ctrl+F | Cmd+F |
-| Toggle Timeline Panel | Alt+1 | Ctrl+Option+1 |
-| Toggle Transcript Panel | Alt+2 | Ctrl+Option+2 |
-| Toggle Stories Panel | Alt+3 | Ctrl+Option+3 |
-| Toggle History Panel | Alt+4 | Ctrl+Option+4 |
+| Category | Action | Windows / Linux | macOS |
+| --- | --- | --- | --- |
+| **Playback** | Play / Pause | `Space` | `Space` |
+| **Playback** | Seek Forward / Backward | `Right` / `Left` | `Right` / `Left` |
+| **Playback** | Seek to Start / End | `Home` / `End` | `Home` / `End` |
+| **Playback** | Timeline Zoom | `+` / `-` | `+` / `-` |
+| **Display** | Transcript Font Scale | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | `Cmd++` / `Cmd+-` / `Cmd+0` |
+| **File** | New Project | `Ctrl+N` | `Cmd+N` |
+| **File** | Open Media File | `Ctrl+O` | `Cmd+O` |
+| **File** | Open Document | `Ctrl+Alt+O` | `Cmd+Option+O` |
+| **File** | Open Project Session | `Ctrl+Shift+O` | `Cmd+Shift+O` |
+| **File** | Close Project | `Ctrl+W` | `Cmd+W` |
+| **File** | Save Project / Save As | `Ctrl+S` / `Ctrl+Shift+S` | `Cmd+S` / `Cmd+Shift+S` |
+| **File** | Export Dialog | `Ctrl+E` | `Cmd+E` |
+| **File** | Batch Processing | `Ctrl+Shift+B` | `Cmd+Shift+B` |
+| **File** | Exit Application | `Ctrl+Q` | `Cmd+Q` |
+| **Panels** | Toggle Timeline Panel | `Alt+1` | `Ctrl+Option+1` |
+| **Panels** | Toggle Transcript Panel | `Alt+2` | `Ctrl+Option+2` |
+| **Panels** | Toggle Stories Panel | `Alt+3` | `Ctrl+Option+3` |
+| **Panels** | Toggle Activity History Panel | `Alt+4` | `Ctrl+Option+4` |
+| **View** | Toggle Waveform Display | `Ctrl+Alt+W` | `Cmd+Option+W` |
+| **View** | Toggle Video Thumbnails | `Ctrl+Alt+T` | `Cmd+Option+T` |
+| **View** | Toggle Video Preview Window | `Ctrl+Shift+M` | `Cmd+Shift+M` |
+| **View** | Toggle Speaker Labels | `Ctrl+Alt+S` | `Cmd+Option+S` |
+| **View** | Toggle Timestamps | `Ctrl+Alt+I` | `Cmd+Option+I` |
+| **Edit** | Undo / Redo | `Ctrl+Z` / `Ctrl+Y` | `Cmd+Z` / `Cmd+Shift+Z` |
+| **Edit** | Find and Replace | `Ctrl+F` | `Cmd+F` |
+| **Edit** | Find Next Match | `Ctrl+G` | `Cmd+G` |
+| **Tools** | Transcribe Audio | `Ctrl+T` | `Cmd+T` |
+| **Tools** | Detect Speakers (Diarization) | `Ctrl+D` | `Cmd+D` |
+| **Tools** | Detect Stories | `Ctrl+Shift+A` | `Cmd+Shift+A` |
+| **Tools** | Translate Transcript | `Ctrl+Shift+L` | `Cmd+Shift+L` |
+| **Tools** | Multi-Stage Processing Pipeline | `Ctrl+R` | `Cmd+R` |
+| **Tools** | Batch Processing | `Ctrl+B` | `Cmd+B` |
+| **Tools** | Regenerate Waveform | `Ctrl+Shift+W` | `Cmd+Shift+W` |
+| **Tools** | Regenerate Video Thumbnails | `Ctrl+Shift+T` | `Cmd+Shift+T` |
+| **Tools** | Clear Temporary Cache | `Ctrl+Alt+C` | `Cmd+Option+C` |
+| **Tools** | Manage AI Models | `Ctrl+M` | `Cmd+M` |
+| **Tools** | Manage Plugins & Add-ons | `Ctrl+Shift+X` | `Cmd+Shift+X` |
+| **Settings** | Preferences | `Ctrl+P` | `Cmd+,` |
+| **Settings** | Customize Keyboard Shortcuts | `Ctrl+K` | `Cmd+K` |
+| **Settings** | GPU Acceleration Settings | `Ctrl+Alt+G` | `Cmd+Option+G` |
+| **Settings** | Glossary & Custom Vocabulary | `Ctrl+Shift+G` | `Cmd+Shift+G` |
+| **Settings** | Check for Updates | `Ctrl+U` | `Cmd+U` |
+| **Help** | Keyboard Shortcuts Reference | `F1` | `Cmd+?` |
+| **Help** | About Radio & TV Story Segmenter | `Shift+F1` | `Shift+F1` |
+| **Help** | Open Diagnostic Log Folder | `Ctrl+Shift+K` | `Cmd+Shift+K` |
+| **Help** | Third-Party Licenses | `Ctrl+Shift+F1` | `Cmd+Shift+F1` |
 
 ---
 
@@ -127,6 +161,7 @@ This application incorporates or interfaces with several open source libraries a
 * WeSpeaker & sherpa-onnx: Apache 2.0 License
 * onnxruntime: MIT License
 * Hugging Face Transformers & MarianMT (Translation Plugin): Apache 2.0 License
+* uv (Isolated Python & Dependency Packaging): MIT / Apache 2.0 License (Astral Software)
 * PySide6 / Qt 6: LGPL v3 / Commercial
 * scipy & scikit-learn: BSD 3-Clause License
 * cryptography & keyring: Apache 2.0 / PSF License

@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 
 class TranslationEnvSetupWorker(QObject):
     """Background worker that sets up the isolated translation runtime environment."""
-    progress = Signal(str)
+    progress = Signal(float, str)
     finished = Signal(object)  # None on success, error message (str) on failure
 
     def __init__(self, plugin_dir: Path | None = None):
@@ -49,9 +49,16 @@ class TranslationEnvSetupWorker(QObject):
         try:
             manager = _translation_runtime_manager()
 
-            def _on_progress(msg: str):
-                if not self._cancelled:
-                    self.progress.emit(msg)
+            def _on_progress(pct_or_msg, msg=""):
+                if self._cancelled:
+                    return
+                if isinstance(pct_or_msg, (int, float)):
+                    pct = float(pct_or_msg)
+                    text = str(msg)
+                else:
+                    pct = 0.0
+                    text = str(pct_or_msg)
+                self.progress.emit(pct, text)
 
             ok = manager.ensure_environment(
                 "translate",
@@ -281,9 +288,20 @@ class TranslationMixin:
         self._translation_env_qthread = None
         self._translation_env_worker = None
 
-    def _on_translation_env_progress(self, message: str):
-        self.log_activity(f"[TRANSLATION] {message}", mark_dirty=False)
-        self.set_processing_stage("Translation Runtime", message)
+    def _on_translation_env_progress(self, percent_or_msg, message: str = ""):
+        if isinstance(percent_or_msg, (int, float)):
+            pct = float(percent_or_msg)
+            msg = message or ""
+        else:
+            pct = 0.0
+            msg = str(percent_or_msg)
+        if msg:
+            now = time.monotonic()
+            last_log = getattr(self, "_last_translation_env_log_time", 0.0)
+            if now - last_log >= 2.0 or pct >= 100.0 or "error" in msg.lower() or "ready" in msg.lower() or "success" in msg.lower():
+                self._last_translation_env_log_time = now
+                self.log_activity(f"[TRANSLATION] {msg}", mark_dirty=False)
+        self.update_processing_progress(pct, msg)
 
     def stop_translation_worker(self, timeout_ms: int = 5000) -> bool:
         if getattr(self, "_translation_env_worker", None) is not None:
@@ -324,6 +342,22 @@ class TranslationMixin:
         manager = _translation_runtime_manager()
         plugin_dir = entry.parent if entry and entry.exists() else None
 
+        from_code = request.get("from_code", "en")
+        to_code = request.get("to_code", "es")
+        variant = request.get("model_variant") or request.get("variant") or "tiny"
+        is_install_only = bool(request.get("installation_only", False))
+        self._active_translation_from = from_code
+        self._active_translation_to = to_code
+        self._active_translation_variant = variant
+
+        # Check if model is already downloaded
+        needs_model = True
+        try:
+            worker_cls = _translation_worker_class()
+            needs_model = not worker_cls.model_is_installed(from_code, to_code, variant)
+        except Exception:
+            needs_model = True
+
         # Fast path: check if environment is already up-to-date on disk
         is_ready = False
         try:
@@ -332,13 +366,32 @@ class TranslationMixin:
         except Exception:
             is_ready = False
 
+        stages = []
+        if not is_ready:
+            stages.append(("runtime_env", "Translation Runtime", "Installing dependencies"))
+        if needs_model or is_install_only:
+            stages.append(("model_download", "Model Download", f"OPUS-MT-{variant} ({from_code.upper()} → {to_code.upper()})"))
+        if not is_install_only:
+            stages.append(("translation", "Translation", f"{from_code.upper()} → {to_code.upper()}"))
+
+        self._translation_pipeline_stages = stages
+
+        if len(stages) > 1:
+            self.pipeline_active = True
+            self.pipeline_total_stages = len(stages)
+            self.pipeline_current_stage_idx = 1
+            self.pipeline_queue = [s[0] for s in stages[1:]]
+            self.pipeline_start_monotonic = time.monotonic()
+
         if is_ready:
             python_exe = manager.get_executable("translate")
             if python_exe and Path(python_exe).exists():
+                if stages:
+                    self.set_processing_stage(stages[0][1], stages[0][2])
                 return self._launch_translation_process(request, on_finished, python_exe, entry)
 
         # First-run or update: provision environment asynchronously to keep UI completely responsive
-        self.set_processing_stage("Translation Runtime", "Preparing isolated translation environment (first run)…")
+        self.set_processing_stage("Translation Runtime", "Installing dependencies")
         self.log_activity("[TRANSLATION] Preparing isolated translation environment in background...")
         if hasattr(self, "cancel_button") and self.cancel_button is not None:
             self.cancel_button.show()
@@ -353,37 +406,62 @@ class TranslationMixin:
         self._translation_env_qthread.started.connect(self._translation_env_worker.run)
         self._translation_env_worker.progress.connect(self._on_translation_env_progress)
 
-        def _on_setup_finished(error):
-            self._cleanup_translation_env_thread()
-            if error:
-                self.log_activity(f"[TRANSLATION] Environment setup error: {error}", mark_dirty=False)
-                self._on_translation_error(error)
-                if on_finished:
-                    try:
-                        on_finished(-1, error, "")
-                    except Exception:
-                        pass
-                return
-
-            py_exe = manager.get_executable("translate")
-            if not py_exe or not Path(py_exe).exists():
-                err = "The isolated translation Python runtime is unavailable."
-                self._on_translation_error(err)
-                if on_finished:
-                    try:
-                        on_finished(-1, err, "")
-                    except Exception:
-                        pass
-                return
-
-            self._launch_translation_process(request, on_finished, py_exe, entry)
-
-        self._translation_env_worker.finished.connect(_on_setup_finished)
+        self._pending_translation_setup = (request, on_finished, entry)
+        self._translation_env_worker.finished.connect(self._on_translation_env_setup_finished)
         self._translation_env_thread = self._translation_env_qthread
         self._translation_env_qthread.start()
         return True
 
+    def _on_translation_env_setup_finished(self, error):
+        self._cleanup_translation_env_thread()
+        pending = getattr(self, "_pending_translation_setup", None)
+        self._pending_translation_setup = None
+        if not pending:
+            return
+        request, on_finished, entry = pending
+
+        if error:
+            self.log_activity(f"[TRANSLATION] Environment setup error: {error}", mark_dirty=False)
+            self._on_translation_error(error)
+            if on_finished:
+                try:
+                    on_finished(-1, error, "")
+                except Exception:
+                    pass
+            return
+
+        manager = _translation_runtime_manager()
+        py_exe = manager.get_executable("translate")
+        if not py_exe or not Path(py_exe).exists():
+            err = "The isolated translation Python runtime is unavailable."
+            self._on_translation_error(err)
+            if on_finished:
+                try:
+                    on_finished(-1, err, "")
+                except Exception:
+                    pass
+            return
+
+        # Advance to next stage in pipeline (e.g. Model Download or Translation)
+        if getattr(self, "pipeline_active", False) and getattr(self, "_translation_pipeline_stages", []):
+            next_stage = None
+            for idx, stage_info in enumerate(self._translation_pipeline_stages):
+                if stage_info[0] != "runtime_env":
+                    next_stage = stage_info
+                    self.pipeline_current_stage_idx = idx + 1
+                    self.pipeline_queue = [s[0] for s in self._translation_pipeline_stages[idx + 1:]]
+                    break
+            if next_stage:
+                self.set_processing_stage(next_stage[1], next_stage[2])
+                self.update_processing_progress(0, f"Starting {next_stage[1]}…")
+
+        self._launch_translation_process(request, on_finished, py_exe, entry)
+
     def _launch_translation_process(self, request: dict, on_finished, python_exe: str, entry: Path) -> bool:
+        from prs_shared import get_models_storage_dir
+        models_dir = str(get_models_storage_dir())
+        request["models_dir"] = models_dir
+
         fd, request_path = tempfile.mkstemp(prefix="rtvs_translate_", suffix=".json")
         os.close(fd)
         request_file = Path(request_path)
@@ -394,6 +472,8 @@ class TranslationMixin:
         proc_env.insert("KMP_DUPLICATE_LIB_OK", "TRUE")
         proc_env.insert("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
         proc_env.insert("TOKENIZERS_PARALLELISM", "false")
+        proc_env.insert("RTVS_MODELS_DIR", models_dir)
+        proc_env.insert("HF_HOME", str(Path(models_dir) / "huggingface"))
         proc.setProcessEnvironment(proc_env)
         proc.setProgram(python_exe)
         proc.setArguments([str(entry), str(request_file)])
@@ -501,6 +581,14 @@ class TranslationMixin:
 
     def _on_translation_progress(self, percent: float, message: str):
         """Handle progress updates from _translation_worker_class()."""
+        msg_lower = (message or "").lower()
+        if "translated" in msg_lower or "loading opus-mt" in msg_lower or "optimizing" in msg_lower:
+            if getattr(self, "pipeline_active", False) and getattr(self, "pipeline_current_stage_idx", 1) < getattr(self, "pipeline_total_stages", 1):
+                self.pipeline_current_stage_idx = getattr(self, "pipeline_total_stages", 1)
+                self.pipeline_queue = []
+                from_code = getattr(self, "_active_translation_from", "en")
+                to_code = getattr(self, "_active_translation_to", "es")
+                self.set_processing_stage("Translation", f"{from_code.upper()} → {to_code.upper()}")
         self.update_processing_progress(percent, message)
 
     def _on_translation_finished(self, translated_transcript: Any, translation_key: str):

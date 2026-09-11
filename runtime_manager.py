@@ -4,6 +4,10 @@ import json
 import shutil
 import logging
 import subprocess
+import time
+import re
+import queue
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -56,6 +60,125 @@ def kill_all_subprocesses():
                 except OSError:
                     pass
     _ACTIVE_SUBPROCESSES.clear()
+
+
+def _emit_progress(progress_cb, percent: float, message: str):
+    """Safely emit progress supporting both 1-argument (message) and 2-argument (percent, message) callbacks."""
+    if not progress_cb:
+        return
+    pct = max(0.0, min(100.0, float(percent)))
+    try:
+        progress_cb(pct, message)
+    except TypeError:
+        try:
+            progress_cb(message)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _run_pip_with_progress(
+    cmd: list[str],
+    feature_name: str,
+    packages: list[str],
+    progress_cb=None,
+    env=None,
+    creationflags=0,
+    start_pct: float = 28.0,
+    end_pct: float = 94.0,
+) -> tuple[bool, str]:
+    """Execute pip or uv pip with real-time output monitoring and progress reporting."""
+    total_pkgs = max(1, len(packages))
+    detected_pkgs = set()
+    output_lines = []
+    start_time = time.monotonic()
+    active_pkg = ""
+
+    _emit_progress(progress_cb, start_pct, f"Installing dependencies for '{feature_name}'…")
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=env,
+            creationflags=creationflags,
+        )
+        register_process(proc)
+    except Exception as exc:
+        return False, str(exc)
+
+    line_queue: queue.Queue = queue.Queue()
+
+    def reader():
+        try:
+            for line in iter(proc.stdout.readline, ''):
+                line_queue.put(line)
+        except Exception:
+            pass
+        finally:
+            line_queue.put(None)
+
+    t = threading.Thread(target=reader, daemon=True)
+    t.start()
+
+    pkg_pattern = re.compile(
+        r'(?:Collecting|Downloading|Installing|Prepared|Resolved|Installed|Using cached)\s+([a-zA-Z0-9_\-\.]+)',
+        re.IGNORECASE
+    )
+
+    last_update_monotonic = time.monotonic()
+
+    while True:
+        try:
+            line = line_queue.get(timeout=0.4)
+        except queue.Empty:
+            line = ""
+
+        now = time.monotonic()
+        elapsed = now - start_time
+
+        if line is None:
+            break
+
+        if line:
+            clean = line.strip()
+            output_lines.append(clean)
+            m = pkg_pattern.search(clean)
+            if m:
+                raw_found = m.group(1).split("=")[0].split("<")[0].split(">")[0].strip()
+                if len(raw_found) > 1 and not raw_found.isdigit():
+                    active_pkg = raw_found
+                    detected_pkgs.add(raw_found.lower())
+
+        if line or (now - last_update_monotonic >= 0.8):
+            last_update_monotonic = now
+            # Smooth asymptotic curve: ~50% at 50s, ~75% at 100s, ~87% at 150s
+            time_factor = 1.0 - (0.5 ** (elapsed / 50.0))
+            pkg_factor = min(1.0, len(detected_pkgs) / float(total_pkgs))
+            combined_ratio = max(pkg_factor * 0.92, time_factor * 0.94)
+            current_pct = start_pct + (end_pct - start_pct) * min(0.96, combined_ratio)
+
+            if active_pkg:
+                msg = f"Installing dependencies: {active_pkg} ({min(len(detected_pkgs), total_pkgs)}/{total_pkgs})…"
+            else:
+                msg = f"Installing dependencies for '{feature_name}'…"
+
+            _emit_progress(progress_cb, current_pct, msg)
+
+    proc.wait()
+    unregister_process(proc)
+
+    full_output = "\n".join(output_lines)
+    if proc.returncode != 0:
+        return False, full_output
+
+    _emit_progress(progress_cb, end_pct, f"Dependencies installed successfully for '{feature_name}'.")
+    return True, full_output
+
 
 
 # Feature configuration matrix with explicit versioning and python targets
@@ -382,11 +505,9 @@ class RuntimeManager:
         archive_path = self.runtimes_dir / "python_standalone.tar.gz"
 
         try:
-            if progress_cb:
-                progress_cb(f"Downloading standalone Python {target_version}…")
+            _emit_progress(progress_cb, 8.0, f"Downloading standalone Python {target_version}…")
             urllib.request.urlretrieve(url, archive_path)
-            if progress_cb:
-                progress_cb(f"Extracting standalone Python {target_version}…")
+            _emit_progress(progress_cb, 14.0, f"Extracting standalone Python {target_version}…")
             with tarfile.open(archive_path, "r:*") as tar:
                 tar.extractall(path=dest_dir)
 
@@ -414,8 +535,7 @@ class RuntimeManager:
 
         if uv and uv.is_file():
             try:
-                if progress_cb:
-                    progress_cb(f"Preparing private Python {target_version} runtime…")
+                _emit_progress(progress_cb, 10.0, f"Preparing Python {target_version} runtime…")
                 # Run uv python install with copy link mode
                 res = subprocess.run([str(uv), "python", "install", target_version],
                                      env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -581,13 +701,13 @@ class RuntimeManager:
             return False
 
         if not force_rebuild and self.is_env_up_to_date(feature_name):
-            if progress_cb:
-                progress_cb(f"Runtime '{feature_name}' is ready and up to date.")
+            _emit_progress(progress_cb, 100.0, f"Runtime '{feature_name}' is ready and up to date.")
             return True
 
         env_dir = self.get_env_dir(feature_name)
         config = ENV_CONFIGS.get(feature_name, {})
         target_ver = config.get("python_version", "3.12")
+        _emit_progress(progress_cb, 5.0, f"Resolving Python {target_ver} for '{feature_name}'…")
         python_binary = self.resolve_target_python(target_ver)
         if not python_binary:
             python_binary = self.ensure_managed_python(target_ver, progress_cb=progress_cb)
@@ -595,22 +715,18 @@ class RuntimeManager:
             msg = f"A compatible Python {target_ver} runtime could not be located or provisioned for '{feature_name}'."
             self._last_error = self._last_error or msg
             logger.error(msg)
-            if progress_cb:
-                progress_cb(msg)
+            _emit_progress(progress_cb, 0.0, msg)
             return False
 
         if env_dir.exists():
-            if progress_cb:
-                progress_cb(f"Upgrading runtime '{feature_name}' (removing outdated environment)...")
+            _emit_progress(progress_cb, 12.0, f"Upgrading runtime '{feature_name}' (removing outdated environment)…")
             if not self.remove_environment(feature_name):
                 self._last_error = f"Cannot recreate runtime '{feature_name}' because the existing environment directory at {env_dir} is locked by another process."
                 logger.error(self._last_error)
-                if progress_cb:
-                    progress_cb(self._last_error)
+                _emit_progress(progress_cb, 0.0, self._last_error)
                 return False
 
-        if progress_cb:
-            progress_cb(f"Creating environment for '{feature_name}' using {python_binary}...")
+        _emit_progress(progress_cb, 18.0, f"Preparing environment for '{feature_name}'…")
 
         packages = self.get_plugin_requirements(feature_name, plugin_dir=plugin_dir)
         extra_index_url = config.get("extra_index_url")
@@ -627,38 +743,37 @@ class RuntimeManager:
         # Attempt 1: Fast installation via uv
         if uv and uv.is_file():
             try:
+                _emit_progress(progress_cb, 22.0, f"Creating isolated environment for '{feature_name}'…")
                 res_venv = subprocess.run(
                     [str(uv), "venv", "--python", python_binary, "--link-mode", "copy", str(env_dir)],
                     check=True, env=uv_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     text=True, creationflags=creationflags
                 )
-                if progress_cb:
-                    progress_cb(f"Installing dependencies for '{feature_name}'…")
                 cmd_pip = [str(uv), "pip", "install", "--python", env_py, "--link-mode", "copy", "--no-cache", "--upgrade"]
                 if extra_index_url:
                     cmd_pip += ["--extra-index-url", extra_index_url]
                 cmd_pip += packages
-                subprocess.run(
-                    cmd_pip, check=True, env=uv_env, stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE, text=True, creationflags=creationflags
+                ok, err_msg = _run_pip_with_progress(
+                    cmd_pip, feature_name, packages, progress_cb=progress_cb,
+                    env=uv_env, creationflags=creationflags, start_pct=28.0, end_pct=94.0
                 )
+                if not ok:
+                    raise RuntimeError(err_msg)
                 success = True
-            except (subprocess.CalledProcessError, Exception) as uv_exc:
-                err_msg = str(uv_exc.stderr if hasattr(uv_exc, 'stderr') and uv_exc.stderr else uv_exc)
+            except Exception as uv_exc:
+                err_msg = str(uv_exc)
                 logger.warning(
                     f"Fast uv installation failed for '{feature_name}' ({err_msg}). "
                     "Switching to resilient standard Python/pip fallback without junctions..."
                 )
-                if progress_cb:
-                    progress_cb(f"Configuring environment via standalone Python fallback...")
+                _emit_progress(progress_cb, 22.0, f"Configuring environment via standalone Python fallback…")
                 self.remove_environment(feature_name)
                 success = False
 
         # Attempt 2: Resilient standalone python -m venv --copies + pip fallback
         if not success:
             try:
-                if progress_cb:
-                    progress_cb(f"Creating isolated environment (direct copy mode)...")
+                _emit_progress(progress_cb, 22.0, f"Creating isolated environment (direct copy mode)…")
                 # Create venv using native python with --copies to eliminate Windows NTFS symlink/junction mount point issues
                 subprocess.run(
                     [python_binary, "-m", "venv", "--copies", str(env_dir)],
@@ -668,46 +783,36 @@ class RuntimeManager:
                 env_py = str(self._get_raw_executable(feature_name))
 
                 # Ensure pip is present in the isolated virtual environment
-                if progress_cb:
-                    progress_cb(f"Verifying package manager for '{feature_name}'…")
+                _emit_progress(progress_cb, 26.0, f"Verifying package manager for '{feature_name}'…")
                 subprocess.run(
                     [env_py, "-m", "ensurepip", "--upgrade"],
                     check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     creationflags=creationflags
                 )
 
-                if progress_cb:
-                    progress_cb(f"Installing dependencies for '{feature_name}'…")
                 cmd_pip = [env_py, "-m", "pip", "install", "--no-cache-dir", "--upgrade"]
                 if extra_index_url:
                     cmd_pip += ["--extra-index-url", extra_index_url]
                 cmd_pip += packages
-                subprocess.run(
-                    cmd_pip, check=True, stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE, text=True, creationflags=creationflags
+                ok, err_msg = _run_pip_with_progress(
+                    cmd_pip, feature_name, packages, progress_cb=progress_cb,
+                    env=None, creationflags=creationflags, start_pct=28.0, end_pct=94.0
                 )
+                if not ok:
+                    raise RuntimeError(err_msg)
                 success = True
-            except subprocess.CalledProcessError as cpe:
-                err_details = (cpe.stderr or cpe.stdout or str(cpe)).strip()
-                self._last_error = f"Installation command failed (exit code {cpe.returncode}):\n{err_details}"
-                logger.error(f"Failed to prepare environment '{feature_name}': {self._last_error}")
-                if progress_cb:
-                    progress_cb(f"Error setting up '{feature_name}': {self._last_error}")
-                self.remove_environment(feature_name)
-                return False
             except Exception as e:
                 self._last_error = str(e)
                 logger.error(f"Failed to prepare environment '{feature_name}': {e}")
-                if progress_cb:
-                    progress_cb(f"Error setting up '{feature_name}': {e}")
+                _emit_progress(progress_cb, 0.0, f"Error setting up '{feature_name}': {e}")
                 self.remove_environment(feature_name)
                 return False
 
         if success:
             # Record manifest for future version checks
+            _emit_progress(progress_cb, 96.0, f"Verifying runtime manifest for '{feature_name}'…")
             self.write_manifest(feature_name, python_binary, packages=packages)
-            if progress_cb:
-                progress_cb(f"Runtime '{feature_name}' setup complete.")
+            _emit_progress(progress_cb, 100.0, f"Runtime '{feature_name}' setup complete.")
             return True
 
         return False

@@ -23,6 +23,8 @@ def main():
         emit({"type":"error","message":"Missing translation request JSON."}); return 2
     with open(sys.argv[1], "r", encoding="utf-8") as f:
         req=json.load(f)
+    if req.get("models_dir"):
+        os.environ["RTVS_MODELS_DIR"] = str(req.get("models_dir"))
     worker=TranslationWorker(
         segments=req.get("segments", []),
         from_code=req.get("from_code","en"),
@@ -33,6 +35,7 @@ def main():
         transcript=req.get("transcript"),
         variant=req.get("variant"),
         device=req.get("device","cpu"),
+        models_dir=req.get("models_dir"),
     )
     worker.progress.connect(lambda p,m: emit({"type":"progress","percent":p,"message":m}))
     worker.finished.connect(lambda result,key: emit({"type":"finished","result":result,"key":key}))

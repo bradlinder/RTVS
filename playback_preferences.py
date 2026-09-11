@@ -14,6 +14,7 @@ class RestoreSelectedSettingsDialog(QDialog):
         ("general_appearance", "Theme & Startup Mode", "Theme mode (Dark) and startup project behavior (Open last project)."),
         ("general_project_dirs", "Default Project Directory & Bundling", "Default projects folder, project subfolders (Transcripts/Media), and media copy settings."),
         ("general_autosave", "Auto-save Interval", "Automatic project save interval (5 minutes)."),
+        ("keyboard_shortcuts", "Keyboard Shortcuts", "Custom keyboard shortcut assignments for all menu actions, tools, navigation, and editing commands."),
         ("audio_hardware", "Audio Hardware & Volume", "Audio output device (System Default) and default volume (100%)."),
         ("software_updates", "Software Updates & Repository", "Automatic update checks (Enabled) and official GitHub repository."),
         ("ai_models", "AI Models & Storage Directory", "Whisper speech recognition model (small, beam size 5), translation model (tiny), and models storage folder."),
@@ -469,7 +470,11 @@ class PlaybackPreferencesMixin:
 
     def _get_stage_estimated_duration(self, stage_key: str) -> float:
         media_dur = getattr(self, "duration", 0) or 180.0
-        if stage_key == "transcription":
+        if "runtime" in stage_key or "env" in stage_key or "depend" in stage_key:
+            return 120.0
+        elif "model" in stage_key or "download" in stage_key:
+            return 90.0
+        elif stage_key == "transcription":
             return max(8.0, media_dur * 0.12)
         elif stage_key == "diarization":
             return max(8.0, media_dur * 0.15)
@@ -478,8 +483,6 @@ class PlaybackPreferencesMixin:
         elif stage_key == "translation":
             num_segs = len(getattr(self, "transcript", {}).get("segments", [])) if getattr(self, "transcript", None) else 50
             return max(5.0, num_segs * 0.08)
-        elif "model" in stage_key or "download" in stage_key:
-            return 120.0
         return 15.0
 
     def calculate_processing_eta(self, percent: float) -> tuple[float, float, str]:
@@ -493,12 +496,16 @@ class PlaybackPreferencesMixin:
         
         if percent >= 2.0:
             stage_total_est = elapsed / (percent / 100.0)
-            if percent < 10.0:
-                weight = percent / 10.0
-                stage_total_est = (1.0 - weight) * stage_base_est + weight * stage_total_est
-            stage_remaining = max(0.0, stage_total_est - elapsed)
+            if percent < 15.0:
+                weight = percent / 15.0
+                baseline = max(stage_base_est, elapsed * 1.2)
+                stage_total_est = (1.0 - weight) * baseline + weight * stage_total_est
+            stage_remaining = max(1.0, stage_total_est - elapsed)
         else:
-            stage_remaining = max(1.0, stage_base_est - elapsed)
+            if elapsed >= stage_base_est:
+                stage_remaining = max(15.0, stage_base_est * 0.35)
+            else:
+                stage_remaining = max(1.0, stage_base_est - elapsed)
 
         is_pipeline = getattr(self, "pipeline_active", False) and getattr(self, "pipeline_total_stages", 0) > 1
         
@@ -519,7 +526,9 @@ class PlaybackPreferencesMixin:
             return
         if stage:
             stage_lower = stage.lower()
-            if "model" in stage_lower or "download" in stage_lower:
+            if "runtime" in stage_lower or "environment" in stage_lower or "depend" in stage_lower:
+                stage_key = "runtime_env"
+            elif "model" in stage_lower or "download" in stage_lower:
                 stage_key = "model_download"
             elif "transcri" in stage_lower:
                 stage_key = "transcription"
@@ -546,7 +555,9 @@ class PlaybackPreferencesMixin:
             else:
                 total = getattr(self, "pipeline_total_stages", 1)
                 queue_len = len(getattr(self, "pipeline_queue", []))
-                self.pipeline_current_stage_idx = max(1, total - queue_len)
+                calc_idx = max(1, total - queue_len)
+                curr_idx = getattr(self, "pipeline_current_stage_idx", 1)
+                self.pipeline_current_stage_idx = max(curr_idx, calc_idx)
                 if not getattr(self, "pipeline_start_monotonic", None):
                     self.pipeline_start_monotonic = self.stage_start_monotonic
 
@@ -941,6 +952,23 @@ class PlaybackPreferencesMixin:
             if "autosave_spin" in lw and lw["autosave_spin"]:
                 lw["autosave_spin"].setValue(5)
 
+        # Keyboard Shortcuts
+        if "keyboard_shortcuts" in selected_set:
+            if hasattr(self, "shortcuts_manager") and self.shortcuts_manager:
+                self.shortcuts_manager.reset_all()
+                self.shortcuts_manager.save()
+                self.shortcuts_manager.apply_to_window(self)
+            else:
+                try:
+                    from PySide6.QtCore import QSettings
+                    sc_settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
+                    sc_settings.remove("keyboard_shortcuts")
+                    sc_settings.sync()
+                except Exception:
+                    pass
+            if "page_shortcuts" in lw and lw["page_shortcuts"]:
+                lw["page_shortcuts"].revert_changes()
+
         # 4. Audio Hardware
         if "audio_hardware" in selected_set:
             self.settings_store.setValue("audio_output_device", "System Default")
@@ -1201,7 +1229,7 @@ class PlaybackPreferencesMixin:
         # Left category tree / list
         cat_list = QListWidget(dialog)
         cat_list.setFixedWidth(160)
-        categories = ["General", "Audio Hardware", "Updates & GitHub", "AI Models", "Playback & Timeline", "Detection", "Batch Processing"]
+        categories = ["General", "Keyboard Shortcuts", "Audio Hardware", "Updates & GitHub", "AI Models", "Playback & Timeline", "Detection", "Batch Processing"]
         show_wp = hasattr(self, "plugin_manager") and self.plugin_manager.is_plugin_enabled("wordpress")
         show_yt = hasattr(self, "plugin_manager") and self.plugin_manager.is_plugin_enabled("youtube")
         if show_wp:
@@ -1305,7 +1333,16 @@ class PlaybackPreferencesMixin:
         gen_layout.addStretch()
         stack.addWidget(page_general)
 
-        # 2. Audio Hardware Page
+        # 2. Keyboard Shortcuts Page
+        if not hasattr(self, "shortcuts_manager") or not self.shortcuts_manager:
+            from shortcuts_manager import ShortcutsManager
+            self.shortcuts_manager = ShortcutsManager(getattr(self, "settings_store", None))
+
+        from shortcuts_manager import KeyboardShortcutsPage
+        page_shortcuts = KeyboardShortcutsPage(self.shortcuts_manager, parent_window=self)
+        stack.addWidget(page_shortcuts)
+
+        # 3. Audio Hardware Page
         page_audio = QWidget()
         audio_layout = QVBoxLayout(page_audio)
         audio_form = QFormLayout()
@@ -1878,7 +1915,15 @@ class PlaybackPreferencesMixin:
         cat_list.currentRowChanged.connect(stack.setCurrentIndex)
         aliases = {
             "general": "general",
+            "shortcuts": "keyboard shortcuts",
+            "shortcut": "keyboard shortcuts",
+            "keyboard": "keyboard shortcuts",
+            "keys": "keyboard shortcuts",
+            "hotkeys": "keyboard shortcuts",
+            "key": "keyboard shortcuts",
+            "keyboard shortcuts": "keyboard shortcuts",
             "audio": "audio hardware",
+            "sound": "audio hardware",
             "updates": "updates & github",
             "github": "updates & github",
             "models": "ai models",
@@ -1903,6 +1948,7 @@ class PlaybackPreferencesMixin:
 
         # Dialog bottom bar
         live_widgets = {
+            "page_shortcuts": page_shortcuts,
             "theme_combo": theme_combo,
             "startup_combo": startup_combo,
             "proj_dir_edit": proj_dir_edit,
@@ -1971,6 +2017,12 @@ class PlaybackPreferencesMixin:
         restore_sel_btn.clicked.connect(_open_restore_selected_dialog)
 
         def _save_preferences(*args, close_dialog=True):
+            # Save Keyboard Shortcuts
+            if page_shortcuts is not None:
+                page_shortcuts.save_shortcuts()
+                if hasattr(self, "shortcuts_manager") and self.shortcuts_manager:
+                    self.shortcuts_manager.apply_to_window(self)
+
             # Save General
             new_theme = theme_combo.currentText()
             self.settings_store.setValue("theme_mode", new_theme)
@@ -2274,7 +2326,19 @@ class PlaybackPreferencesMixin:
                             event.accept()
                             return True
 
-            if key == Qt.Key.Key_Space:
+            # Play / Pause shortcut check (default Space, or custom user assignment)
+            play_seq = "Space"
+            if hasattr(self, "shortcuts_manager") and self.shortcuts_manager:
+                play_seq = self.shortcuts_manager.get_current_shortcut("play_pause") or "Space"
+
+            is_play_key = False
+            if play_seq.lower() in ("space", ""):
+                is_play_key = (key == Qt.Key.Key_Space and not event.modifiers())
+            elif play_seq and play_seq != "None":
+                from PySide6.QtGui import QKeySequence
+                is_play_key = (QKeySequence(int(event.modifiers()) | key) == QKeySequence(play_seq))
+
+            if is_play_key:
                 focused_widget = QApplication.focusWidget()
                 if focused_widget and isinstance(focused_widget, QLineEdit):
                     return super().eventFilter(watched, event)

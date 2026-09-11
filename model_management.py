@@ -677,8 +677,13 @@ class ModelManagementMixin:
         else:
             self.log_activity(f"[MODELS] {model_name} installed and verified.", mark_dirty=False)
             self.refresh_whisper_model_chooser()
+            if hasattr(self, "refresh_translation_model_chooser"):
+                try:
+                    self.refresh_translation_model_chooser()
+                except Exception:
+                    pass
             if dialog is not None:
-                QMessageBox.information(dialog, "Model Ready", f"Whisper '{model_name}' is installed and ready for offline use.")
+                QMessageBox.information(dialog, "Model Ready", f"Model '{model_name}' is installed and ready for offline use.")
 
         if dialog is not None:
             dialog.refresh_models()

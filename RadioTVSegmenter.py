@@ -203,6 +203,8 @@ class MainWindow(
 
         # Initialize persistent settings before any component that reads them.
         self.settings_store = QSettings(INTERNAL_APP_ID, INTERNAL_APP_ID)
+        from shortcuts_manager import ShortcutsManager
+        self.shortcuts_manager = ShortcutsManager(self.settings_store)
         self.default_project_directory = str(self.settings_store.value("default_project_directory", "") or "")
         self.timeline_show_waveform = str(self.settings_store.value("timeline_show_waveform", "true")).lower() in {"1", "true", "yes"}
         self.timeline_show_thumbnails = str(self.settings_store.value("timeline_show_thumbnails", "true")).lower() in {"1", "true", "yes"}
@@ -259,7 +261,8 @@ class MainWindow(
         self._load_user_preferences()
         QTimer.singleShot(150, self.restore_last_opened)
 
-        self.shortcut_find_next = QShortcut(platform_seq("Ctrl+G"), self)
+        find_next_key = self.shortcuts_manager.get_current_shortcut("find_next")
+        self.shortcut_find_next = QShortcut(platform_seq(find_next_key), self)
         self.shortcut_find_next.activated.connect(self.trigger_find_next)
 
         self.log_activity("[SYSTEM] Application initialized.")

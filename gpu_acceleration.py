@@ -13,7 +13,7 @@ from runtime_manager import RuntimeManager, detect_nvidia_gpu
 
 
 class GpuAccelerationInstallWorker(QObject):
-    progress = Signal(str)
+    progress = Signal(float, str)
     finished = Signal(object)  # error message (str) or None on success
 
     def __init__(self, force_rebuild=False):
@@ -24,10 +24,17 @@ class GpuAccelerationInstallWorker(QObject):
         error = None
         try:
             runtime_mgr = RuntimeManager()
+
+            def _on_progress(pct_or_msg, msg=""):
+                if isinstance(pct_or_msg, (int, float)):
+                    self.progress.emit(float(pct_or_msg), str(msg))
+                else:
+                    self.progress.emit(0.0, str(pct_or_msg))
+
             ok = runtime_mgr.ensure_environment(
                 "gpu_transcribe",
                 force_rebuild=self.force_rebuild,
-                progress_cb=lambda msg: self.progress.emit(msg),
+                progress_cb=_on_progress,
             )
             if not ok:
                 error = "The GPU acceleration environment could not be created. See the diagnostic log for details."
@@ -189,9 +196,16 @@ class GpuAccelerationMixin:
         self._gpu_install_thread = self._gpu_install_qthread
         self._gpu_install_qthread.start()
 
-    def _on_gpu_install_progress(self, message):
-        self.log_activity(f"[GPU] {message}", mark_dirty=False)
-        self.set_processing_stage("GPU Acceleration", message)
+    def _on_gpu_install_progress(self, percent_or_msg, message=""):
+        if isinstance(percent_or_msg, (int, float)):
+            pct = float(percent_or_msg)
+            msg = message or ""
+        else:
+            pct = 0.0
+            msg = str(percent_or_msg)
+        if msg:
+            self.log_activity(f"[GPU] {msg}", mark_dirty=False)
+        self.update_processing_progress(pct, msg)
 
     def _on_gpu_install_finished(self, error):
         self._gpu_install_error = error
@@ -205,6 +219,7 @@ class GpuAccelerationMixin:
         self.progress.hide()
         self.set_processing_stage(None)
 
+        error = getattr(self, "_gpu_install_error", None)
         if error:
             self.log_activity(f"[GPU] Install failed: {error}", mark_dirty=False)
             QMessageBox.critical(self, "GPU Acceleration", f"Could not install GPU acceleration:\n\n{error}")

@@ -399,6 +399,9 @@ class UiLayoutMixin:
 
         # ==========================================
         # File Menu
+        # NOTE FOR FUTURE MENU ADDITIONS: Every action added to any menu MUST have an explicit
+        # keyboard shortcut assigned via platform_seq(...) or QKeySequence, and MUST be documented
+        # in show_shortcuts_dialog() and the README.
         # ==========================================
         file_menu = menubar.addMenu("&File")
 
@@ -406,10 +409,13 @@ class UiLayoutMixin:
         open_media_act = QAction("&Open Media...", self)
         open_media_act.setShortcut(QKeySequence.Open)
         open_media_act.triggered.connect(self.open_media)
+        self.open_media_action = open_media_act
         file_menu.addAction(open_media_act)
 
         open_doc_act = QAction("Open &Document...", self)
+        open_doc_act.setShortcut(platform_seq("Ctrl+Alt+O"))
         open_doc_act.triggered.connect(self.open_document)
+        self.open_doc_action = open_doc_act
         file_menu.addAction(open_doc_act)
 
         file_menu.addSeparator()
@@ -418,11 +424,13 @@ class UiLayoutMixin:
         new_proj_act = QAction("&New Project", self)
         new_proj_act.setShortcut(QKeySequence.New)
         new_proj_act.triggered.connect(self.new_project)
+        self.new_proj_action = new_proj_act
         file_menu.addAction(new_proj_act)
 
         open_proj_act = QAction("Open &Project...", self)
         open_proj_act.setShortcut(platform_seq("Ctrl+Shift+O"))
         open_proj_act.triggered.connect(self.open_project_dialog)
+        self.open_proj_action = open_proj_act
         file_menu.addAction(open_proj_act)
 
         self.recent_menu = file_menu.addMenu("Recent Projects")
@@ -431,6 +439,7 @@ class UiLayoutMixin:
         close_proj_act = QAction("&Close Project", self)
         close_proj_act.setShortcut(QKeySequence.Close)
         close_proj_act.triggered.connect(self.close_project)
+        self.close_proj_action = close_proj_act
         file_menu.addAction(close_proj_act)
 
         file_menu.addSeparator()
@@ -452,11 +461,13 @@ class UiLayoutMixin:
         export_act = QAction("&Export...", self)
         export_act.setShortcut(platform_seq("Ctrl+E"))
         export_act.triggered.connect(self.open_unified_export_dialog)
+        self.export_action = export_act
         file_menu.addAction(export_act)
 
         batch_act = QAction("&Batch Processing...", self)
         batch_act.setShortcut(platform_seq("Ctrl+Shift+B"))
         batch_act.triggered.connect(self.open_batch_processing_dialog)
+        self.batch_file_action = batch_act
         file_menu.addAction(batch_act)
 
         self.plugins_export_menu = file_menu.addMenu("Publishing & Plugins")
@@ -467,6 +478,7 @@ class UiLayoutMixin:
         exit_act = QAction("E&xit", self)
         exit_act.setShortcut(QKeySequence.Quit)
         exit_act.triggered.connect(self.close)
+        self.exit_action = exit_act
         file_menu.addAction(exit_act)
 
         # ==========================================
@@ -487,6 +499,7 @@ class UiLayoutMixin:
         find_act = QAction("&Find and Replace...", self)
         find_act.setShortcut(QKeySequence.Find)
         find_act.triggered.connect(self.open_find_dialog)
+        self.find_action = find_act
         edit_menu.addAction(find_act)
 
         # ==========================================
@@ -632,16 +645,19 @@ class UiLayoutMixin:
         tools_menu.addSeparator()
 
         self.regen_waveform_action = QAction("&Regenerate Waveform", self)
+        self.regen_waveform_action.setShortcut(platform_seq("Ctrl+Shift+W"))
         self.regen_waveform_action.setEnabled(False)
         self.regen_waveform_action.triggered.connect(self.regenerate_waveform)
         tools_menu.addAction(self.regen_waveform_action)
 
         self.regen_thumbnails_action = QAction("Regenerate Video &Thumbnails", self)
+        self.regen_thumbnails_action.setShortcut(platform_seq("Ctrl+Shift+T"))
         self.regen_thumbnails_action.setEnabled(False)
         self.regen_thumbnails_action.triggered.connect(self.regenerate_video_thumbnails)
         tools_menu.addAction(self.regen_thumbnails_action)
 
         self.clear_cache_action = QAction("&Clear Temporary Cache...", self)
+        self.clear_cache_action.setShortcut(platform_seq("Ctrl+Alt+C"))
         self.clear_cache_action.triggered.connect(self.open_clear_cache_dialog)
         tools_menu.addAction(self.clear_cache_action)
 
@@ -654,10 +670,11 @@ class UiLayoutMixin:
         tools_menu.addAction(self.manage_models_action)
 
         self.manage_plugins_action = QAction("&Manage Plugins && Add-ons...", self)
+        self.manage_plugins_action.setShortcut(platform_seq("Ctrl+Shift+X"))
         self.manage_plugins_action.triggered.connect(self.open_plugins_manager)
         tools_menu.addAction(self.manage_plugins_action)
 
-       # ==========================================
+        # ==========================================
         # Settings Menu
         # ==========================================
         settings_menu = menubar.addMenu("&Settings")
@@ -666,22 +683,32 @@ class UiLayoutMixin:
         # Ctrl+P on Windows/Linux, Cmd+P on macOS (platform_seq automatically adapts Meta/Ctrl)
         pref_act.setShortcut(platform_seq("Ctrl+P"))
         pref_act.triggered.connect(self.open_preferences_dialog)
+        self.pref_action = pref_act
         settings_menu.addAction(pref_act)
 
+        shortcuts_pref_act = QAction("Customize &Keyboard Shortcuts...", self)
+        shortcuts_pref_act.setShortcut(platform_seq("Ctrl+K"))
+        shortcuts_pref_act.triggered.connect(lambda: self.open_preferences_dialog(initial_category="Keyboard Shortcuts"))
+        self.shortcuts_pref_action = shortcuts_pref_act
+        settings_menu.addAction(shortcuts_pref_act)
+
         clear_cache_settings_act = QAction("Clear &Temporary Cache...", self)
+        clear_cache_settings_act.setShortcut(platform_seq("Ctrl+Alt+C"))
         clear_cache_settings_act.triggered.connect(self.open_clear_cache_dialog)
         settings_menu.addAction(clear_cache_settings_act)
 
         settings_menu.addAction(self.manage_models_action)
 
         gpu_act = QAction("&GPU Acceleration Settings...", self)
-        gpu_act.setShortcut(platform_seq("Ctrl+G"))
+        gpu_act.setShortcut(platform_seq("Ctrl+Alt+G"))
         gpu_act.triggered.connect(self.open_gpu_acceleration_settings)
+        self.gpu_action = gpu_act
         settings_menu.addAction(gpu_act)
 
         glossary_act = QAction("&Glossary & Custom Vocabulary...", self)
         glossary_act.setShortcut(platform_seq("Ctrl+Shift+G"))
         glossary_act.triggered.connect(self.open_glossary_dialog)
+        self.glossary_action = glossary_act
         settings_menu.addAction(glossary_act)
 
         # Language submenu in Settings menu
@@ -706,6 +733,7 @@ class UiLayoutMixin:
         update_act = QAction("Check for &Updates...", self)
         update_act.setShortcut(platform_seq("Ctrl+U"))
         update_act.triggered.connect(self.check_for_updates)
+        self.update_action = update_act
         settings_menu.addAction(update_act)
 
         # ==========================================
@@ -717,21 +745,38 @@ class UiLayoutMixin:
         # HelpContents maps to F1 on Windows/Linux, and Cmd+? on macOS (avoiding brightness key conflict)
         shortcuts_act.setShortcut(QKeySequence.HelpContents)
         shortcuts_act.triggered.connect(self.show_shortcuts_dialog)
+        self.shortcuts_help_action = shortcuts_act
         help_menu.addAction(shortcuts_act)
 
         help_menu.addSeparator()
 
         about_act = QAction("&About Radio & TV Story Segmenter", self)
+        about_act.setShortcut(platform_seq("Shift+F1"))
         about_act.triggered.connect(self.show_about_dialog)
+        self.about_action = about_act
         help_menu.addAction(about_act)
 
         log_act = QAction("Open &Diagnostic Log Folder", self)
+        log_act.setShortcut(platform_seq("Ctrl+Shift+K"))
         log_act.triggered.connect(self.open_diagnostic_log_folder)
+        self.log_action = log_act
         help_menu.addAction(log_act)
 
         licenses_act = QAction("&Third-Party Licenses", self)
+        licenses_act.setShortcut(platform_seq("Ctrl+Shift+F1"))
         licenses_act.triggered.connect(self.show_licenses_dialog)
+        self.licenses_action = licenses_act
         help_menu.addAction(licenses_act)
+
+        # Apply any saved user custom keyboard shortcut mappings
+        self.apply_user_shortcuts()
+
+    def apply_user_shortcuts(self):
+        """Rebind all menu actions and application shortcuts according to user preferences."""
+        if not hasattr(self, "shortcuts_manager") or not self.shortcuts_manager:
+            from shortcuts_manager import ShortcutsManager
+            self.shortcuts_manager = ShortcutsManager(getattr(self, "settings_store", None))
+        self.shortcuts_manager.apply_to_window(self)
 
     def _refresh_recent_projects_menu(self):
         """Update recent projects submenu items based on user settings store."""
@@ -946,8 +991,16 @@ class UiLayoutMixin:
         cmd = "Cmd" if is_mac else "Ctrl"
         opt = "Option" if is_mac else "Alt"
         panel_mod = "Ctrl+Option" if is_mac else "Alt"
-        help_key = "Cmd+?" if is_mac else "F1"
-        pref_key = "Cmd+," if is_mac else "Ctrl+,"
+
+        def get_sc(action_id: str, fallback: str = "") -> str:
+            if hasattr(self, "shortcuts_manager") and self.shortcuts_manager:
+                sc = self.shortcuts_manager.get_current_shortcut(action_id)
+                if sc and sc != "None":
+                    from shortcuts_manager import format_sequence_display
+                    return format_sequence_display(sc)
+                if sc == "None":
+                    return "Unassigned"
+            return fallback
 
         html_content = f"""
         <style>
@@ -968,59 +1021,95 @@ class UiLayoutMixin:
 
         <h3>Playback & Navigation</h3>
         <table>
-            <tr><td><b>Play / Pause</b></td><td><kbd>Space</kbd> or <kbd>Media Play/Pause</kbd></td></tr>
-            <tr><td><b>Skip Backward / Forward</b></td><td><kbd>Left</kbd> / <kbd>Right</kbd></td></tr>
-            <tr><td><b>Seek to Start / End</b></td><td><kbd>Home</kbd> / <kbd>End</kbd></td></tr>
-            <tr><td><b>Zoom In / Out on Timeline</b></td><td><kbd>+</kbd> / <kbd>-</kbd> or <kbd>Mouse Wheel</kbd></td></tr>
+            <tr><td><b>Play / Pause</b></td><td><kbd>{get_sc("play_pause", "Space")}</kbd> or <kbd>Media Play/Pause</kbd></td></tr>
+            <tr><td><b>Skip Backward / Forward</b></td><td><kbd>{get_sc("seek_backward", "Left")}</kbd> / <kbd>{get_sc("seek_forward", "Right")}</kbd></td></tr>
+            <tr><td><b>Seek to Start / End</b></td><td><kbd>{get_sc("seek_start", "Home")}</kbd> / <kbd>{get_sc("seek_end", "End")}</kbd></td></tr>
+            <tr><td><b>Zoom In / Out on Timeline</b></td><td><kbd>{get_sc("zoom_in", "+")}</kbd> / <kbd>{get_sc("zoom_out", "-")}</kbd> or <kbd>Mouse Wheel</kbd></td></tr>
             <tr><td><b>Pan Timeline View</b></td><td><kbd>Shift + Wheel</kbd> or <kbd>Middle-Click Drag</kbd></td></tr>
-            <tr><td><b>Increase / Decrease Transcript Text</b></td><td><kbd>{cmd}++</kbd> / <kbd>{cmd}+-</kbd></td></tr>
-            <tr><td><b>Reset Transcript Text Size</b></td><td><kbd>{cmd}+0</kbd></td></tr>
+            <tr><td><b>Increase / Decrease Transcript Text</b></td><td><kbd>{get_sc("transcript_font_up", f"{cmd}++")}</kbd> / <kbd>{get_sc("transcript_font_down", f"{cmd}+-")}</kbd></td></tr>
+            <tr><td><b>Reset Transcript Text Size</b></td><td><kbd>{get_sc("transcript_font_reset", f"{cmd}+0")}</kbd></td></tr>
         </table>
 
         <h3>File & Project</h3>
         <table>
-            <tr><td><b>New Project</b></td><td><kbd>{cmd}+N</kbd></td></tr>
-            <tr><td><b>Open Media File</b></td><td><kbd>{cmd}+O</kbd></td></tr>
-            <tr><td><b>Open Project Session</b></td><td><kbd>{cmd}+Shift+O</kbd></td></tr>
-            <tr><td><b>Close Project Session</b></td><td><kbd>{cmd}+W</kbd></td></tr>
-            <tr><td><b>Save Project</b></td><td><kbd>{cmd}+S</kbd></td></tr>
-            <tr><td><b>Save Project As...</b></td><td><kbd>{cmd}+Shift+S</kbd></td></tr>
-            <tr><td><b>Export Dialog</b></td><td><kbd>{cmd}+E</kbd></td></tr>
-            <tr><td><b>Batch Processing</b></td><td><kbd>{cmd}+Shift+B</kbd></td></tr>
-            <tr><td><b>Preferences</b></td><td><kbd>{pref_key}</kbd></td></tr>
-            <tr><td><b>Exit Application</b></td><td><kbd>{cmd}+Q</kbd></td></tr>
+            <tr><td><b>New Project</b></td><td><kbd>{get_sc("new_project", f"{cmd}+N")}</kbd></td></tr>
+            <tr><td><b>Open Media File</b></td><td><kbd>{get_sc("open_media", f"{cmd}+O")}</kbd></td></tr>
+            <tr><td><b>Open Document</b></td><td><kbd>{get_sc("open_document", f"{cmd}+{opt}+O")}</kbd></td></tr>
+            <tr><td><b>Open Project Session</b></td><td><kbd>{get_sc("open_project", f"{cmd}+Shift+O")}</kbd></td></tr>
+            <tr><td><b>Close Project Session</b></td><td><kbd>{get_sc("close_project", f"{cmd}+W")}</kbd></td></tr>
+            <tr><td><b>Save Project</b></td><td><kbd>{get_sc("save_project", f"{cmd}+S")}</kbd></td></tr>
+            <tr><td><b>Save Project As...</b></td><td><kbd>{get_sc("save_project_as", f"{cmd}+Shift+S")}</kbd></td></tr>
+            <tr><td><b>Export Dialog</b></td><td><kbd>{get_sc("export", f"{cmd}+E")}</kbd></td></tr>
+            <tr><td><b>Batch Processing</b></td><td><kbd>{get_sc("batch_processing", f"{cmd}+Shift+B")}</kbd></td></tr>
+            <tr><td><b>Preferences</b></td><td><kbd>{get_sc("preferences", f"{cmd}+P")}</kbd></td></tr>
+            <tr><td><b>Customize Keyboard Shortcuts</b></td><td><kbd>{get_sc("customize_shortcuts", f"{cmd}+K")}</kbd></td></tr>
+            <tr><td><b>Exit Application</b></td><td><kbd>{get_sc("exit_app", f"{cmd}+Q")}</kbd></td></tr>
         </table>
 
         <h3>Panels & Views</h3>
         <table>
-            <tr><td><b>Toggle Timeline Panel</b></td><td><kbd>{panel_mod}+1</kbd></td></tr>
-            <tr><td><b>Toggle Transcript Panel</b></td><td><kbd>{panel_mod}+2</kbd></td></tr>
-            <tr><td><b>Toggle Stories Panel</b></td><td><kbd>{panel_mod}+3</kbd></td></tr>
-            <tr><td><b>Toggle Activity History Panel</b></td><td><kbd>{panel_mod}+4</kbd></td></tr>
-            <tr><td><b>Toggle Waveform Display</b></td><td><kbd>{cmd}+{opt}+W</kbd></td></tr>
-            <tr><td><b>Toggle Video Thumbnails</b></td><td><kbd>{cmd}+{opt}+T</kbd></td></tr>
-            <tr><td><b>Toggle Video Preview Window</b></td><td><kbd>{cmd}+Shift+M</kbd></td></tr>
-            <tr><td><b>Toggle Speaker Labels</b></td><td><kbd>{cmd}+{opt}+S</kbd></td></tr>
-            <tr><td><b>Toggle Timestamps</b></td><td><kbd>{cmd}+{opt}+I</kbd></td></tr>
+            <tr><td><b>Toggle Timeline Panel</b></td><td><kbd>{get_sc("toggle_timeline", f"{panel_mod}+1")}</kbd></td></tr>
+            <tr><td><b>Toggle Transcript Panel</b></td><td><kbd>{get_sc("toggle_transcript", f"{panel_mod}+2")}</kbd></td></tr>
+            <tr><td><b>Toggle Stories Panel</b></td><td><kbd>{get_sc("toggle_stories", f"{panel_mod}+3")}</kbd></td></tr>
+            <tr><td><b>Toggle Activity History Panel</b></td><td><kbd>{get_sc("toggle_activity", f"{panel_mod}+4")}</kbd></td></tr>
+            <tr><td><b>Toggle Waveform Display</b></td><td><kbd>{get_sc("toggle_waveform", f"{cmd}+{opt}+W")}</kbd></td></tr>
+            <tr><td><b>Toggle Video Thumbnails</b></td><td><kbd>{get_sc("toggle_thumbnails", f"{cmd}+{opt}+T")}</kbd></td></tr>
+            <tr><td><b>Toggle Video Preview Window</b></td><td><kbd>{get_sc("toggle_video_preview", f"{cmd}+Shift+M")}</kbd></td></tr>
+            <tr><td><b>Toggle Speaker Labels</b></td><td><kbd>{get_sc("toggle_speaker_labels", f"{cmd}+{opt}+S")}</kbd></td></tr>
+            <tr><td><b>Toggle Timestamps</b></td><td><kbd>{get_sc("toggle_timestamps", f"{cmd}+{opt}+I")}</kbd></td></tr>
         </table>
 
         <h3>Editing & Transcript</h3>
         <table>
-            <tr><td><b>Undo / Redo</b></td><td><kbd>{cmd}+Z</kbd> / <kbd>{cmd}+Y</kbd></td></tr>
-            <tr><td><b>Find and Replace</b></td><td><kbd>{cmd}+F</kbd></td></tr>
-            <tr><td><b>Find Next Match</b></td><td><kbd>{cmd}+G</kbd></td></tr>
+            <tr><td><b>Undo / Redo</b></td><td><kbd>{get_sc("undo", f"{cmd}+Z")}</kbd> / <kbd>{get_sc("redo", f"{cmd}+Y")}</kbd></td></tr>
+            <tr><td><b>Find and Replace</b></td><td><kbd>{get_sc("find_replace", f"{cmd}+F")}</kbd></td></tr>
+            <tr><td><b>Find Next Match</b></td><td><kbd>{get_sc("find_next", f"{cmd}+G")}</kbd></td></tr>
             <tr><td><b>Insert Speaker Break (Edit Mode)</b></td><td><kbd>Shift+Enter</kbd></td></tr>
             <tr><td><b>Insert Timestamp Line (Edit Mode)</b></td><td><kbd>Enter</kbd></td></tr>
             <tr><td><b>Exit Editing Mode</b></td><td><kbd>Esc</kbd></td></tr>
-            <tr><td><b>Keyboard Shortcuts Reference</b></td><td><kbd>{help_key}</kbd></td></tr>
+        </table>
+
+        <h3>AI Pipeline & Tools</h3>
+        <table>
+            <tr><td><b>Transcribe Audio</b></td><td><kbd>{get_sc("transcribe", f"{cmd}+T")}</kbd></td></tr>
+            <tr><td><b>Detect Speakers (Diarization)</b></td><td><kbd>{get_sc("detect_speakers", f"{cmd}+D")}</kbd></td></tr>
+            <tr><td><b>Detect Stories</b></td><td><kbd>{get_sc("detect_stories", f"{cmd}+Shift+A")}</kbd></td></tr>
+            <tr><td><b>Translate Transcript</b></td><td><kbd>{get_sc("translate", f"{cmd}+Shift+L")}</kbd></td></tr>
+            <tr><td><b>Multi-Stage Processing Pipeline</b></td><td><kbd>{get_sc("run_pipeline", f"{cmd}+R")}</kbd></td></tr>
+            <tr><td><b>Regenerate Waveform</b></td><td><kbd>{get_sc("regen_waveform", f"{cmd}+Shift+W")}</kbd></td></tr>
+            <tr><td><b>Regenerate Video Thumbnails</b></td><td><kbd>{get_sc("regen_thumbnails", f"{cmd}+Shift+T")}</kbd></td></tr>
+            <tr><td><b>Clear Temporary Cache</b></td><td><kbd>{get_sc("clear_cache", f"{cmd}+{opt}+C")}</kbd></td></tr>
+            <tr><td><b>Manage AI Models</b></td><td><kbd>{get_sc("manage_models", f"{cmd}+M")}</kbd></td></tr>
+            <tr><td><b>Manage Plugins & Add-ons</b></td><td><kbd>{get_sc("manage_plugins", f"{cmd}+Shift+X")}</kbd></td></tr>
+        </table>
+
+        <h3>Settings & Diagnostics</h3>
+        <table>
+            <tr><td><b>Preferences</b></td><td><kbd>{get_sc("preferences", f"{cmd}+P")}</kbd></td></tr>
+            <tr><td><b>Customize Keyboard Shortcuts</b></td><td><kbd>{get_sc("customize_shortcuts", f"{cmd}+K")}</kbd></td></tr>
+            <tr><td><b>GPU Acceleration Settings</b></td><td><kbd>{get_sc("gpu_settings", f"{cmd}+{opt}+G")}</kbd></td></tr>
+            <tr><td><b>Glossary & Custom Vocabulary</b></td><td><kbd>{get_sc("glossary", f"{cmd}+Shift+G")}</kbd></td></tr>
+            <tr><td><b>Check for Updates</b></td><td><kbd>{get_sc("check_updates", f"{cmd}+U")}</kbd></td></tr>
+            <tr><td><b>Keyboard Shortcuts Reference</b></td><td><kbd>{get_sc("help_shortcuts", "F1" if not is_mac else "Cmd+?")}</kbd></td></tr>
+            <tr><td><b>About Radio & TV Story Segmenter</b></td><td><kbd>{get_sc("about", "Shift+F1")}</kbd></td></tr>
+            <tr><td><b>Open Diagnostic Log Folder</b></td><td><kbd>{get_sc("diagnostic_log", f"{cmd}+Shift+K")}</kbd></td></tr>
+            <tr><td><b>Third-Party Licenses</b></td><td><kbd>{get_sc("licenses", f"{cmd}+Shift+F1")}</kbd></td></tr>
         </table>
         """
 
         browser.setHtml(html_content)
         layout.addWidget(browser)
 
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
-        button_box.rejected.connect(dialog.accept)
+        button_box = QDialogButtonBox(dialog)
+        customize_btn = button_box.addButton("Customize Shortcuts...", QDialogButtonBox.ButtonRole.ActionRole)
+        close_btn = button_box.addButton(QDialogButtonBox.StandardButton.Close)
+
+        def _open_customize():
+            dialog.accept()
+            self.open_preferences_dialog(initial_category="Keyboard Shortcuts")
+
+        customize_btn.clicked.connect(_open_customize)
+        close_btn.clicked.connect(dialog.accept)
         layout.addWidget(button_box)
 
         dialog.exec()

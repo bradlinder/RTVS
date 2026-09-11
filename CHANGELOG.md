@@ -1,6 +1,17 @@
 # Changelog
 
-## v2.8.4
+## v2.8.5
+- **Customizable Keyboard Shortcuts**:
+  - Integrated a dedicated **Keyboard Shortcuts** customization page into the Preferences dialog (`Settings > Preferences > Keyboard Shortcuts`).
+  - Added a direct **Settings > Customize Keyboard Shortcuts...** menu item (`Ctrl+K` / `Cmd+K`) to jump straight to the shortcut editor.
+  - Added an interactive **Key Sequence Recorder** widget allowing users to press any key or combination (with Ctrl, Alt, Shift, Meta/Cmd) or clear assignments.
+  - Added real-time shortcut conflict / collision detection warning when a key sequence is already assigned to another action, with single-click reassignment.
+  - Added search filtering and category dropdown filtering across File & Project, Edit, Panels & Views, AI Pipeline & Tools, Settings & Diagnostics, Help, and Playback & Navigation.
+  - Added "Reset Selected" and "Reset All to Defaults" buttons, and integrated "Keyboard Shortcuts" into the "Restore System Defaults..." dialog.
+  - Linked the "Customize Shortcuts..." button directly into the Quick Shortcuts Reference dialog (`F1` / `Cmd+?`).
+  - Implemented dynamic live rebinding across `MainWindow` actions, `QShortcut` instances, and playback event filters without requiring application restart.
+- **Documentation & Version Alignment**:
+  - Updated application version to `v2.8.5` across `prs_shared.py`, `package.json`, `updater.py`, `build_installer.py`, Windows Inno Setup script (`RadioTVStorySegmenter.iss`), and `README.md`.
 - **Conditional Whisper Speed / Quality Setting**:
   - Dynamically hides the **Transcription Speed / Quality** setting (`whisper_beam_size`) in Preferences whenever non-autoregressive models (such as Parakeet ONNX) are selected, displaying it exclusively for Whisper models.
 - **Multi-Select & Batch Operations in Plugin Manager**:

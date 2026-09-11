@@ -132,6 +132,8 @@ class TranslationWorker(QObject):
         # Defer model handles so they instantiate inside run() on the QThread
         self.model = None
         self.tokenizer = None
+        if kwargs.get("models_dir"):
+            os.environ["RTVS_MODELS_DIR"] = str(kwargs.get("models_dir"))
 
     @classmethod
     def model_root(cls, variant="tiny"):
@@ -139,7 +141,18 @@ class TranslationWorker(QObject):
 
     @classmethod
     def model_dir(cls, from_code, to_code, variant="tiny"):
-        return cls.model_root(variant) / f"{from_code}-{to_code}"
+        canonical = cls.model_root(variant) / f"{from_code}-{to_code}"
+        if cls._model_is_installed_in_dir(canonical):
+            return canonical
+        try:
+            from plugins.translation.support import get_legacy_models_storage_dirs
+            for legacy_root in get_legacy_models_storage_dirs():
+                legacy_dir = legacy_root / f"opus-mt-{variant}" / f"{from_code}-{to_code}"
+                if cls._model_is_installed_in_dir(legacy_dir):
+                    return legacy_dir
+        except Exception:
+            pass
+        return canonical
 
     @classmethod
     def _has_required_model_files(cls, directory):
@@ -155,10 +168,17 @@ class TranslationWorker(QObject):
     @classmethod
     def _model_is_installed_in_dir(cls, directory):
         directory = Path(directory)
+        if not directory.is_dir():
+            return False
+        if not cls._has_required_model_files(directory):
+            return False
         marker = directory / ".complete"
         if not marker.is_file():
-            return False
-        return cls._has_required_model_files(directory)
+            try:
+                marker.write_text("verified\n", encoding="utf-8")
+            except Exception:
+                pass
+        return True
 
     @classmethod
     def model_is_installed(cls, from_code, to_code, variant="tiny"):
