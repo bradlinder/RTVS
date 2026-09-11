@@ -140,7 +140,7 @@ class MainWindow(
         self.duration = 0
         self.current_position = 0
         self.skip_seconds = 5
-        self.whisper_model = "small"
+        self.whisper_model = "parakeet-onnx"
         self.silence_threshold = 3.0
         self.lead_in_padding = 0.5
         self.expected_speakers = "auto"

@@ -120,8 +120,6 @@ class WhisperModelInstallWorker(QObject):
                         repo_id=repo_id,
                         filename=filename,
                         local_dir=str(destination.parent),
-                        local_dir_use_symlinks=False,
-                        resume_download=True,
                     )
                 except TypeError:
                     hf_hub_download(
@@ -316,6 +314,7 @@ class ModelManagementMixin:
         self.model_input.blockSignals(True)
         self.model_input.clear()
         models = [
+            ("parakeet-onnx", "Parakeet ONNX (Ultra-Fast)"),
             ("tiny", "Tiny"),
             ("base", "Base"),
             ("small", "Small"),
@@ -323,7 +322,6 @@ class ModelManagementMixin:
             ("medium", "Medium"),
             ("distil-large-v3", "Distil-Large-v3 (Fast Large)"),
             ("large-v3", "Large"),
-            ("parakeet-onnx", "Parakeet ONNX (Ultra-Fast)"),
         ]
         for model_id, label in models:
             available = self.is_whisper_model_available(model_id)
@@ -487,13 +485,13 @@ class ModelManagementMixin:
 
         models_layout.addWidget(QLabel("<b>Transcription models</b>"))
         whisper_models = [
+            ("parakeet-onnx", "Parakeet ONNX Fast TDT (English)"),
             ("tiny", "Whisper Tiny"), ("base", "Whisper Base"),
             ("small", "Whisper Small"),
             ("distil-medium.en", "Distil-Whisper Medium (English)"),
             ("medium", "Whisper Medium"),
             ("distil-large-v3", "Distil-Whisper Large v3 (English)"),
             ("large-v3", "Whisper Large"),
-            ("parakeet-onnx", "Parakeet ONNX Fast TDT (English)"),
         ]
         for model_id, label in whisper_models:
             path = self.model_cache_path(model_id)
@@ -646,7 +644,7 @@ class ModelManagementMixin:
                 cache_dir = str(get_models_storage_dir() / "huggingface" / "hub")
                 Path(cache_dir).mkdir(parents=True, exist_ok=True)
                 from huggingface_hub import snapshot_download
-                snapshot_download(repo_id=resolved, cache_dir=cache_dir, resume_download=True)
+                snapshot_download(repo_id=resolved, cache_dir=cache_dir)
         except Exception as exc:
             error = str(exc)
         return error

@@ -529,7 +529,7 @@ class MediaBatchMixin:
         self.set_theme(saved_theme)
 
         # Models & AI settings
-        self.whisper_model = str(self.settings_store.value("whisper_model", "small") or "small")
+        self.whisper_model = str(self.settings_store.value("whisper_model", "parakeet-onnx") or "parakeet-onnx")
         try:
             self.whisper_beam_size = int(self.settings_store.value("whisper_beam_size", 5) or 5)
         except Exception:

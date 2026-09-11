@@ -1811,7 +1811,7 @@ class StoryAutoDetectWorker(QObject):
         lead_in_padding=0.5,
         audio_duration=0,
         transcript_segments=None,
-        whisper_model="tiny",
+        whisper_model="parakeet-onnx",
         detection_mode="voice",
         **kwargs,
     ):
@@ -1821,7 +1821,7 @@ class StoryAutoDetectWorker(QObject):
         self.lead_in_padding = float(lead_in_padding or 0.5)
         self.audio_duration = float(audio_duration or 0.0)
         self.transcript_segments = transcript_segments or []
-        self.whisper_model = whisper_model or "tiny"
+        self.whisper_model = whisper_model or "parakeet-onnx"
         self.detection_mode = str(detection_mode or "voice").strip().lower()
         self._is_cancelled = False
 

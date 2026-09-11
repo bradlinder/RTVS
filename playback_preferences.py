@@ -973,10 +973,10 @@ class PlaybackPreferencesMixin:
                 set_models_storage_dir(def_model_dir)
             except Exception:
                 def_model_dir = ""
-            self.settings_store.setValue("whisper_model", "small")
+            self.settings_store.setValue("whisper_model", "parakeet-onnx")
             self.settings_store.setValue("whisper_beam_size", 5)
             self.settings_store.setValue("translation_model_variant", "tiny")
-            self.whisper_model = "small"
+            self.whisper_model = "parakeet-onnx"
             self.whisper_beam_size = 5
             self.translation_model_variant = "tiny"
             if hasattr(self, "refresh_whisper_model_chooser"):
@@ -992,7 +992,7 @@ class PlaybackPreferencesMixin:
             if "model_dir_edit" in lw and lw["model_dir_edit"] and def_model_dir:
                 lw["model_dir_edit"].setText(def_model_dir)
             if "pref_whisper_combo" in lw and lw["pref_whisper_combo"]:
-                idx = lw["pref_whisper_combo"].findData("small")
+                idx = lw["pref_whisper_combo"].findData("parakeet-onnx")
                 if idx >= 0:
                     lw["pref_whisper_combo"].setCurrentIndex(idx)
             if "pref_beam_combo" in lw and lw["pref_beam_combo"]:
@@ -1415,6 +1415,7 @@ class PlaybackPreferencesMixin:
         # Transcription Model (Whisper) selector
         pref_whisper_combo = QComboBox()
         whisper_models = [
+            ("parakeet-onnx", "Parakeet ONNX (Ultra-Fast)"),
             ("tiny", "Tiny"),
             ("base", "Base"),
             ("small", "Small"),
@@ -1422,14 +1423,13 @@ class PlaybackPreferencesMixin:
             ("medium", "Medium"),
             ("distil-large-v3", "Distil-Large-v3 (Fast Large)"),
             ("large-v3", "Large (v3)"),
-            ("parakeet-onnx", "Parakeet ONNX (Ultra-Fast)"),
         ]
         for m_id, label in whisper_models:
             installed = self.is_whisper_model_available(m_id)
             display = f"{label} ✓" if installed else label
             pref_whisper_combo.addItem(display, m_id)
 
-        curr_whisper = getattr(self, "whisper_model", "small")
+        curr_whisper = getattr(self, "whisper_model", "parakeet-onnx")
         w_idx = pref_whisper_combo.findData(curr_whisper)
         if w_idx >= 0:
             pref_whisper_combo.setCurrentIndex(w_idx)

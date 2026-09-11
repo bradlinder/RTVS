@@ -34,9 +34,11 @@ LicenseFile=..\..\NOTICES.txt
 ChangesAssociations=yes
 
 [InstallDelete]
-; Clean up legacy shortcuts created by previous releases (with "Story" in the name)[cite: 10]
+; Clean up legacy shortcuts created by previous releases (with "Story" in the name)
 Type: files; Name: "{autodesktop}\Radio & TV Story Segmenter.lnk"
 Type: files; Name: "{group}\Radio & TV Story Segmenter.lnk"
+; Clean up broken standalone worker binary from workers/ if left by older installer
+Type: files; Name: "{app}\workers\prs_worker.exe"
 
 [Files]
 Source: "..\..\dist\RadioTVSegmenter\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion

@@ -819,19 +819,32 @@ def main() -> None:
         str(ROOT / "radio_tv_story_segmenter_worker.py"),
     ])
 
-    # Copy the compiled standalone prs_worker binary into app_root and create worker shim
+    # Copy the compiled standalone prs_worker binary into app_root
     generated_worker = worker_dist / "prs_worker" / worker_target_exe
     if generated_worker.exists():
         shutil.copy2(generated_worker, worker_dest)
-        if sys.platform == "win32":
-            shutil.copy2(generated_worker, worker_in_subdir)
-        else:
+        if sys.platform != "win32":
             try:
                 if worker_in_subdir.exists() or worker_in_subdir.is_symlink():
                     worker_in_subdir.unlink()
                 worker_in_subdir.symlink_to(f"../{worker_target_exe}")
             except Exception:
-                shutil.copy2(generated_worker, worker_in_subdir)
+                pass
+        else:
+            # On Windows, never place an isolated PyInstaller onedir binary inside workers/
+            # without its own _internal directory; otherwise it fails loading python312.dll.
+            # The standalone worker binary resides at app_root / "prs_worker.exe" alongside app_root / "_internal".
+            if worker_in_subdir.exists():
+                try:
+                    worker_in_subdir.unlink()
+                except Exception:
+                    pass
+
+    # Ensure worker python source is available for isolated virtual environments (e.g. GPU acceleration)
+    worker_py_src = ROOT / "radio_tv_story_segmenter_worker.py"
+    if worker_py_src.exists():
+        shutil.copy2(worker_py_src, workers_dir / "radio_tv_story_segmenter_worker.py")
+        shutil.copy2(worker_py_src, app_root / "radio_tv_story_segmenter_worker.py")
     shutil.rmtree(worker_dist, ignore_errors=True)
 
     print("\n" + "="*70, flush=True)

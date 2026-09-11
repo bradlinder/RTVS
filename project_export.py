@@ -2784,9 +2784,9 @@ class ProjectExportMixin:
         self.auto_save_minutes = float(settings.get("auto_save_minutes", data.get("auto_save_minutes", 5)))
         self.skip_seconds = float(settings.get("skip_seconds", data.get("skip_seconds", 5)))
         # Transcription Model is a global user preference, not a project setting.
-        saved_global_whisper = str(self.settings_store.value("whisper_model", getattr(self, "whisper_model", "small")) or "small")
-        allowed_whisper = {"tiny", "base", "small", "distil-medium.en", "medium", "distil-large-v3", "large-v3", "parakeet-onnx"}
-        self.whisper_model = saved_global_whisper if saved_global_whisper in allowed_whisper else "small"
+        saved_global_whisper = str(self.settings_store.value("whisper_model", getattr(self, "whisper_model", "parakeet-onnx")) or "parakeet-onnx")
+        allowed_whisper = {"parakeet-onnx", "tiny", "base", "small", "distil-medium.en", "medium", "distil-large-v3", "large-v3"}
+        self.whisper_model = saved_global_whisper if saved_global_whisper in allowed_whisper else "parakeet-onnx"
         self.settings_store.setValue("whisper_model", self.whisper_model)
         self.settings_store.sync()
         self.translation_model_variant = str(settings.get("translation_model_variant", data.get("translation_model_variant", "tiny")))

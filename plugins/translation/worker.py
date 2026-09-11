@@ -236,8 +236,6 @@ class TranslationWorker(QObject):
                 snapshot_download(
                     repo_id=repo,
                     local_dir=str(staging_dir),
-                    local_dir_use_symlinks=False,
-                    resume_download=True,
                 )
                 if self._model_is_installed_in_dir(staging_dir):
                     download_success = True

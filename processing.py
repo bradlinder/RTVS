@@ -778,14 +778,24 @@ class ProcessingMixin:
 
         if getattr(sys, "frozen", False):
             exe_name = "prs_worker.exe" if os.name == "nt" else "prs_worker"
-            candidates = [
-                Path(sys.executable).resolve().parent / "workers" / exe_name,
-                Path(sys.executable).resolve().parent / exe_name,
-            ]
-            for candidate in candidates:
-                if candidate.exists():
-                    return str(candidate), list(args), {}
-            # Re-use the main frozen executable with the lightweight worker CLI flag to avoid duplicate binaries
+            app_dir = Path(sys.executable).resolve().parent
+
+            # 1. Primary candidate: dedicated prs_worker.exe in app_dir (lives alongside _internal/)
+            app_worker = app_dir / exe_name
+            if app_worker.exists():
+                return str(app_worker), list(args), {}
+
+            # 2. Re-use the main frozen executable with the lightweight worker CLI flag
+            # RadioTVSegmenter directly runs radio_tv_story_segmenter_worker.main() without GUI
+            if Path(sys.executable).exists():
+                return sys.executable, ["--prs-worker", *args], {}
+
+            # 3. Subdirectory worker (ONLY if it has its own _internal directory adjacent to it)
+            sub_worker = app_dir / "workers" / exe_name
+            if sub_worker.exists() and (sub_worker.parent / "_internal").exists():
+                return str(sub_worker), list(args), {}
+
+            # Fallback
             return sys.executable, ["--prs-worker", *args], {}
         helper = Path(__file__).with_name("radio_tv_story_segmenter_worker.py")
         if not helper.exists():
@@ -1745,7 +1755,7 @@ class ProcessingMixin:
             lead_in_padding=self.lead_in_padding,
             audio_duration=getattr(self, "duration", 0),
             transcript_segments=transcript_segments,
-            whisper_model=getattr(self, "whisper_model", "tiny"),
+            whisper_model=getattr(self, "whisper_model", "parakeet-onnx"),
             detection_mode=getattr(self, "story_detection_mode", "voice"),
         )
         self.worker.moveToThread(self.thread)
