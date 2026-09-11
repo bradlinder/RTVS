@@ -8,6 +8,11 @@ build/
 dist/
 *.egg-info/
 *.spec
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
 
 # Virtual environments
 venv/

@@ -55,17 +55,22 @@ terms are reproduced below.
    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 
 -------------------------------------------------------------------------------
-4. pyannote.audio & PyTorch
-   License: MIT License
-   pyannote.audio: Copyright (c) 2020 CNRS / pyannote team
-   PyTorch:        Copyright (c) 2016-present, Facebook Inc / Meta Platforms
+4. diarize, sherpa-onnx, WeSpeaker & onnxruntime
+   diarize:      License: Apache License, Version 2.0
+                 Copyright (c) 2024 FoxNoseTech
+   sherpa-onnx:  License: Apache License, Version 2.0
+                 Copyright (c) 2022-2024 Xiaomi Corporation / sherpa-onnx contributors
+   WeSpeaker:    License: Apache License, Version 2.0
+                 Copyright (c) 2022 WeSpeaker contributors
+   onnxruntime:  License: MIT License
+                 Copyright (c) Microsoft Corporation
+
+   Licensed under the Apache License, Version 2.0 (for diarize, sherpa-onnx, and WeSpeaker):
+       http://www.apache.org/licenses/LICENSE-2.0
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files.
-   (Standard MIT conditions apply as stated above.)
-
-   Note: Specific pretrained pyannote model checkpoints (e.g. pyannote/speaker-diarization-3.1)
-   are hosted on Hugging Face and require accepting user agreements prior to access.
+   of onnxruntime and associated documentation files (the "Software"), to deal
+   in the Software without restriction, subject to the conditions of the MIT License.
 
 -------------------------------------------------------------------------------
 5. Hugging Face Transformers, Tokenizers & Helsinki-NLP MarianMT
@@ -108,4 +113,20 @@ terms are reproduced below.
      Licensed under Creative Commons Attribution 3.0 (CC BY 3.0 US).
      https://creativecommons.org/licenses/by/3.0/us/
      Attribution: "Electronic Media" icon from The Noun Project.
+
+-------------------------------------------------------------------------------
+9. SciPy & scikit-learn
+   License: BSD 3-Clause License
+   SciPy:        Copyright (c) 2001-2002 Enthought, Inc. 2003-2024 SciPy Developers.
+   scikit-learn: Copyright (c) 2007-2024 The scikit-learn developers.
+
+   Redistribution and use in source and binary forms, with or without modification,
+   are permitted provided that the copyright notices and BSD conditions are met.
+
+-------------------------------------------------------------------------------
+10. cryptography & keyring
+   cryptography: Dual-licensed under Apache License, Version 2.0 and BSD 3-Clause
+                 Copyright (c) Individual contributors.
+   keyring:      License: MIT License
+                 Copyright Jason R. Coombs and contributors.
 ===============================================================================

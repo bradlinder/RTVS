@@ -141,7 +141,7 @@ jobs:
         id: get_version
         shell: bash
         run: |
-          VERSION=$(python -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text()).group(1))" 2>/dev/null || echo "2.8.2")
+          VERSION=$(python -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text()).group(1))" 2>/dev/null || echo "2.8.3")
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Run PyInstaller build
@@ -330,7 +330,7 @@ jobs:
       - name: Package Debian (.deb) & Distributable Tarball (.tar.gz)
         run: |
           bash installer/Linux/build_deb.sh
-          VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text()).group(1))" 2>/dev/null || echo "2.8.2")
+          VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text()).group(1))" 2>/dev/null || echo "2.8.3")
           cd dist
           GZIP=-9 tar -czvf "RadioTVSegmenter-${VERSION}-Linux-x86_64.tar.gz" RadioTVSegmenter/
           cd ..

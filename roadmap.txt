@@ -1,0 +1,194 @@
+================================================================================
+RADIO & TV STORY SEGMENTER - DEVELOPMENT ROADMAP & TECHNICAL SPECIFICATION
+================================================================================
+This document outlines the architectural roadmap and implementation specifications
+for future versions of the Radio & TV Story Segmenter. Adapted from best-in-class
+heuristics and timeline serialization algorithms.
+
+--------------------------------------------------------------------------------
+TABLE OF CONTENTS
+--------------------------------------------------------------------------------
+1. VERSION 3.0: HEURISTIC POST-PROCESSING & TRANSCRIPT CLEANING (PHASE 1)
+   1.1 Whisper Hallucination & Degenerate Loop Scrubber
+   1.2 Multi-Lingual Filler Word & Disfluency Detection
+   1.3 Pipeline Integration & UI Controls
+
+2. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
+   2.1 Cockos Reaper Project (.rpp) Generator
+   2.2 Magix Samplitude EDL (v1.5) Export
+   2.3 Video NLE Interchange (FCPXML, Premiere / DaVinci Resolve xmeml XML)
+   2.4 Avid / Pro Tools AAF Composition
+   2.5 Rational Timecode & Audio Sample Rate Math
+
+3. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
+   3.1 "Text-as-Timeline" Rough-Cut Editing Engine
+   3.2 Seamless Non-Destructive Playback Preview
+   3.3 CTC Word Boundary Refinement & Forced Alignment
+   3.4 Memory-Bounded Diarization & Chunked Streaming
+
+================================================================================
+1. VERSION 3.0: HEURISTIC POST-PROCESSING & TRANSCRIPT CLEANING (PHASE 1)
+================================================================================
+
+1.1 WHISPER HALLUCINATION & DEGENERATE LOOP SCRUBBER
+---------------------------------------------------
+Whisper frequently enters repeating hallucination loops on audio with low SNR,
+background music, or long silences, and emits standard ASR artifact phrases.
+
+Implementation Details:
+- Target File: `processing.py` (or new helper `transcript_cleaner.py`)
+- Module Functions:
+  * `collapse_repeating_ngrams(words, min_n=2, max_n=8)`:
+    - Normalizes token keys: lowercase + strip non-alphanumeric punctuation.
+    - Scans words left-to-right for repeating n-grams from max_n down to min_n.
+    - Required repetitions before collapse: for n >= 4 phrases, requires 2+ repeats;
+      for n < 4, requires 3+ repeats (prevents collapsing intentional "yes yes yes").
+    - Greedily selects the match that removes the highest word volume.
+  * `strip_hallucination_phrases(words)`:
+    - Multi-token phrase blacklist matching:
+      ["i'm sorry", "i am sorry", "thank you for watching", "thanks for watching",
+       "please subscribe", "like and subscribe", "subscribe to my channel",
+       "see you next time", "thanks for listening", "subtitles by",
+       "subtitles by the amara.org community", "www.youtube.com"]
+    - Drops only fully matched contiguous phrase sequences; preserves surrounding speech.
+  * `trim_trailing_degenerate_tail(words, window_size=6, max_unique=2)`:
+    - Whisper tail loops often end with dozens of "um" or "." tokens at audio end.
+    - Scans backward from the final token. If the rolling window contains <= 2 distinct
+      tokens and extends to the last word, trims the degenerate run if >= 6 words long.
+  * `clean_transcript(words)`:
+    - Sequentially executes collapse_repeating_ngrams -> strip_hallucination_phrases
+      -> trim_trailing_degenerate_tail and re-indexes word timestamps/IDs.
+
+1.2 MULTI-LINGUAL FILLER WORD & DISFLUENCY DETECTION
+----------------------------------------------------
+Identifies hesitations and filled pauses without altering genuine semantic vocabulary.
+
+Implementation Details:
+- Target File: `transcript_story.py` / `processing.py`
+- Dictionary (`FILLER_WORDS` Set):
+  * English: "um", "umm", "ummm", "uh", "uhh", "uhm", "erm", "er", "err", "ah", "ahh", "eh", "ehm"
+  * Spanish: "em", "emm", "emmm", "eee"
+  * German: "äh", "ähh", "ähhh", "ähm", "ähmm", "öh", "öhm", "ööhm"
+  * French: "euh", "euuh", "euuuh", "euhm", "heu", "heum"
+  * Portuguese: "hã", "hãhã", "ahn", "ahnn", "ãh", "ãhh", "ãhm", "éh", "éhh"
+  * Chinese: "嗯", "嗯嗯", "呃", "额", "唔"
+  * Shared Hums/Pushes: "hm", "hmm", "hmmm", "mh", "mhh", "mm", "mmm", "mhm", "mm-hmm", "uh-huh"
+- Excluded words: Ambiguous natural speech tokens like "like", "so", "right", "you know"
+  are excluded to prevent false positives in broadcast interviews.
+- Disfluency handling: Support placeholder tags (e.g. `[pause]`, `...`, `[groan]`)
+  produced by specialized ASR models.
+
+1.3 PIPELINE INTEGRATION & UI CONTROLS
+--------------------------------------
+- Add preferences / checkboxes to Settings and Processing dialog:
+  [x] Scrub Whisper Hallucination Loops & Artifacts
+  [x] Highlight / Auto-Tag Filler Words
+- Note: Macro story boundary & song detection remains powered by the existing Neural Silero VAD
+  acoustic engine in `StoryAutoDetectWorker`.
+- Hook into batch processing worker (`radio_tv_story_segmenter_worker.py`) so cleaning
+  occurs automatically after ASR before story segment segmentation.
+
+================================================================================
+2. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
+================================================================================
+
+2.1 COCKOS REAPER PROJECT (.rpp) GENERATOR
+------------------------------------------
+Upgrades the simple EDL marker export to full multi-track Reaper project files.
+
+Implementation Details:
+- Target File: `project_export.py`
+- RPP Structure:
+  * Root `<REAPER_PROJECT 0.1 "7.0">` with sample rate (default 48000), BPM (120), tracks.
+  * Track definition `<TRACK` with unique GUID (`{...}`).
+  * Media items `<ITEM` for each kept segment range:
+    - `POSITION <timeline_pos_seconds>`
+    - `LENGTH <segment_length_seconds>`
+    - `SOFFS <source_audio_offset_start_seconds>`
+    - `FADEIN 1 0.005` / `FADEOUT 1 0.005` (5ms anti-click micro fades)
+    - `NAME "<Segment Title or Media File Base>"`
+    - `<SOURCE WAVE/MP3 FILE "<media_path>">`
+- Supports both relative paths and absolute media paths for instant opening in Reaper.
+
+2.2 MAGIX SAMPLITUDE EDL (v1.5) EXPORT
+--------------------------------------
+Sample-accurate text-based cut-list widely supported by legacy radio broadcast consoles
+and DAW tools.
+
+Implementation Details:
+- Header: `Samplitude EDL File Format Version 1.5`
+- Sample calculations: `samples = round(seconds * audio_sample_rate)`
+- Columns: Source, Track, Play-In, Play-Out, Record-In, Record-Out, Volume, Pan, Fades, Name.
+
+2.3 VIDEO NLE INTERCHANGE (FCPXML & XMEML XML)
+----------------------------------------------
+Generates sequence timelines for video newsrooms and multi-cam podcast edits.
+
+Implementation Details:
+- Supported Formats:
+  * Apple Final Cut Pro XML (`.fcpxml` v1.9 / v1.10)
+  * Adobe Premiere Pro / DaVinci Resolve Final Cut XML (`.xml` xmeml v4 / v5)
+- Track Structure:
+  * Video Track (V1) + Stereo Audio Tracks (A1, A2) mapped to source media.
+  * Source in/out frame bounds and sequence timeline positions.
+- Framerate Rational Time Base:
+  * Supports 23.976 (24000/1001), 24 (24/1), 25 (25/1), 29.97 (30000/1001),
+    30 (30/1), 50 (50/1), 59.94 (60000/1001), 60 (60/1) fps.
+  * Time conversion helper: `seconds_to_rational(seconds, framerate)` to prevent drift.
+
+2.4 AVID & PRO TOOLS AAF COMPOSITION
+------------------------------------
+- Support AAF composition export for high-end post-production facilities (Pro Tools / Avid Media Composer).
+- Reference-only metadata composition pointing to broadcast WAV (BWF) media files.
+
+2.5 UI & BATCH EXPORT INTEGRATION
+---------------------------------
+- Expand Export Menu in `RadioTVSegmenter.py`:
+  * Export -> DAW Project (Reaper .rpp, Samplitude .edl)
+  * Export -> Video NLE Timeline (Premiere/Resolve XML, Final Cut FCPXML)
+- Framerate selection popup dialog when exporting video timeline files.
+
+================================================================================
+3. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
+================================================================================
+
+3.1 "TEXT-AS-TIMELINE" ROUGH-CUT EDITING ENGINE
+-----------------------------------------------
+Allows journalists to edit audio/video directly by striking through or deleting words
+in the transcript UI.
+
+Implementation Details:
+- State Model:
+  * Words have `deleted: bool` and `muted: bool` flags.
+  * `get_word_cut_ranges(words, duration)`: groups contiguous deleted words into cut spans.
+  * `merge_cut_ranges(ranges, duration, merge_gap=0.35)`: bridges micro gaps between cuts.
+  * `get_keep_ranges(cuts, duration)`: inverts cut intervals into active playback/export clips.
+- Word bar / timeline sync: Deleting text instantly recalculates segment boundaries
+  and updates the duration counter in real time.
+
+3.2 SEAMLESS NON-DESTRUCTIVE PLAYBACK PREVIEW
+---------------------------------------------
+- Custom audio playback handler in PySide6 / QMediaPlayer / sounddevice:
+  * Plays only inside `keep_ranges`.
+  * When playback cursor reaches a cut point, instantly seeks to the start of the next
+    keep range with a 5ms linear volume crossfade to avoid popping artifacts.
+
+3.3 CTC WORD BOUNDARY REFINEMENT & FORCED ALIGNMENT
+---------------------------------------------------
+- Whisper's token timestamps can have 50-150ms acoustic jitter.
+- Optional secondary alignment pass using a lightweight Wav2Vec2 / MMS / CTC model:
+  * Uses acoustic phone probabilities to snap word start/end times strictly to energy
+    onsets and vowel/consonant transitions.
+  * Result: Subtitle files (SRT/VTT) and audio slices are frame-accurate to 10ms.
+
+3.4 MEMORY-BOUNDED DIARIZATION & CHUNKED STREAMING
+--------------------------------------------------
+- For long broadcast files (e.g. 2-6 hour council meetings or continuous broadcasts):
+  * Segment audio into overlapping windows (`MAX_SEGMENT_S = 120s`).
+  * Process Pyannote / speaker embeddings in bounded RAM/VRAM chunks.
+  * Stitch speaker clusters across chunk boundaries using cosine similarity matching.
+  * Prevents CUDA out-of-memory errors on consumer GPUs.
+
+================================================================================
+END OF ROADMAP & TECHNICAL SPECIFICATION
+================================================================================

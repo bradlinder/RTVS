@@ -7,17 +7,17 @@ Radio & TV Story Segmenter is a cross-platform desktop application built with Py
 ## Features
 
 * Automated Speech Transcription: Powered by faster-whisper (CTranslate2) with local Whisper models from tiny up to large-v3.
-* Speaker Diarization: Uses pyannote.audio and Silero VAD to detect and attribute speakers across multi-person interviews and panel segments.
-* Bilingual Translation: Direct in-app Spanish/English translation using local Helsinki-NLP MarianMT transformer models with sentence-level alignment.
+* Speaker Diarization: Uses diarize (Silero VAD + WeSpeaker ONNX embeddings) to detect and attribute speakers across multi-person interviews and panel segments without requiring heavy PyTorch dependencies in the core application.
+* Bilingual Translation: Direct in-app Spanish/English translation using local Helsinki-NLP MarianMT transformer models with sentence-level alignment via an isolated plugin runtime.
 * Interactive Transcript Editor: Click-to-seek playback navigation, inline text correction, customizable font scaling, and speaker reattribution tools.
 * Visual Waveform Timeline: Synchronized timeline with zoom, scrub markers, region selection, and optional video thumbnail strips.
-* Hardware Acceleration: Multi-backend detection supporting NVIDIA CUDA, AMD/Intel DirectML via ONNX Runtime, and Apple Silicon MPS.
+* Hardware Acceleration: Optional NVIDIA CUDA acceleration (Windows) for faster-whisper and diarization via an on-demand download, keeping the default application CPU-first and lightweight across platforms.
 * Multi-Format Publishing & Exports:
-* Standard Subtitles (SRT, VTT)
-* Plain and annotated transcripts (TXT, Markdown, CSV)
-* Cockos Reaper Digital Audio Workstation project markers (EDL)
-* WordPress REST API direct draft/post creation
-* Audio segment extractions sliced directly through FFmpeg
+  * Standard Subtitles (SRT, VTT)
+  * Plain and annotated transcripts (TXT, Markdown, CSV)
+  * Cockos Reaper Digital Audio Workstation project markers (EDL)
+  * WordPress REST API direct draft/post creation
+  * Audio segment extractions sliced directly through FFmpeg
 
 
 
@@ -46,12 +46,13 @@ source venv/bin/activate
 Install standard application requirements:
 pip install -r requirements.txt
 
-### 3. GPU Hardware Acceleration (Optional)
+### 3. GPU Hardware Acceleration (Optional - Windows NVIDIA)
 
-* NVIDIA: Ensure CUDA 11.8 or 12.x drivers are installed. PyTorch will leverage CUDA automatically.
-* AMD / Intel (Windows): Install DirectML runtime execution:
-pip install onnxruntime-directml
-* Apple Silicon: PyTorch uses Metal Performance Shaders (MPS) natively on macOS.
+The base application is CPU-first by design to keep download and install footprints minimal and universally compatible across platforms. On Windows systems equipped with a supported NVIDIA GPU, you can optionally download and enable a dedicated CUDA-accelerated Whisper and diarization environment:
+1. Open the application.
+2. Go to **Settings > GPU Acceleration (NVIDIA CUDA)...**
+3. Click **Download and Install** to provision the isolated CUDA runtime.
+4. Check **Use GPU acceleration when available**.
 
 ---
 
@@ -121,10 +122,14 @@ Radio & TV Story Segmenter is released under the MIT License.
 This application incorporates or interfaces with several open source libraries and pre-trained models:
 
 * faster-whisper & CTranslate2: MIT License
-* pyannote.audio: MIT License
+* diarize: Apache 2.0 License (FoxNoseTech)
 * Silero VAD: MIT License
-* Hugging Face Transformers & MarianMT: Apache 2.0 License
+* WeSpeaker & sherpa-onnx: Apache 2.0 License
+* onnxruntime: MIT License
+* Hugging Face Transformers & MarianMT (Translation Plugin): Apache 2.0 License
 * PySide6 / Qt 6: LGPL v3 / Commercial
+* scipy & scikit-learn: BSD 3-Clause License
+* cryptography & keyring: Apache 2.0 / PSF License
 * FFmpeg: LGPL v2.1+ / GPL v2+ (executed externally)
 
 For full license texts and copyright acknowledgments, see NOTICES.txt or open Help -> Third-Party Licenses within the application.

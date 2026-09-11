@@ -16,12 +16,12 @@ Radio & TV Story Segmenter - Build & Environment Setup Instructions
 - FFmpeg installed and accessible in your system PATH (or in the app root directory)
 - Git
 
-2. HARDWARE ACCELERATION DRIVERS
+2. HARDWARE ACCELERATION (NVIDIA CUDA - WINDOWS)
 -------------------------------------------------------------------------------
-- NVIDIA: CUDA 11.8 or 12.x Toolkit + cuDNN
-- AMD / Intel (Windows): ONNX Runtime DirectML backend is supported for direct
-  hardware acceleration across Radeon GPUs and APUs (e.g. Ryzen AI).
-- Apple Silicon: PyTorch MPS acceleration supported natively on macOS.
+The core application is CPU-first across all operating systems. On Windows
+systems with an NVIDIA GPU, an isolated CUDA environment can be downloaded
+on demand directly from Settings > GPU Acceleration (NVIDIA CUDA)...
+No manual PyTorch or CUDA driver installation is required in the base environment.
 
 3. PYTHON VIRTUAL ENVIRONMENT & DEPENDENCIES
 -------------------------------------------------------------------------------
@@ -35,16 +35,12 @@ Create and activate your virtual environment:
     python3 -m venv venv
     source venv/bin/activate
 
-Install core requirements:
+Install core application requirements:
     pip install -r requirements.txt
     pip install -r requirements-build.txt
 
-For DirectML GPU acceleration on Windows:
-    pip install onnxruntime-directml
-
-For Pyannote Diarization & MarianMT Translation:
-    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121  # or cpu / directml
-    pip install pyannote.audio transformers sentencepiece sacremoses
+Heavy machine translation (OPUS-MT / Transformers) runs in an isolated,
+on-demand runtime managed automatically by the application (see plugins/translation).
 
 4. BUILDING FRONTEND ASSETS (Vite + React)
 -------------------------------------------------------------------------------
@@ -59,7 +55,7 @@ This outputs bundled assets into the distribution web root.
 Execute:
     python RadioTVSegmenter.py
 
-6. PACKAGING / STANDALONE BUILDS
+6. PACKAGING, STANDALONE BUILDS & RELEASE DISTRIBUTION
 -------------------------------------------------------------------------------
 - Windows:
     Run build_windows.bat or compile RadioTVStorySegmenter.iss using Inno Setup.
@@ -67,3 +63,8 @@ Execute:
     Run ./build_macos.sh
 - Linux:
     Run ./build_linux.sh or ./installer/Linux/build_deb.sh
+
+Note on Releases:
+Distribute all built installers, binaries, and source snapshot archives via
+GitHub Releases. Avoid committing .zip or archive files directly into git history
+to prevent repository bloat.

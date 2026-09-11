@@ -23,12 +23,51 @@ def _translation_worker_class():
     from plugins.translation.worker import TranslationWorker
     return TranslationWorker
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, QProcess, QProcessEnvironment
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, QProcess, QProcessEnvironment, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QMessageBox,
     QProgressDialog,
 )
+
+
+class TranslationEnvSetupWorker(QObject):
+    """Background worker that sets up the isolated translation runtime environment."""
+    progress = Signal(str)
+    finished = Signal(object)  # None on success, error message (str) on failure
+
+    def __init__(self, plugin_dir: Path | None = None):
+        super().__init__()
+        self.plugin_dir = plugin_dir
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        error = None
+        try:
+            manager = _translation_runtime_manager()
+
+            def _on_progress(msg: str):
+                if not self._cancelled:
+                    self.progress.emit(msg)
+
+            ok = manager.ensure_environment(
+                "translate",
+                progress_cb=_on_progress,
+                plugin_dir=self.plugin_dir,
+            )
+            if not ok:
+                err_detail = manager.get_last_error()
+                error = "The isolated translation runtime could not be installed or updated."
+                if err_detail:
+                    error = f"{error}\n\nDetails:\n{err_detail}"
+            elif self._cancelled:
+                error = "Translation environment preparation was cancelled."
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+        self.finished.emit(error)
 
 
 def _translation_runtime_entry_path(app=None) -> Path:
@@ -230,7 +269,30 @@ class TranslationMixin:
         t = threading.Thread(target=_check, daemon=True)
         t.start()
 
+    def _cleanup_translation_env_thread(self):
+        thread = getattr(self, "_translation_env_qthread", None)
+        if thread is not None:
+            try:
+                thread.quit()
+                thread.wait(1000)
+            except Exception:
+                pass
+        self._translation_env_thread = None
+        self._translation_env_qthread = None
+        self._translation_env_worker = None
+
+    def _on_translation_env_progress(self, message: str):
+        self.log_activity(f"[TRANSLATION] {message}", mark_dirty=False)
+        self.set_processing_stage("Translation Runtime", message)
+
     def stop_translation_worker(self, timeout_ms: int = 5000) -> bool:
+        if getattr(self, "_translation_env_worker", None) is not None:
+            try:
+                self._translation_env_worker.cancel()
+            except Exception:
+                pass
+        self._cleanup_translation_env_thread()
+
         proc = getattr(self, "translation_process", None)
         if proc is not None:
             try:
@@ -249,7 +311,10 @@ class TranslationMixin:
 
     def _start_translation_runtime_request(self, request: dict, on_finished=None) -> bool:
         """Run translation code in the plugin-owned isolated Python environment."""
-        if getattr(self, "translation_process", None) is not None:
+        if (
+            getattr(self, "translation_process", None) is not None
+            or getattr(self, "_translation_env_thread", None) is not None
+        ):
             return False
         entry = _translation_runtime_entry_path(self)
         if not entry.exists():
@@ -257,21 +322,68 @@ class TranslationMixin:
             return False
 
         manager = _translation_runtime_manager()
-        self.set_processing_stage("Translation Runtime", "Preparing isolated translation environment…")
-        QApplication.processEvents()
         plugin_dir = entry.parent if entry and entry.exists() else None
-        if not manager.ensure_environment("translate", progress_cb=lambda msg: self.set_processing_stage("Translation Runtime", msg), plugin_dir=plugin_dir):
-            err_detail = manager.get_last_error()
-            msg = "The isolated translation runtime could not be installed or updated."
-            if err_detail:
-                msg = f"{msg}\n\nDetails:\n{err_detail}"
-            self._on_translation_error(msg)
-            return False
-        python_exe = manager.get_executable("translate")
-        if not python_exe or not Path(python_exe).exists():
-            self._on_translation_error("The isolated translation Python runtime is unavailable.")
-            return False
 
+        # Fast path: check if environment is already up-to-date on disk
+        is_ready = False
+        try:
+            raw_exe = manager._get_raw_executable("translate")
+            is_ready = bool(raw_exe.exists() and manager.is_env_up_to_date("translate"))
+        except Exception:
+            is_ready = False
+
+        if is_ready:
+            python_exe = manager.get_executable("translate")
+            if python_exe and Path(python_exe).exists():
+                return self._launch_translation_process(request, on_finished, python_exe, entry)
+
+        # First-run or update: provision environment asynchronously to keep UI completely responsive
+        self.set_processing_stage("Translation Runtime", "Preparing isolated translation environment (first run)…")
+        self.log_activity("[TRANSLATION] Preparing isolated translation environment in background...")
+        if hasattr(self, "cancel_button") and self.cancel_button is not None:
+            self.cancel_button.show()
+            self.cancel_button.setEnabled(True)
+
+        self._translation_env_qthread = QThread(self)
+        self._translation_env_worker = TranslationEnvSetupWorker(plugin_dir=plugin_dir)
+        self._translation_env_worker.moveToThread(self._translation_env_qthread)
+        if hasattr(self, "_track_worker_thread"):
+            self._track_worker_thread(self._translation_env_qthread)
+
+        self._translation_env_qthread.started.connect(self._translation_env_worker.run)
+        self._translation_env_worker.progress.connect(self._on_translation_env_progress)
+
+        def _on_setup_finished(error):
+            self._cleanup_translation_env_thread()
+            if error:
+                self.log_activity(f"[TRANSLATION] Environment setup error: {error}", mark_dirty=False)
+                self._on_translation_error(error)
+                if on_finished:
+                    try:
+                        on_finished(-1, error, "")
+                    except Exception:
+                        pass
+                return
+
+            py_exe = manager.get_executable("translate")
+            if not py_exe or not Path(py_exe).exists():
+                err = "The isolated translation Python runtime is unavailable."
+                self._on_translation_error(err)
+                if on_finished:
+                    try:
+                        on_finished(-1, err, "")
+                    except Exception:
+                        pass
+                return
+
+            self._launch_translation_process(request, on_finished, py_exe, entry)
+
+        self._translation_env_worker.finished.connect(_on_setup_finished)
+        self._translation_env_thread = self._translation_env_qthread
+        self._translation_env_qthread.start()
+        return True
+
+    def _launch_translation_process(self, request: dict, on_finished, python_exe: str, entry: Path) -> bool:
         fd, request_path = tempfile.mkstemp(prefix="rtvs_translate_", suffix=".json")
         os.close(fd)
         request_file = Path(request_path)
@@ -339,8 +451,10 @@ class TranslationMixin:
         proc.finished.connect(finished)
         proc.start()
         if not proc.waitForStarted(10000):
-            try: request_file.unlink(missing_ok=True)
-            except Exception: pass
+            try:
+                request_file.unlink(missing_ok=True)
+            except Exception:
+                pass
             self.translation_process = None
             self.translation_thread = None
             self._on_translation_error("Could not start the isolated translation runtime.")

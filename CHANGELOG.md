@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.8.3
+- **Non-Blocking Translation Runtime Setup**:
+  - Moved initial isolated translation runtime environment provisioning (`manager.ensure_environment`) off the main Qt GUI thread to a background `QThread` (`TranslationEnvSetupWorker`).
+  - Added fast-path verification so up-to-date environments start immediately without setup overhead.
+  - Connected real-time status and activity logging with cancellation and graceful thread cleanup support in `stop_translation_worker()`.
+- **Documentation & Legal Compliance**:
+  - Reconciled `README.md`, `NOTICES.txt`, and `BUILD_INSTRUCTIONS.txt` to reflect the active `diarize` (Silero VAD + WeSpeaker ONNX) diarization engine and on-demand Windows NVIDIA CUDA acceleration.
+  - Added formal third-party license notices for `diarize`, `sherpa-onnx`, `WeSpeaker`, `onnxruntime`, `scipy`, `scikit-learn`, `cryptography`, and `keyring`.
+- **Repository Hygiene**:
+  - Added archive patterns (`*.zip`, `*.tar.gz`, `*.7z`) to `.gitignore` to prevent snapshot zips from polluting repository history.
+- **Version Alignment**:
+  - Updated application version, installer scripts, plugin manifests, and documentation to v2.8.3.
+
 ## v2.8.2
 - **Isolated Runtime Mount Point & Link Mode Resilience**:
   - Resolved `[TRANSLATION ERROR] Failed to create Python minor version link directory (os error 448: The path cannot be traversed because it contains an untrusted mount point)` during translation runtime and OPUS-MT model installation on Windows.
