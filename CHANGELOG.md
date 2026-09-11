@@ -1,17 +1,22 @@
 # Changelog
 
-## WordPress Publisher Plugin v2.8.1 (App v2.8.8 Preview)
-- **Custom Header / Footer Text & Disclaimer Options**:
-  - Added an optional text area in the WordPress Publish Dialog allowing users to include custom notices, AI transcript disclaimers, or editorial notes on a per-post basis.
-  - Added post placement selection to position custom text at either the **Top of post** or **Bottom of post**.
-  - Added **Hide from Google & search engine snippets (`data-nosnippet`)** option: wraps notice text in `data-nosnippet="true"` and search engine directives (`<!--googleoff: all-->...<!--googleon: all-->`), preventing disclaimer text from overriding story snippets in Google and other search engines while keeping the full story indexed.
-  - Added **Exclude from WordPress post excerpts** option: preserves clean, story-focused automated excerpts and teasers without showing disclaimer text in theme post summaries or archives.
-  - Added **Save Text & Options as Default**: allows users to persist their custom disclaimer text, placement preference, and exclusion settings as defaults across all future posts.
-  - Integrated default custom text and disclaimer settings directly into the WordPress Settings dialog and Preferences panel.
+## v2.8.8
+- **Independent Plugin Update Checker ("Check for Updates...")**:
+  - Added a dedicated **Check for Updates...** action to the Plugin Manager (`Tools > Manage Plugins & Add-ons`), enabling users to check GitHub releases for newer versions of installed plugins and update them in-place without needing to rebuild or reinstall the core application.
+  - Automatically compares installed plugin versions against the latest release assets published on GitHub (`.rtvs-addon` and `.zip` packages).
+  - Displays a detailed update summary showing current vs. remote versions (e.g. `WordPress Publisher: v2.8.0 -> v2.8.1`) with one-click batch updating.
+- **Enhanced In-App Plugin Browser & Update Actions**:
+  - Updated the GitHub Plugins Browser dialog to detect when an installed plugin has a newer version available on GitHub, showing highlighted `Update Available (v...)` badges.
+  - Added dedicated **Update to v...** action buttons for each outdated plugin, along with an **Update All Available** batch button on the toolbar.
+  - Automatically reloads updated plugins dynamically and refreshes export menus immediately upon installation without requiring an app restart.
+- **WordPress Publisher Plugin Custom Header / Footer Notices**:
+  - Added custom header/footer text areas with placement selection (top or bottom of post).
+  - Added search engine directive suppression (`data-nosnippet="true"` and `<!--googleoff: all-->...<!--googleon: all-->`) to prevent disclaimer text from overriding search engine result snippets while keeping the article fully indexable.
+  - Added WordPress excerpt exclusion to keep post summaries clean in theme archives.
+  - Added **Save Text & Options as Default** to persist custom notice text across all future posts.
 - **Independent Modular Plugin Build & Packaging Tooling**:
-  - Enhanced `build_installer.py` with the `--plugin <name>` CLI option to package individual plugins directly (e.g. `python build_installer.py --plugin wordpress`) into `.rtvs-addon` and release `.zip` packages without compiling the full application installer.
-  - Updated CI/CD workflow (`.github/workflows/build.yml`) to support standalone plugin builds and release packaging.
-  - Decoupled plugin manifest versioning from the monolithic application version so modular plugins can be updated and distributed independently.
+  - Added `--plugin <name>` CLI option to `build_installer.py` (e.g., `python build_installer.py --plugin wordpress`) to package `.rtvs-addon` packages independently of the full installer.
+  - Updated CI/CD workflow (`.github/workflows/build.yml`) to support standalone plugin builds.
 
 ## v2.8.7
 - **Speaker Detection & Diarization Native Runtime Resolution**:

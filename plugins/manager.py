@@ -17,8 +17,34 @@ from typing import Any, Dict, List, Optional
 from prs_shared import INTERNAL_APP_ID, PROJECT_VERSION, QSettings, get_github_repo
 from plugins.base import BasePlugin, PluginManifest
 
+import re
+
+def parse_plugin_version_tuple(version_str: str) -> tuple[tuple[int, ...], int]:
+    """Parse plugin version string into comparable numerical components and a stability weight."""
+    if not version_str:
+        return ((0, 0, 0), 0)
+    cleaned = re.sub(r"^(?:version|ver|v)?[.\s_-]*", "", str(version_str).strip(), flags=re.IGNORECASE)
+    is_prerelease = bool(re.search(r"[-_.]?(beta|alpha|rc|dev|preview)", str(version_str), re.IGNORECASE))
+    parts = []
+    for chunk in cleaned.split("."):
+        m = re.match(r"^(\d+)", chunk)
+        if m:
+            parts.append(int(m.group(1)))
+        else:
+            break
+    while len(parts) < 3:
+        parts.append(0)
+    return (tuple(parts), 0 if is_prerelease else 1)
+
+
+def is_newer_plugin_version(new_version: str, current_version: str) -> bool:
+    """Returns True if new_version is strictly newer than current_version."""
+    if not new_version or not current_version:
+        return False
+    return parse_plugin_version_tuple(new_version) > parse_plugin_version_tuple(current_version)
+
 from PySide6.QtCore import Qt, QSize, QThread, Signal
-from PySide6.QtGui import QIcon, QFont
+from PySide6.QtGui import QIcon, QFont, QColor
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -210,21 +236,27 @@ class PluginManager:
         module_name, class_name = entry_point.split(":", 1) if ":" in entry_point else ("plugin", "Plugin")
 
         try:
-            # Try importing directly if inside plugins package
             plugin_cls = None
-            try:
-                mod = importlib.import_module(f"plugins.{plugin_id}.{module_name}")
-                plugin_cls = getattr(mod, class_name)
-            except (ImportError, ModuleNotFoundError):
-                # Fall back to loading directly from file path
-                py_file = folder / f"{module_name}.py"
-                if py_file.exists():
+            # If plugin exists as files in user/extracted plugin folder, prefer loading dynamically from file
+            py_file = (folder / f"{module_name}.py") if (folder and folder.is_dir()) else None
+            if py_file and py_file.exists():
+                try:
                     spec = importlib.util.spec_from_file_location(f"rtvs_plugin_{plugin_id}", py_file)
                     if spec and spec.loader:
                         mod = importlib.util.module_from_spec(spec)
                         sys.modules[f"rtvs_plugin_{plugin_id}"] = mod
                         spec.loader.exec_module(mod)
-                        plugin_cls = getattr(mod, class_name)
+                        plugin_cls = getattr(mod, class_name, None)
+                except Exception as file_load_err:
+                    print(f"[PLUGINS] Direct file load failed for '{plugin_id}': {file_load_err}")
+
+            # Fall back to importing directly if inside plugins package (bundled/frozen)
+            if plugin_cls is None:
+                try:
+                    mod = importlib.import_module(f"plugins.{plugin_id}.{module_name}")
+                    plugin_cls = getattr(mod, class_name, None)
+                except (ImportError, ModuleNotFoundError):
+                    pass
 
             if plugin_cls is None:
                 print(f"[PLUGINS] Could not find class {class_name} in {plugin_id}")
@@ -454,32 +486,77 @@ class GitHubPluginsWorker(QThread):
         ]
 
         # Try querying GitHub Releases API
-        api_url = f"https://api.github.com/repos/{self.repo}/releases?per_page=5"
+        api_url = f"https://api.github.com/repos/{self.repo}/releases?per_page=10"
         headers = {"User-Agent": f"RadioTVSegmenter/{PROJECT_VERSION}"}
         req = urllib.request.Request(api_url, headers=headers)
 
         try:
-            with urllib.request.urlopen(req, timeout=8) as response:
+            with urllib.request.urlopen(req, timeout=10) as response:
                 if response.status == 200:
                     releases = json.loads(response.read().decode("utf-8"))
-                    asset_map = {}
+                    
+                    # Map of plugin_id -> best asset data found
+                    # Structure: {plugin_id: {"url": str, "size": int, "version": str, "asset_name": str}}
+                    best_assets: Dict[str, Dict[str, Any]] = {}
+                    
+                    catalog_by_id = {item["id"]: item for item in plugins_catalog}
+
                     for rel in releases:
                         tag_ver = rel.get("tag_name", "").lstrip("v")
                         for asset in rel.get("assets", []):
                             aname = asset.get("name", "")
-                            if aname.endswith(".rtvs-addon"):
-                                asset_map[aname] = {
-                                    "url": asset.get("browser_download_url"),
-                                    "size": asset.get("size", 0),
-                                    "version": tag_ver or PROJECT_VERSION,
-                                }
+                            if not (aname.endswith(".rtvs-addon") or aname.endswith(".zip")):
+                                continue
+                            
+                            detected_id = None
+                            detected_ver = tag_ver or PROJECT_VERSION
 
+                            # Case 1: Pattern rtvs-plugin-{id}-v{ver}.rtvs-addon or .zip
+                            m_ver = re.match(r"^rtvs-plugin-([a-zA-Z0-9_-]+)-v?([0-9]+(?:\.[0-9]+)*(?:-[a-zA-Z0-9_.-]+)?)\.(?:rtvs-addon|zip)$", aname, re.IGNORECASE)
+                            if m_ver:
+                                detected_id = m_ver.group(1).lower()
+                                detected_ver = m_ver.group(2)
+                            else:
+                                # Case 2: Pattern {id}.rtvs-addon
+                                m_simple = re.match(r"^([a-zA-Z0-9_-]+)\.rtvs-addon$", aname, re.IGNORECASE)
+                                if m_simple:
+                                    detected_id = m_simple.group(1).lower()
+                            
+                            if detected_id:
+                                current_best = best_assets.get(detected_id)
+                                if not current_best or is_newer_plugin_version(detected_ver, current_best["version"]):
+                                    best_assets[detected_id] = {
+                                        "url": asset.get("browser_download_url"),
+                                        "size": asset.get("size", 0),
+                                        "version": detected_ver,
+                                        "asset_name": aname,
+                                    }
+
+                    # Update existing catalog items with best releases
                     for item in plugins_catalog:
-                        aname = item["asset_name"]
-                        if aname in asset_map:
-                            item["download_url"] = asset_map[aname]["url"]
-                            item["size"] = asset_map[aname]["size"]
-                            item["version"] = asset_map[aname]["version"]
+                        pid = item["id"]
+                        if pid in best_assets:
+                            item["download_url"] = best_assets[pid]["url"]
+                            item["size"] = best_assets[pid]["size"]
+                            item["version"] = best_assets[pid]["version"]
+                            item["asset_name"] = best_assets[pid]["asset_name"]
+
+                    # If new unrecognized plugins were discovered in GitHub release assets, add them to catalog
+                    for pid, asset_info in best_assets.items():
+                        if pid not in catalog_by_id:
+                            clean_name = pid.replace("-", " ").replace("_", " ").title() + " Extension"
+                            new_entry = {
+                                "id": pid,
+                                "name": clean_name,
+                                "category": "extension",
+                                "version": asset_info["version"],
+                                "description": f"Community or modular add-on extension published on GitHub ({asset_info['asset_name']}).",
+                                "author": "Community / GitHub Release",
+                                "asset_name": asset_info["asset_name"],
+                                "download_url": asset_info["url"],
+                                "fallback_url": "",
+                            }
+                            plugins_catalog.append(new_entry)
 
                     self.finished.emit(True, plugins_catalog, "")
                     return
@@ -710,6 +787,12 @@ class GitHubPluginsDialog(QDialog):
         self.batch_download_btn.clicked.connect(self.download_selected_plugins)
         batch_bar.addWidget(self.batch_download_btn)
 
+        self.batch_update_btn = QPushButton("Update All Available")
+        self.batch_update_btn.setStyleSheet("font-weight: bold; color: #0284c7;")
+        self.batch_update_btn.clicked.connect(self.update_all_available_plugins)
+        self.batch_update_btn.setVisible(False)
+        batch_bar.addWidget(self.batch_update_btn)
+
         self.batch_enable_btn = QPushButton("Enable Selected")
         self.batch_enable_btn.clicked.connect(self.enable_selected_plugins)
         batch_bar.addWidget(self.batch_enable_btn)
@@ -798,12 +881,20 @@ class GitHubPluginsDialog(QDialog):
         self.table.setRowCount(0)
         self.row_checkboxes.clear()
 
+        has_any_update = False
+
         for row, item in enumerate(self.catalog):
             self.table.insertRow(row)
             self.table.setRowHeight(row, 48)
             plugin_id = item["id"]
             is_installed = self.manager.is_plugin_installed(plugin_id)
             is_enabled = self.manager.is_plugin_enabled(plugin_id)
+            installed_manifest = self.manager.manifests.get(plugin_id)
+            installed_version = installed_manifest.version if installed_manifest else None
+            remote_version = str(item.get("version", PROJECT_VERSION))
+            has_update = is_installed and installed_version and is_newer_plugin_version(remote_version, installed_version)
+            if has_update:
+                has_any_update = True
 
             # Column 0: Selection Checkbox
             chk = QCheckBox()
@@ -822,17 +913,31 @@ class GitHubPluginsDialog(QDialog):
             self.table.setItem(row, 1, name_item)
 
             # Column 2: Version
-            self.table.setItem(row, 2, QTableWidgetItem(f"v{item.get('version', PROJECT_VERSION)}"))
+            if has_update:
+                ver_item = QTableWidgetItem(f"v{remote_version} (Installed: v{installed_version})")
+                ver_item.setForeground(QColor("#0284c7"))
+            elif is_installed:
+                ver_item = QTableWidgetItem(f"v{installed_version}")
+            else:
+                ver_item = QTableWidgetItem(f"v{remote_version}")
+            self.table.setItem(row, 2, ver_item)
 
             # Column 3: Category
             self.table.setItem(row, 3, QTableWidgetItem(str(item.get("category", "General")).capitalize()))
 
             # Column 4: Status
-            if is_installed:
+            if has_update:
+                status_text = f"Update Available (v{remote_version})"
+                status_item = QTableWidgetItem(status_text)
+                status_item.setForeground(QColor("#0284c7"))
+                status_item.setFont(QFont(self.font().family(), self.font().pointSize(), QFont.Weight.Bold))
+            elif is_installed:
                 status_text = "Installed (Enabled)" if is_enabled else "Installed (Disabled)"
+                status_item = QTableWidgetItem(status_text)
             else:
                 status_text = "Available"
-            self.table.setItem(row, 4, QTableWidgetItem(status_text))
+                status_item = QTableWidgetItem(status_text)
+            self.table.setItem(row, 4, status_item)
 
             # Column 5: Action Buttons
             action_widget = QWidget()
@@ -848,6 +953,12 @@ class GitHubPluginsDialog(QDialog):
                 download_btn.clicked.connect(lambda _, it=item: self.download_and_install_plugin(it))
                 action_layout.addWidget(download_btn)
             else:
+                if has_update:
+                    update_btn = QPushButton(f"Update to v{remote_version}")
+                    update_btn.setStyleSheet("QPushButton { font-weight: bold; min-height: 28px; padding: 4px 12px; background-color: #0284c7; color: white; border-radius: 4px; }")
+                    update_btn.clicked.connect(lambda _, it=item: self.download_and_install_plugin(it))
+                    action_layout.addWidget(update_btn)
+
                 toggle_btn = QPushButton("Disable" if is_enabled else "Enable")
                 toggle_btn.setStyleSheet(btn_style)
                 toggle_btn.clicked.connect(lambda _, pid=plugin_id, cur=is_enabled: self.toggle_plugin(pid, not cur))
@@ -860,8 +971,45 @@ class GitHubPluginsDialog(QDialog):
 
             self.table.setCellWidget(row, 5, action_widget)
 
+        self.batch_update_btn.setVisible(has_any_update)
+
         if self.table.rowCount() > 0:
             self.table.selectRow(0)
+
+    def update_all_available_plugins(self):
+        """Finds all installed plugins with available updates and updates them in batch."""
+        updates_to_run = []
+        for item in self.catalog:
+            pid = item["id"]
+            if self.manager.is_plugin_installed(pid):
+                m = self.manager.manifests.get(pid)
+                if m and is_newer_plugin_version(str(item.get("version", "")), m.version):
+                    updates_to_run.append(item)
+
+        if not updates_to_run:
+            QMessageBox.information(self, "Plugin Updates", "All installed plugins are up to date.")
+            return
+
+        names = "\n• ".join([f"{it['name']} (v{it.get('version', '')})" for it in updates_to_run])
+        res = QMessageBox.question(
+            self,
+            "Update Plugins",
+            f"Download and install updates for the following {len(updates_to_run)} plugin(s)?\n\n• {names}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if res != QMessageBox.StandardButton.Yes:
+            return
+
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
+        self.progress_label.setText(f"Updating {len(updates_to_run)} plugin(s)...")
+        self.progress_label.setVisible(True)
+
+        self.batch_worker = GitHubBatchDownloadWorker(updates_to_run, self.manager, enable_after=True, parent=self)
+        self.batch_worker.progress.connect(self.on_download_progress)
+        self.batch_worker.finished.connect(self.on_batch_finished)
+        self.batch_worker.start()
 
     def select_all_plugins(self):
         for chk in self.row_checkboxes:
@@ -1166,6 +1314,13 @@ class PluginManagerDialog(QDialog):
         self.batch_export_btn = QPushButton("Export Selected...")
         self.batch_export_btn.clicked.connect(self.export_selected_plugins)
         batch_bar.addWidget(self.batch_export_btn)
+
+        batch_bar.addSpacing(10)
+
+        self.batch_check_updates_btn = QPushButton("Check for Updates...")
+        self.batch_check_updates_btn.setToolTip("Check GitHub for newer versions of installed plugins without updating the core app.")
+        self.batch_check_updates_btn.clicked.connect(self.check_for_plugin_updates)
+        batch_bar.addWidget(self.batch_check_updates_btn)
 
         batch_bar.addStretch()
         layout.addLayout(batch_bar)
@@ -1488,6 +1643,123 @@ class PluginManagerDialog(QDialog):
             self.refresh_list()
         else:
             QMessageBox.warning(self, "Installation Failed", "Could not install plugin packages. Make sure each package contains a valid manifest.json.")
+
+    def check_for_plugin_updates(self):
+        """Checks GitHub for newer versions of installed plugins without updating the core app."""
+        self.manager.discover_plugins()
+        installed_manifests = dict(self.manager.manifests)
+        if not installed_manifests:
+            res = QMessageBox.question(
+                self,
+                "Check for Plugin Updates",
+                "No plugins are currently installed.\n\nWould you like to open the GitHub catalog to browse and install available add-ons?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if res == QMessageBox.StandardButton.Yes:
+                self.on_download_github()
+            return
+
+        # Show non-modal loading dialog / worker
+        from PySide6.QtWidgets import QProgressDialog
+        progress = QProgressDialog("Checking GitHub releases for plugin updates...", "Cancel", 0, 0, self)
+        progress.setWindowTitle("Checking for Updates")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.show()
+
+        repo = get_github_repo()
+        worker = GitHubPluginsWorker(repo, self)
+
+        def on_check_finished(success: bool, catalog: list, note: str):
+            progress.close()
+            if not success and not catalog:
+                QMessageBox.warning(
+                    self,
+                    "Update Check Failed",
+                    "Could not connect to GitHub to check for plugin updates. Please check your internet connection."
+                )
+                return
+
+            catalog_map = {it["id"]: it for it in catalog}
+            updates_available = []
+
+            for pid, manifest in self.manager.manifests.items():
+                if pid in catalog_map:
+                    remote_item = catalog_map[pid]
+                    remote_ver = str(remote_item.get("version", ""))
+                    if remote_ver and is_newer_plugin_version(remote_ver, manifest.version):
+                        updates_available.append((manifest, remote_item))
+
+            if not updates_available:
+                QMessageBox.information(
+                    self,
+                    "Plugins Up to Date",
+                    f"All {len(self.manager.manifests)} installed plugin(s) are up to date!\n\n(Checked against latest GitHub releases for {repo})"
+                )
+                return
+
+            # Format update list
+            update_lines = []
+            for m, r_item in updates_available:
+                update_lines.append(f"• <b>{m.name}</b>: v{m.version} &rarr; <span style='color: #0284c7; font-weight: bold;'>v{r_item.get('version', '')}</span>")
+
+            update_msg = (
+                f"<b>{len(updates_available)} plugin update(s) available:</b><br><br>"
+                + "<br>".join(update_lines)
+                + "<br><br>Would you like to download and install these update(s) now without modifying the core app?"
+            )
+
+            res = QMessageBox.question(
+                self,
+                "Plugin Updates Available",
+                update_msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+
+            if res == QMessageBox.StandardButton.Yes:
+                self.run_batch_plugin_updates([item for _, item in updates_available])
+
+        worker.finished.connect(on_check_finished)
+        worker.start()
+
+    def run_batch_plugin_updates(self, update_items: List[Dict[str, Any]]):
+        """Downloads and installs a batch of plugin updates."""
+        from PySide6.QtWidgets import QProgressDialog
+        progress = QProgressDialog("Updating plugins from GitHub...", "Cancel", 0, 100, self)
+        progress.setWindowTitle("Updating Plugins")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        batch_worker = GitHubBatchDownloadWorker(update_items, self.manager, enable_after=True, parent=self)
+
+        def on_progress(pct, msg):
+            progress.setValue(pct)
+            progress.setLabelText(msg)
+
+        def on_batch_finished(succeeded, failed, errors):
+            progress.close()
+            self.refresh_list()
+            if failed == 0:
+                QMessageBox.information(
+                    self,
+                    "Updates Completed",
+                    f"Successfully updated {succeeded} plugin(s) to the latest version!\n\nAll updated features are now active."
+                )
+            else:
+                err_str = "\n• ".join(errors)
+                QMessageBox.warning(
+                    self,
+                    "Updates Completed with Issues",
+                    f"Updated {succeeded} plugin(s), but {failed} failed:\n\n• {err_str}"
+                )
+
+        batch_worker.progress.connect(on_progress)
+        batch_worker.finished.connect(on_batch_finished)
+        batch_worker.start()
 
     def on_open_folder(self):
         self.manager.ensure_packaged_addons()

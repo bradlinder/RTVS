@@ -751,6 +751,43 @@ class UnifiedExportDialog(QDialog):
 
         wp_info_layout.addWidget(wp_lang_group)
 
+        # Custom Header / Footer Notice Group
+        wp_custom_group = QGroupBox("Custom Header / Footer Text (Optional)")
+        wp_custom_layout = QVBoxLayout(wp_custom_group)
+
+        self.wp_custom_text_edit = ResizableTextEdit("")
+        self.wp_custom_text_edit.setPlaceholderText(
+            "e.g. Note: The following transcript was machine-generated and may contain some spelling errors or other inaccuracies."
+        )
+        self.wp_custom_text_edit.setMaximumHeight(65)
+        wp_custom_layout.addWidget(self.wp_custom_text_edit)
+
+        wp_pos_row = QHBoxLayout()
+        self.wp_pos_button_group = QButtonGroup(self)
+        self.wp_rad_pos_top = QRadioButton("Place at top of post")
+        self.wp_rad_pos_bottom = QRadioButton("Place at bottom of post")
+        self.wp_pos_button_group.addButton(self.wp_rad_pos_top)
+        self.wp_pos_button_group.addButton(self.wp_rad_pos_bottom)
+        wp_pos_row.addWidget(self.wp_rad_pos_top)
+        wp_pos_row.addWidget(self.wp_rad_pos_bottom)
+        wp_pos_row.addStretch()
+        wp_custom_layout.addLayout(wp_pos_row)
+
+        wp_opt_layout = QVBoxLayout()
+        self.wp_chk_no_snippet = QCheckBox("Hide from Google & search engine snippets (data-nosnippet)")
+        self.wp_chk_no_snippet.setToolTip(
+            "Wraps custom text in data-nosnippet and Google search engine directives so search engines index the story but exclude this notice from search result summaries."
+        )
+        self.wp_chk_no_excerpt = QCheckBox("Exclude this text from WordPress post excerpts")
+        self.wp_chk_no_excerpt.setToolTip(
+            "Prevents this notice from appearing in automated WordPress theme excerpts or post list teasers."
+        )
+        wp_opt_layout.addWidget(self.wp_chk_no_snippet)
+        wp_opt_layout.addWidget(self.wp_chk_no_excerpt)
+        wp_custom_layout.addLayout(wp_opt_layout)
+
+        wp_info_layout.addWidget(wp_custom_group)
+
         # Connection status & Settings button
         wp_conn_layout = QHBoxLayout()
         self.wp_conn_status = QLabel("")
@@ -1882,6 +1919,21 @@ class UnifiedExportDialog(QDialog):
                 self.loc_radio_custom.setChecked(True)
         self._on_location_radio_toggled()
 
+        # WordPress custom notice settings
+        if hasattr(self, "wp_custom_text_edit"):
+            self.wp_custom_text_edit.setPlainText(str(settings.value("wp_custom_text", "") or ""))
+            saved_pos = str(settings.value("wp_custom_text_pos", "top") or "top").lower()
+            if saved_pos == "bottom":
+                self.wp_rad_pos_bottom.setChecked(True)
+            else:
+                self.wp_rad_pos_top.setChecked(True)
+            self.wp_chk_no_snippet.setChecked(
+                str(settings.value("wp_custom_text_no_snippet", "true")).lower() in ("true", "1", "yes")
+            )
+            self.wp_chk_no_excerpt.setChecked(
+                str(settings.value("wp_custom_text_no_excerpt", "true")).lower() in ("true", "1", "yes")
+            )
+
     def save_options_to_settings(self, as_default=False):
         settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
         settings.setValue("export_opt_fmt_txt", self.cb_txt.isChecked())
@@ -1899,6 +1951,12 @@ class UnifiedExportDialog(QDialog):
         custom_dir = self.loc_custom_path_edit.text().strip()
         if custom_dir:
             settings.setValue("export_opt_custom_dir", custom_dir)
+
+        if hasattr(self, "wp_custom_text_edit"):
+            settings.setValue("wp_custom_text", self.wp_custom_text_edit.toPlainText())
+            settings.setValue("wp_custom_text_pos", "bottom" if self.wp_rad_pos_bottom.isChecked() else "top")
+            settings.setValue("wp_custom_text_no_snippet", self.wp_chk_no_snippet.isChecked())
+            settings.setValue("wp_custom_text_no_excerpt", self.wp_chk_no_excerpt.isChecked())
 
         settings.sync()
         if as_default:
@@ -1922,11 +1980,18 @@ class UnifiedExportDialog(QDialog):
         self.loc_custom_path_edit.clear()
         self._on_location_radio_toggled()
 
+        if hasattr(self, "wp_custom_text_edit"):
+            self.wp_custom_text_edit.clear()
+            self.wp_rad_pos_top.setChecked(True)
+            self.wp_chk_no_snippet.setChecked(True)
+            self.wp_chk_no_excerpt.setChecked(True)
+
         settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
         for k in [
             "export_opt_fmt_txt", "export_opt_fmt_docx", "export_opt_fmt_srt", "export_opt_fmt_vtt",
             "export_opt_fmt_media", "export_opt_include_speakers", "export_opt_include_timestamps",
             "export_opt_include_en", "export_opt_include_es", "export_opt_custom_loc_enabled", "export_opt_custom_dir",
+            "wp_custom_text", "wp_custom_text_pos", "wp_custom_text_no_snippet", "wp_custom_text_no_excerpt",
         ]:
             settings.remove(k)
         settings.sync()
