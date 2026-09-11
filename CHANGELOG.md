@@ -7,7 +7,7 @@
   - Added explicit packaging collection flags (`--collect-all`, `--copy-metadata`, and `--hidden-import`) for `numpy`, `scipy`, `sklearn`, `wespeakerruntime`, `diarize`, and `torchaudio` across both primary GUI and standalone worker (`prs_worker`) PyInstaller builds.
   - Expanded worker `--self-test` diagnostic validation during CI/CD build staging to fully import the entire Diarization pipeline (`diarize.embeddings`, `diarize.clustering`, `diarize.vad`, `diarize.utils`, `wespeakerruntime`, and `sklearn.cluster`) before installer generation.
 - **Dependency & Build Alignment**:
-  - Pinned runtime and build dependencies for `scikit-learn>=1.4.0,<1.6.0`, `scipy>=1.11.0,<1.15.0`, `numpy>=1.26.0,<2.0.0`, and `wespeakerruntime>=0.2.0,<1.0.0` to guarantee binary ABI compatibility across ML modules.
+  - Pinned runtime and build dependencies for `scikit-learn>=1.4.0,<1.6.0`, `scipy>=1.11.0,<1.15.0`, `numpy>=1.26.0,<2.0.0`, and `wespeakerruntime>=1.0.0,<2.0.0` to guarantee binary ABI compatibility across ML modules.
 - **Version Alignment**:
   - Bumped application version to `v2.8.7` across application constants (`prs_shared.py`), installer scripts (`RadioTVStorySegmenter.iss`), plugin manifests (`youtube`, `wordpress`, `translation`), metadata, and changelog viewers.
 
