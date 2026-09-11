@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.8.6
+- **Real-Time Streaming OPUS-MT Model Downloads**:
+  - Replaced blocking snapshot downloads with a direct chunked streaming downloader using standard Python libraries, eliminating frozen progress states and prerequisite dependencies.
+  - Added live download percentage and transfer size counters (`Downloading model.safetensors (34 / 120 MB)`).
+  - Integrated dynamic sibling file discovery via the Hugging Face API to ensure all required configuration, tokenizer, and weight files are acquired cleanly.
+- **Persistent Progress & Stage Visualization**:
+  - Decoupled the top execution panel, progress bar, and cancel button from the timeline canvas in `ui_layout.py` so processing, downloads, and translation stages stay visible when the timeline is hidden.
+- **Pipeline Translation Staging & Prompting**:
+  - Automatically checks for model availability when translation is included in processing workflows and prompts users for one-click download.
+  - Enhanced error recovery and stage resetting on cancellation or missing prerequisites.
+- **Translation Runtime & Dependency Cleanup**:
+  - Added the `translate` isolated environment into the **Manage Models** dialog for disk usage tracking, manual removal, and reinstallation.
+  - Prompts to remove unused translation runtime dependencies when all translation models are uninstalled.
+  - Automatically purges isolated virtual environments and model caches when uninstalling the Translation plugin in the Plugin Manager.
+- **Version Alignment**:
+  - Bumped application version to `v2.8.6` across application constants, installer scripts, plugin manifests, and update handlers.
+
 ## v2.8.5
 - **Customizable Keyboard Shortcuts**:
   - Integrated a dedicated **Keyboard Shortcuts** customization page into the Preferences dialog (`Settings > Preferences > Keyboard Shortcuts`).

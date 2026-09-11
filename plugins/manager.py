@@ -262,13 +262,33 @@ class PluginManager:
         # Clear enabled status and plugin settings
         self.set_plugin_enabled(plugin_id, False)
         manifest = self.manifests.get(plugin_id)
+        runtimes_to_remove = []
         if manifest and manifest.runtime_type == "isolated":
+            rname = manifest.runtime_name or manifest.id
+            if rname:
+                runtimes_to_remove.append(rname)
+        if plugin_id == "translation" and "translate" not in runtimes_to_remove:
+            runtimes_to_remove.append("translate")
+
+        for rname in runtimes_to_remove:
             try:
                 from runtime_manager import RuntimeManager
-                runtime_name = manifest.runtime_name or manifest.id
-                RuntimeManager().remove_environment(runtime_name)
+                rm = RuntimeManager()
+                rm.kill_all_subprocesses()
+                rm.remove_environment(rname)
             except Exception as exc:
-                print(f"[PLUGINS] Could not remove isolated runtime for {plugin_id}: {exc}")
+                print(f"[PLUGINS] Could not remove isolated runtime {rname} for {plugin_id}: {exc}")
+
+        # If uninstalling translation plugin, also remove downloaded translation models to prevent bloat
+        if plugin_id == "translation":
+            try:
+                from prs_shared import get_app_storage_dir
+                tr_models_dir = get_app_storage_dir() / "models" / "translation"
+                if tr_models_dir.exists():
+                    shutil.rmtree(tr_models_dir, ignore_errors=True)
+            except Exception:
+                pass
+
         self.settings.remove(f"plugins/{plugin_id}")
         self.settings.sync()
 

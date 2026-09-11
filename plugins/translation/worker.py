@@ -244,10 +244,7 @@ class TranslationWorker(QObject):
         if self.model_is_installed(from_code, to_code, self.model_variant) and not self.installation_only:
             self.progress.emit(5, f"OPUS-MT {self.model_variant} model is installed; loading it…")
             return self.model_dir(from_code, to_code, self.model_variant)
-        try:
-            from huggingface_hub import snapshot_download
-        except Exception as exc:
-            raise RuntimeError("The translation download component (huggingface_hub) is unavailable. Install the translation prerequisites.") from exc
+
         final_dir = self.model_dir(from_code, to_code, self.model_variant)
         staging_dir = final_dir.with_name(final_dir.name + ".installing")
         backup_dir = final_dir.with_name(final_dir.name + ".backup")
@@ -255,21 +252,32 @@ class TranslationWorker(QObject):
         try:
             if staging_dir.exists(): shutil.rmtree(staging_dir, ignore_errors=True)
             staging_dir.mkdir(parents=True, exist_ok=True)
-            download_success = False
-            try:
-                from huggingface_hub import snapshot_download
-                snapshot_download(
-                    repo_id=repo,
-                    local_dir=str(staging_dir),
-                )
-                if self._has_required_model_files(staging_dir):
-                    download_success = True
-            except Exception:
-                download_success = False
 
-            if not download_success:
-                # Direct HTTP streaming fallback for all required OPUS-MT files
-                candidate_files = [
+            # Discover model files from Hugging Face API or fall back to standard file list
+            import urllib.request
+            import urllib.error
+            import json
+
+            target_files = []
+            try:
+                api_url = f"https://huggingface.co/api/models/{repo}"
+                req = urllib.request.Request(api_url, headers={"User-Agent": "Radio-TV-Story-Segmenter/60-opus-mt"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    api_data = json.loads(resp.read().decode("utf-8"))
+                    siblings = [s.get("rfilename", "") for s in api_data.get("siblings", []) if s.get("rfilename")]
+                    # Include required configs, tokenizers, and weights while skipping unneeded formats
+                    skip_exts = (".tflite", ".msgpack", ".h5", ".npz", ".yml", ".md", ".gitattributes")
+                    for fname in siblings:
+                        if fname.startswith("."):
+                            continue
+                        if any(fname.endswith(ext) for ext in skip_exts):
+                            continue
+                        target_files.append(fname)
+            except Exception:
+                pass
+
+            if not target_files:
+                target_files = [
                     "config.json",
                     "generation_config.json",
                     "tokenizer_config.json",
@@ -281,30 +289,37 @@ class TranslationWorker(QObject):
                     "vocab.json",
                     "vocab.spm",
                 ]
-                total_files = len(candidate_files)
-                for idx, fname in enumerate(candidate_files):
-                    if self._cancelled:
-                        raise InterruptedError("Model download canceled.")
-                    p_start = 10 + int(75 * (idx / total_files))
-                    p_end = 10 + int(75 * ((idx + 1) / total_files))
-                    try:
-                        self._download_file(
-                            repo,
-                            fname,
-                            staging_dir / fname,
-                            p_start,
-                            p_end,
-                            f"Downloading {fname}",
-                        )
-                    except Exception:
-                        pass
+
+            total_files = len(target_files)
+            downloaded_count = 0
+            for idx, fname in enumerate(target_files):
+                if self._cancelled:
+                    raise InterruptedError("Model download canceled.")
+                p_start = 5 + int(80 * (idx / total_files))
+                p_end = 5 + int(80 * ((idx + 1) / total_files))
+                try:
+                    self._download_file(
+                        repo,
+                        fname,
+                        staging_dir / fname,
+                        p_start,
+                        p_end,
+                        f"Downloading {fname}",
+                    )
+                    downloaded_count += 1
+                except Exception as dl_err:
+                    # Optional weights or auxiliary files can be skipped if another weight file exists
+                    if fname in ("pytorch_model.bin", "model.safetensors", "generation_config.json", "special_tokens_map.json", "added_tokens.json", "vocab.spm", "vocab.json"):
+                        continue
+                    # For critical files, if download fails, log and let verification catch if required
+                    continue
 
             if self._cancelled: raise InterruptedError("Model download canceled.")
             marker = staging_dir / ".complete"
             marker.write_text(f"{repo}\n{self.model_variant}\n{datetime.now().isoformat()}\n", encoding="utf-8")
             self.progress.emit(90, f"Verifying OPUS-MT {self.model_variant} model files…")
             if not self._model_is_installed_in_dir(staging_dir):
-                raise RuntimeError(f"The translation model download for {repo} completed, but required model files (config, tokenizer, weights) are missing or empty.")
+                raise RuntimeError(f"The translation model download for {repo} completed, but required model files (config, tokenizer, weights) are missing or incomplete.")
             if backup_dir.exists(): shutil.rmtree(backup_dir, ignore_errors=True)
             if final_dir.exists(): final_dir.rename(backup_dir)
             staging_dir.rename(final_dir)

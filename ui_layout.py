@@ -59,13 +59,13 @@ class UiLayoutMixin:
         main_layout.setSpacing(6)
 
         # -----------------------------------------------------------
-        # Top Panel: Playback, Time, Save, Status, and Progress Bar
+        # Top Controls: Playback, Time, Save, and Status
         # -----------------------------------------------------------
-        self.top_panel = QWidget(self)
-        top_panel = self.top_panel
-        top_layout = QVBoxLayout(top_panel)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(4)
+        self.controls_panel = QWidget(self)
+        self.controls_panel.setObjectName("controls_panel")
+        controls_panel_layout = QVBoxLayout(self.controls_panel)
+        controls_panel_layout.setContentsMargins(0, 0, 0, 0)
+        controls_panel_layout.setSpacing(4)
 
         controls_row = QHBoxLayout()
         controls_row.setSpacing(8)
@@ -96,9 +96,19 @@ class UiLayoutMixin:
         self.quick_save_button.clicked.connect(self.save_project)
         controls_row.addWidget(self.quick_save_button)
 
-        top_layout.addLayout(controls_row)
+        controls_panel_layout.addLayout(controls_row)
+        main_layout.addWidget(self.controls_panel)
 
-        # Progress / Pipeline Execution Bar (hidden by default)
+        # -----------------------------------------------------------
+        # Progress / Pipeline Execution Bar (Always visible when active,
+        # independent of whether the timeline widget is shown or hidden)
+        # -----------------------------------------------------------
+        self.progress_panel = QWidget(self)
+        self.progress_panel.setObjectName("progress_panel")
+        progress_panel_layout = QVBoxLayout(self.progress_panel)
+        progress_panel_layout.setContentsMargins(0, 0, 0, 0)
+        progress_panel_layout.setSpacing(4)
+
         progress_row = QHBoxLayout()
         progress_row.setSpacing(8)
 
@@ -124,13 +134,16 @@ class UiLayoutMixin:
         self.progress_bar.hide()
         self.cancel_button.hide()
 
-        top_layout.addLayout(progress_row)
+        progress_panel_layout.addLayout(progress_row)
+        main_layout.addWidget(self.progress_panel)
 
+        # -----------------------------------------------------------
         # Timeline and Waveform Canvas Widget
+        # -----------------------------------------------------------
         self.timeline = TimelineWidget(self)
-        top_layout.addWidget(self.timeline)
-
-        main_layout.addWidget(top_panel)
+        self.timeline.setObjectName("timeline_widget")
+        self.top_panel = self.timeline  # Compatibility alias
+        main_layout.addWidget(self.timeline)
 
         # -----------------------------------------------------------
         # Center Panel: Splitter with Transcript View and Story Manager
@@ -513,7 +526,7 @@ class UiLayoutMixin:
         self.toggle_timeline_action = QAction("&Timeline Panel", self, checkable=True)
         self.toggle_timeline_action.setShortcut(QKeySequence(f"{panel_mod}+1"))
         self.toggle_timeline_action.setChecked(True)
-        self.toggle_timeline_action.toggled.connect(lambda checked: self.top_panel.setVisible(checked))
+        self.toggle_timeline_action.toggled.connect(lambda checked: self.timeline.setVisible(checked))
         view_menu.addAction(self.toggle_timeline_action)
 
         self.toggle_transcript_action = QAction("&Transcript Panel", self, checkable=True)

@@ -471,20 +471,48 @@ class ProcessingMixin:
             ("transcription", "Transcribe", self.transcript),
             ("diarization", "Detect Speakers", self.diarization),
             ("stories", "Detect Stories", self.stories),
-            ("translation", "Translate Transcript", self.translations),
         ]
+        pm = getattr(self, "plugin_manager", None)
+        translation_installed = bool(pm and pm.is_plugin_installed("translation") and pm.is_plugin_enabled("translation"))
+        if translation_installed:
+            choices.append(("translation", "Translate Transcript", self.translations))
+
         boxes = []
         for key, label, data in choices:
             row = QHBoxLayout()
             cb = QCheckBox(label)
             is_complete = bool(self.processing_status.get(key, False))
-            cb.setChecked(not is_complete)
-            if is_complete:
-                state = "Complete"
-            elif data:
-                state = "Partial"
+
+            if key == "translation":
+                # Only check translation by default if the required translation model is already installed
+                from_c = self.source_language_code()
+                to_c = self.target_language_code()
+                var = getattr(self, "translation_model_variant", "tiny")
+                w_cls = None
+                try:
+                    from translation import _translation_worker_class
+                    w_cls = _translation_worker_class()
+                except Exception:
+                    pass
+                model_installed = bool(w_cls and w_cls.model_is_installed(from_c, to_c, var))
+                cb.setChecked(model_installed and not is_complete)
+                if not model_installed:
+                    state = "Model Not Installed"
+                elif is_complete:
+                    state = "Complete"
+                elif data:
+                    state = "Partial"
+                else:
+                    state = "Not Started"
             else:
-                state = "Not Started"
+                cb.setChecked(not is_complete)
+                if is_complete:
+                    state = "Complete"
+                elif data:
+                    state = "Partial"
+                else:
+                    state = "Not Started"
+
             row.addWidget(cb)
             row.addStretch()
             row.addWidget(QLabel(state))
@@ -523,6 +551,35 @@ class ProcessingMixin:
                         "Translation requires a transcript. Please include Transcribe in the selected stages or load a transcript first.",
                     )
                     return
+            if "translation" in selected:
+                from_code = self.source_language_code()
+                to_code = self.target_language_code()
+                variant = getattr(self, "translation_model_variant", "tiny")
+                worker_cls = None
+                try:
+                    from translation import _translation_worker_class
+                    worker_cls = _translation_worker_class()
+                except Exception:
+                    pass
+                model_installed = bool(worker_cls and worker_cls.model_is_installed(from_code, to_code, variant))
+                if not model_installed:
+                    variant_display = "OPUS-MT-tiny" if variant == "tiny" else "OPUS-MT"
+                    res = QMessageBox.question(
+                        dialog,
+                        "Translation Model Missing",
+                        f"The {variant_display} translation model ({from_code.upper()} → {to_code.upper()}) is not currently installed.\n\n"
+                        "Would you like to download and install it during processing?\n\n"
+                        "Click 'Yes' to download the model, or 'No' to proceed without translation.",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No,
+                    )
+                    if res != QMessageBox.StandardButton.Yes:
+                        selected.remove("translation")
+                        for k, b in boxes:
+                            if k == "translation":
+                                b.setChecked(False)
+                        if not selected:
+                            return
             if len(selected) > 1 and not self.ensure_project_for_processing_pipeline():
                 return
             if not self._confirm_pipeline_rerun_if_needed(selected, parent=dialog):
@@ -681,6 +738,7 @@ class ProcessingMixin:
                 self.pipeline_queue = []
                 self.pipeline_active = False
                 self.pipeline_rerun_confirmed = False
+                self.set_processing_stage(None)
                 self.set_tools_actions_enabled(True)
                 return
             from_code = self.source_language_code()

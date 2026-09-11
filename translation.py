@@ -9,9 +9,9 @@ from __future__ import annotations
 import copy
 import json
 import os
-import threading
-import json
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -557,9 +557,34 @@ class TranslationMixin:
             return
 
         variant = getattr(self, "translation_model_variant", "tiny")
-        if not _translation_worker_class().model_is_installed(from_code, to_code, variant) and not install_if_missing:
-            QMessageBox.warning(self, "Translation Model Missing", f"The {variant} translation model ({from_code}->{to_code}) is not installed.\nPlease install it via Settings > Manage Models.")
-            return
+        worker_cls = None
+        try:
+            worker_cls = _translation_worker_class()
+        except Exception:
+            pass
+
+        model_installed = bool(worker_cls and worker_cls.model_is_installed(from_code, to_code, variant))
+        if not model_installed:
+            variant_display = "OPUS-MT-tiny" if variant == "tiny" else "OPUS-MT"
+            reply = QMessageBox.question(
+                self,
+                "Translation Model Required",
+                f"No translation model is currently installed for {from_code.upper()} → {to_code.upper()} ({variant_display}).\n\n"
+                "Would you like to download and install this model now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                self.log_activity(f"[TRANSLATION] Translation canceled: no installed model for {from_code}->{to_code}")
+                if getattr(self, "pipeline_active", False):
+                    self.pipeline_active = False
+                    self.pipeline_queue = []
+                    self.pipeline_rerun_confirmed = False
+                self.set_processing_stage(None)
+                self.set_tools_actions_enabled(True)
+                if hasattr(self, "cancel_button") and self.cancel_button is not None:
+                    self.cancel_button.hide()
+                return
 
         self.set_processing_stage("Translating transcript", f"{from_code} → {to_code}")
         if hasattr(self, "cancel_button") and self.cancel_button is not None:
@@ -577,6 +602,7 @@ class TranslationMixin:
         self.log_activity(f"[TRANSLATION] Starting isolated {from_code}->{to_code} translation ({variant}).")
         if not self._start_translation_runtime_request(request):
             self.set_tools_actions_enabled(True)
+            self.set_processing_stage(None)
             if hasattr(self, "cancel_button") and self.cancel_button is not None: self.cancel_button.hide()
 
     def _on_translation_progress(self, percent: float, message: str):
@@ -642,7 +668,7 @@ class TranslationMixin:
             self.pipeline_active = False
             self.pipeline_queue = []
             self.pipeline_rerun_confirmed = False
-        self.set_processing_stage("", "")
+        self.set_processing_stage(None)
         self.set_tools_actions_enabled(True)
         if hasattr(self, "cancel_button") and self.cancel_button is not None:
             self.cancel_button.hide()
@@ -654,7 +680,7 @@ class TranslationMixin:
             self.pipeline_active = False
             self.pipeline_queue = []
             self.pipeline_rerun_confirmed = False
-        self.set_processing_stage("", "")
+        self.set_processing_stage(None)
         self.set_tools_actions_enabled(True)
         if hasattr(self, "cancel_button") and self.cancel_button is not None:
             self.cancel_button.hide()

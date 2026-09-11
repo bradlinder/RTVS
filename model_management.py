@@ -512,6 +512,16 @@ class ModelManagementMixin:
                     translation_rows.append(add_row("translation", f"{variant}:{from_code}-{to_code}", label, path, installed,
                             lambda _, f=from_code, t=to_code, d=variant: self.install_translation_models_for_manager(f, t, d, dialog)))
 
+            try:
+                from runtime_manager import RuntimeManager
+                _rm = RuntimeManager()
+                _tr_env_dir = _rm.get_env_dir("translate")
+                _tr_env_installed = _tr_env_dir.exists() and _rm._get_raw_executable("translate").exists()
+                translation_rows.append(add_row("translation_runtime", "translate_env", "Translation Runtime & Dependencies (CTranslate2)", _tr_env_dir, _tr_env_installed,
+                        lambda _, f="en", t="es", d="tiny": self.install_translation_models_for_manager(f, t, d, dialog)))
+            except Exception:
+                pass
+
         models_layout.addStretch()
         scroll_area.setWidget(scroll_content)
         layout.addWidget(scroll_area, 1)
@@ -531,6 +541,11 @@ class ModelManagementMixin:
                 if item["kind"] == "whisper":
                     item["path"] = self.model_cache_path(item["model_id"])
                     installed_now = self.is_whisper_model_available(item["model_id"])
+                elif item["kind"] == "translation_runtime":
+                    from runtime_manager import RuntimeManager
+                    _rm = RuntimeManager()
+                    item["path"] = _rm.get_env_dir("translate")
+                    installed_now = item["path"].exists() and _rm._get_raw_executable("translate").exists()
                 else:
                     variant, pair = item["model_id"].split(":", 1)
                     f, t = pair.split("-", 1)
@@ -559,13 +574,50 @@ class ModelManagementMixin:
                 return
             for item in selected:
                 try:
-                    if item["path"].exists():
+                    if item["kind"] == "translation_runtime":
+                        from runtime_manager import RuntimeManager
+                        rm = RuntimeManager()
+                        rm.kill_all_subprocesses()
+                        rm.remove_environment("translate")
+                    elif item["path"].exists():
                         shutil.rmtree(item["path"])
                     item["remove"].setChecked(False)
                     self.log_activity(f"[MODELS] Removed {item['label']}", mark_dirty=False)
                 except Exception as exc:
                     self.log_activity(f"[MODELS] Could not remove {item['label']}: {exc}", mark_dirty=False)
                     QMessageBox.warning(dialog, "Remove Model", f"Could not remove {item['label']}:\n\n{exc}")
+
+            # Check if all translation models have been removed and suggest cleaning up dependencies
+            if _translation_plugin_installed(self) and any(it["kind"] == "translation" for it in selected):
+                try:
+                    from runtime_manager import RuntimeManager
+                    rm = RuntimeManager()
+                    env_dir = rm.get_env_dir("translate")
+                    if env_dir.exists():
+                        any_models_remain = False
+                        for variant in ("tiny", "standard"):
+                            for f_c, t_c in (("en", "es"), ("es", "en")):
+                                if _translation_worker_class().model_is_installed(f_c, t_c, variant):
+                                    any_models_remain = True
+                                    break
+                        if not any_models_remain:
+                            env_size = size_text(env_dir)
+                            reply = QMessageBox.question(
+                                dialog,
+                                "Remove Translation Dependencies?",
+                                f"All translation models have been removed.\n\n"
+                                f"Would you also like to remove the translation runtime environment and its dependencies ({env_size}) to free up disk space?\n\n"
+                                "They will be automatically reinstalled the next time you install a translation model.",
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                QMessageBox.StandardButton.Yes,
+                            )
+                            if reply == QMessageBox.StandardButton.Yes:
+                                rm.kill_all_subprocesses()
+                                rm.remove_environment("translate")
+                                self.log_activity("[MODELS] Removed translation runtime environment and dependencies.", mark_dirty=False)
+                except Exception as exc:
+                    self.log_activity(f"[MODELS] Error cleaning up translation dependencies: {exc}", mark_dirty=False)
+
             self.refresh_whisper_model_chooser()
             if _translation_plugin_installed(self):
                 self.refresh_translation_model_chooser()
