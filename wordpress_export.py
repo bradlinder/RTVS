@@ -36,6 +36,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QGroupBox,
     QFormLayout,
+    QTextEdit,
+    QRadioButton,
+    QButtonGroup,
+    QCheckBox,
 )
 
 
@@ -423,6 +427,49 @@ class WordPressSettingsDialog(QDialog):
         form.addRow("App Password:", self.pass_edit)
         layout.addWidget(group)
 
+        # Default Custom Header / Footer Text
+        custom_group = QGroupBox("Default Custom Text / Disclaimer (Optional)")
+        cg_layout = QVBoxLayout(custom_group)
+
+        self.custom_text_edit = QTextEdit()
+        self.custom_text_edit.setPlaceholderText(
+            "e.g. Note: The following transcript was machine-generated and may contain some spelling errors or other inaccuracies."
+        )
+        self.custom_text_edit.setMaximumHeight(65)
+        self.custom_text_edit.setPlainText(str(self.settings.value("wp_custom_text", "") or ""))
+        cg_layout.addWidget(self.custom_text_edit)
+
+        pos_row = QHBoxLayout()
+        self.pos_button_group = QButtonGroup(self)
+        self.rad_pos_top = QRadioButton("Place at top of post")
+        self.rad_pos_bottom = QRadioButton("Place at bottom of post")
+        self.pos_button_group.addButton(self.rad_pos_top)
+        self.pos_button_group.addButton(self.rad_pos_bottom)
+        saved_pos = str(self.settings.value("wp_custom_text_pos", "top") or "top").lower()
+        if saved_pos == "bottom":
+            self.rad_pos_bottom.setChecked(True)
+        else:
+            self.rad_pos_top.setChecked(True)
+        pos_row.addWidget(self.rad_pos_top)
+        pos_row.addWidget(self.rad_pos_bottom)
+        pos_row.addStretch()
+        cg_layout.addLayout(pos_row)
+
+        opt_layout = QVBoxLayout()
+        self.chk_no_snippet = QCheckBox("Hide from Google & search engine snippets (data-nosnippet)")
+        self.chk_no_excerpt = QCheckBox("Exclude this text from WordPress post excerpts")
+        self.chk_no_snippet.setChecked(
+            str(self.settings.value("wp_custom_text_no_snippet", "true")).lower() in ("true", "1", "yes")
+        )
+        self.chk_no_excerpt.setChecked(
+            str(self.settings.value("wp_custom_text_no_excerpt", "true")).lower() in ("true", "1", "yes")
+        )
+        opt_layout.addWidget(self.chk_no_snippet)
+        opt_layout.addWidget(self.chk_no_excerpt)
+        cg_layout.addLayout(opt_layout)
+
+        layout.addWidget(custom_group)
+
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
@@ -472,6 +519,10 @@ class WordPressSettingsDialog(QDialog):
 
         self.settings.setValue("wp_site_url", url)
         self.settings.setValue("wp_username", user)
+        self.settings.setValue("wp_custom_text", self.custom_text_edit.toPlainText())
+        self.settings.setValue("wp_custom_text_pos", "bottom" if self.rad_pos_bottom.isChecked() else "top")
+        self.settings.setValue("wp_custom_text_no_snippet", self.chk_no_snippet.isChecked())
+        self.settings.setValue("wp_custom_text_no_excerpt", self.chk_no_excerpt.isChecked())
         if user and pwd:
             saved_in_keyring = _set_wp_password(user, pwd)
             if not saved_in_keyring:
@@ -730,6 +781,40 @@ class WordPressExportMixin:
             append_blocks(es_blocks)
 
         full_content = "\n".join(content_parts)
+
+        # 3b. Optional Custom Header / Footer Text
+        settings = QSettings(INTERNAL_APP_ID, INTERNAL_APP_ID)
+        custom_text = str(settings.value("wp_custom_text", "") or "").strip()
+        custom_pos = str(settings.value("wp_custom_text_pos", "top") or "top").lower()
+        no_snippet = str(settings.value("wp_custom_text_no_snippet", "true")).lower() in ("true", "1", "yes")
+        no_excerpt = str(settings.value("wp_custom_text_no_excerpt", "true")).lower() in ("true", "1", "yes")
+
+        if custom_text:
+            text_escaped = html.escape(custom_text).replace("\n\n", "</p><p>").replace("\n", "<br/>")
+            inner_html = f"<p>{text_escaped}</p>"
+            if no_snippet:
+                custom_html = (
+                    f'<!-- wp:paragraph -->\n'
+                    f'<div data-nosnippet="true" class="rtvs-custom-notice" style="font-style: italic; opacity: 0.85; margin: 16px 0;">\n'
+                    f'<!--googleoff: all-->\n'
+                    f'{inner_html}\n'
+                    f'<!--googleon: all-->\n'
+                    f'</div>\n'
+                    f'<!-- /wp:paragraph -->'
+                )
+            else:
+                custom_html = (
+                    f'<!-- wp:paragraph -->\n'
+                    f'<div class="rtvs-custom-notice" style="font-style: italic; opacity: 0.85; margin: 16px 0;">\n'
+                    f'{inner_html}\n'
+                    f'</div>\n'
+                    f'<!-- /wp:paragraph -->'
+                )
+
+            if custom_pos == "top":
+                full_content = f"{custom_html}\n\n{full_content}"
+            else:
+                full_content = f"{full_content}\n\n{custom_html}"
 
         # 4. Create Post
         report_progress(4, "Creating WordPress draft…")

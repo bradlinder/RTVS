@@ -1,5 +1,18 @@
 # Changelog
 
+## WordPress Publisher Plugin v2.8.1 (App v2.8.8 Preview)
+- **Custom Header / Footer Text & Disclaimer Options**:
+  - Added an optional text area in the WordPress Publish Dialog allowing users to include custom notices, AI transcript disclaimers, or editorial notes on a per-post basis.
+  - Added post placement selection to position custom text at either the **Top of post** or **Bottom of post**.
+  - Added **Hide from Google & search engine snippets (`data-nosnippet`)** option: wraps notice text in `data-nosnippet="true"` and search engine directives (`<!--googleoff: all-->...<!--googleon: all-->`), preventing disclaimer text from overriding story snippets in Google and other search engines while keeping the full story indexed.
+  - Added **Exclude from WordPress post excerpts** option: preserves clean, story-focused automated excerpts and teasers without showing disclaimer text in theme post summaries or archives.
+  - Added **Save Text & Options as Default**: allows users to persist their custom disclaimer text, placement preference, and exclusion settings as defaults across all future posts.
+  - Integrated default custom text and disclaimer settings directly into the WordPress Settings dialog and Preferences panel.
+- **Independent Modular Plugin Build & Packaging Tooling**:
+  - Enhanced `build_installer.py` with the `--plugin <name>` CLI option to package individual plugins directly (e.g. `python build_installer.py --plugin wordpress`) into `.rtvs-addon` and release `.zip` packages without compiling the full application installer.
+  - Updated CI/CD workflow (`.github/workflows/build.yml`) to support standalone plugin builds and release packaging.
+  - Decoupled plugin manifest versioning from the monolithic application version so modular plugins can be updated and distributed independently.
+
 ## v2.8.7
 - **Speaker Detection & Diarization Native Runtime Resolution**:
   - Resolved `ImportError: numpy._core.multiarray failed to import` during Speaker Detection / Diarization execution in frozen and installed Windows environments.

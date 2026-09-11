@@ -6,6 +6,7 @@ custom excerpt, author assignment, categories, and custom featured image
 """
 from __future__ import annotations
 
+import html
 import os
 import shutil
 import subprocess
@@ -31,6 +32,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QRadioButton,
     QButtonGroup,
+    QCheckBox,
     QProgressBar,
     QWidget,
 )
@@ -82,7 +84,7 @@ class WordPressPublishDialog(QDialog):
         self.custom_image_path: Optional[str] = None
 
         self.setWindowTitle("Publish Story to WordPress")
-        self.setMinimumSize(640, 580)
+        self.setMinimumSize(660, 680)
         self.setup_ui()
         self.load_metadata()
 
@@ -106,7 +108,7 @@ class WordPressPublishDialog(QDialog):
         form.addRow("Title:", self.title_edit)
 
         self.excerpt_edit = QTextEdit()
-        self.excerpt_edit.setMaximumHeight(70)
+        self.excerpt_edit.setMaximumHeight(65)
         form.addRow("Excerpt:", self.excerpt_edit)
 
         self.status_combo = QComboBox()
@@ -116,6 +118,57 @@ class WordPressPublishDialog(QDialog):
         form.addRow("Status:", self.status_combo)
 
         layout.addWidget(post_group)
+
+        # Custom Text / Notice Group
+        custom_group = QGroupBox("Custom Header / Footer Text (Optional)")
+        custom_layout = QVBoxLayout(custom_group)
+
+        self.custom_text_edit = QTextEdit()
+        self.custom_text_edit.setPlaceholderText(
+            "e.g. Note: The following transcript was machine-generated and may contain some spelling errors or other inaccuracies."
+        )
+        self.custom_text_edit.setMaximumHeight(65)
+        custom_layout.addWidget(self.custom_text_edit)
+
+        pos_row = QHBoxLayout()
+        self.pos_button_group = QButtonGroup(self)
+        self.rad_pos_top = QRadioButton("Place at top of post")
+        self.rad_pos_bottom = QRadioButton("Place at bottom of post")
+        self.pos_button_group.addButton(self.rad_pos_top)
+        self.pos_button_group.addButton(self.rad_pos_bottom)
+        pos_row.addWidget(self.rad_pos_top)
+        pos_row.addWidget(self.rad_pos_bottom)
+        pos_row.addStretch()
+        custom_layout.addLayout(pos_row)
+
+        opt_layout = QVBoxLayout()
+        self.chk_no_snippet = QCheckBox("Hide from Google & search engine snippets (data-nosnippet)")
+        self.chk_no_snippet.setToolTip(
+            "Wraps custom text in data-nosnippet and Google search engine directives so search engines index the story but exclude this notice from search result summaries."
+        )
+        self.chk_no_excerpt = QCheckBox("Exclude this text from WordPress post excerpts")
+        self.chk_no_excerpt.setToolTip(
+            "Prevents this notice from appearing in automated WordPress theme excerpts or post list teasers."
+        )
+        opt_layout.addWidget(self.chk_no_snippet)
+        opt_layout.addWidget(self.chk_no_excerpt)
+        custom_layout.addLayout(opt_layout)
+
+        save_def_row = QHBoxLayout()
+        self.save_defaults_btn = QPushButton("Save Text & Options as Default")
+        self.save_defaults_btn.setToolTip(
+            "Save this custom text, placement, and exclusion options as the default for all future WordPress posts."
+        )
+        self.save_defaults_btn.clicked.connect(self.save_custom_text_defaults)
+        self.saved_defaults_status = QLabel("")
+        self.saved_defaults_status.setStyleSheet("color: #2ea44f; font-size: 11px;")
+        save_def_row.addWidget(self.save_defaults_btn)
+        save_def_row.addWidget(self.saved_defaults_status)
+        save_def_row.addStretch()
+        custom_layout.addLayout(save_def_row)
+
+        layout.addWidget(custom_group)
+        self.load_custom_text_settings()
 
         # Featured Image Group
         img_group = QGroupBox("Featured Image (Thumbnail)")
@@ -190,6 +243,29 @@ class WordPressPublishDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
+    def load_custom_text_settings(self):
+        """Load persistent custom text defaults from application settings."""
+        saved_text = str(self.settings.value("wp_custom_text", "") or "")
+        saved_pos = str(self.settings.value("wp_custom_text_pos", "top") or "top").lower()
+        saved_no_snippet = str(self.settings.value("wp_custom_text_no_snippet", "true")).lower() in ("true", "1", "yes")
+        saved_no_excerpt = str(self.settings.value("wp_custom_text_no_excerpt", "true")).lower() in ("true", "1", "yes")
+
+        self.custom_text_edit.setPlainText(saved_text)
+        if saved_pos == "bottom":
+            self.rad_pos_bottom.setChecked(True)
+        else:
+            self.rad_pos_top.setChecked(True)
+        self.chk_no_snippet.setChecked(saved_no_snippet)
+        self.chk_no_excerpt.setChecked(saved_no_excerpt)
+
+    def save_custom_text_defaults(self):
+        """Save active custom text, placement, and exclusion settings as persistent defaults."""
+        self.settings.setValue("wp_custom_text", self.custom_text_edit.toPlainText())
+        self.settings.setValue("wp_custom_text_pos", "bottom" if self.rad_pos_bottom.isChecked() else "top")
+        self.settings.setValue("wp_custom_text_no_snippet", self.chk_no_snippet.isChecked())
+        self.settings.setValue("wp_custom_text_no_excerpt", self.chk_no_excerpt.isChecked())
+        self.saved_defaults_status.setText("✓ Saved as default")
+
     def load_metadata(self):
         title = ""
         content = ""
@@ -218,6 +294,7 @@ class WordPressPublishDialog(QDialog):
             title = Path(self.app.audio_file).stem
 
         self.title_edit.setText(title)
+        # Explicit excerpt is generated cleanly from story content alone
         self.excerpt_edit.setText(generate_wp_excerpt(content))
         self.target_timestamp = timestamp
 
@@ -318,6 +395,44 @@ class WordPressPublishDialog(QDialog):
             formatted_content = "\n".join(paras) if paras else f"<p>{content}</p>"
         else:
             formatted_content = "<p></p>"
+
+        # Build custom notice HTML (Header / Footer)
+        custom_text = self.custom_text_edit.toPlainText().strip()
+        custom_pos = "bottom" if self.rad_pos_bottom.isChecked() else "top"
+        no_snippet = self.chk_no_snippet.isChecked()
+        no_excerpt = self.chk_no_excerpt.isChecked()
+
+        if custom_text:
+            text_escaped = html.escape(custom_text).replace("\n\n", "</p><p>").replace("\n", "<br/>")
+            inner_html = f"<p>{text_escaped}</p>"
+            if no_snippet:
+                custom_html = (
+                    f'<!-- wp:paragraph -->\n'
+                    f'<div data-nosnippet="true" class="rtvs-custom-notice" style="font-style: italic; opacity: 0.85; margin: 16px 0;">\n'
+                    f'<!--googleoff: all-->\n'
+                    f'{inner_html}\n'
+                    f'<!--googleon: all-->\n'
+                    f'</div>\n'
+                    f'<!-- /wp:paragraph -->'
+                )
+            else:
+                custom_html = (
+                    f'<!-- wp:paragraph -->\n'
+                    f'<div class="rtvs-custom-notice" style="font-style: italic; opacity: 0.85; margin: 16px 0;">\n'
+                    f'{inner_html}\n'
+                    f'</div>\n'
+                    f'<!-- /wp:paragraph -->'
+                )
+
+            if custom_pos == "top":
+                formatted_content = f"{custom_html}\n\n{formatted_content}"
+            else:
+                formatted_content = f"{formatted_content}\n\n{custom_html}"
+
+        # If excerpt is empty, ensure it's generated from pure transcript if no_excerpt is checked
+        if not excerpt:
+            if no_excerpt:
+                excerpt = generate_wp_excerpt(content)
 
         # Run background publish
         worker = WordPressPublishWorker(client, title, formatted_content, excerpt, status, img_to_upload)

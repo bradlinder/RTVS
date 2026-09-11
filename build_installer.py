@@ -482,20 +482,6 @@ def sync_installer_scripts(project_version: str) -> None:
             iss_file.write_text(new_content, encoding="utf-8")
             print(f"[BUILD] Synchronized Inno Setup script {iss_file.name} to version {project_version}")
 
-    # Synchronize plugin manifests with current project_version
-    for pid in ("wordpress", "youtube", "translation"):
-        m_file = ROOT / "plugins" / pid / "manifest.json"
-        if m_file.exists():
-            try:
-                import json
-                m_data = json.loads(m_file.read_text(encoding="utf-8"))
-                if m_data.get("version") != project_version:
-                    m_data["version"] = project_version
-                    m_file.write_text(json.dumps(m_data, indent=2) + "\n", encoding="utf-8")
-                    print(f"[BUILD] Synchronized plugin '{pid}' manifest to version {project_version}")
-            except Exception as e:
-                print(f"[BUILD] Warning: Could not sync plugin '{pid}' manifest: {e}")
-
 
 def compile_windows_installer(project_version: str) -> bool:
     """Compile the Windows Inno Setup installer executable if ISCC is installed."""
@@ -543,6 +529,12 @@ def parse_build_args():
         help="Build target: 'all' / 'Core App + Selected Plugins', 'core' / 'Core App Only', or 'plugins' / 'Plugins Only'.",
     )
     parser.add_argument(
+        "--plugin",
+        dest="single_plugin",
+        default=os.environ.get("BUILD_SINGLE_PLUGIN", None),
+        help="Build a specific individual plugin only: 'wordpress', 'youtube', 'translation', or 'all'.",
+    )
+    parser.add_argument(
         "--plugin-wordpress",
         type=lambda x: str(x).lower() in ("true", "1", "yes"),
         default=os.environ.get("BUILD_PLUGIN_WORDPRESS", "true").lower() in ("true", "1", "yes"),
@@ -570,7 +562,28 @@ def parse_build_args():
         action="store_true",
         help="Skip automatic compilation of Windows installer (useful when CI compiles in a separate step).",
     )
-    return parser.parse_known_args()[0]
+    args = parser.parse_known_args()[0]
+    if args.single_plugin:
+        p = str(args.single_plugin).strip().lower()
+        if p == "wordpress":
+            args.plugin_wordpress = True
+            args.plugin_youtube = False
+            args.plugin_translation = False
+        elif p == "youtube":
+            args.plugin_wordpress = False
+            args.plugin_youtube = True
+            args.plugin_translation = False
+        elif p == "translation":
+            args.plugin_wordpress = False
+            args.plugin_youtube = False
+            args.plugin_translation = True
+        elif p in ("all", "plugins"):
+            args.plugin_wordpress = True
+            args.plugin_youtube = True
+            args.plugin_translation = True
+        if str(args.target).strip().lower() == "all" and p not in ("all",):
+            args.target = "plugins"
+    return args
 
 
 def package_plugins(
