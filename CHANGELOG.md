@@ -1,13 +1,13 @@
 # Changelog
 
-## v2.9.0
+## v2.9.1
 - **Seamless App Upgrade Plugin Synchronization**:
   - Automatically checks and upgrades installed plugins in the user directory when a newer bundled version is shipped with an application update.
   - Ensures existing users who upgrade the desktop application automatically receive all updated core plugin features without requiring manual reinstallation.
 - **Independent Plugin Update Checker ("Check for Updates...")**:
   - Added a dedicated **Check for Updates...** action to the Plugin Manager (`Tools > Manage Plugins & Add-ons`), enabling users to check GitHub releases for newer versions of installed plugins and update them in-place without needing to rebuild or reinstall the core application.
   - Automatically compares installed plugin versions against the latest release assets published on GitHub (`.rtvs-addon` and `.zip` packages).
-  - Displays a detailed update summary showing current vs. remote versions (e.g. `WordPress Publisher: v2.8.0 -> v2.9.0`) with one-click batch updating.
+  - Displays a detailed update summary showing current vs. remote versions (e.g. `WordPress Publisher: v2.8.0 -> v2.9.1`) with one-click batch updating.
 - **Enhanced In-App Plugin Browser & Update Actions**:
   - Updated the GitHub Plugins Browser dialog to detect when an installed plugin has a newer version available on GitHub, showing highlighted `Update Available (v...)` badges.
   - Added dedicated **Update to v...** action buttons for each outdated plugin, along with an **Update All Available** batch button on the toolbar.
