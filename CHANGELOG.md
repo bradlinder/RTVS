@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.8.2
+- **Isolated Runtime Mount Point & Link Mode Resilience**:
+  - Resolved `[TRANSLATION ERROR] Failed to create Python minor version link directory (os error 448: The path cannot be traversed because it contains an untrusted mount point)` during translation runtime and OPUS-MT model installation on Windows.
+  - Enforced `UV_LINK_MODE="copy"`, `UV_CACHE_DIR`, and `UV_DATA_DIR` across all `uv` environment creation (`uv venv --link-mode copy`) and package installation (`uv pip install --link-mode copy`) steps, preventing junction and symlink traversal failures on redirected or OneDrive-synced user directories.
+  - Added self-healing runtime discovery (`_find_extracted_python`) in `RuntimeManager` that detects and verifies extracted Python interpreters even if post-install junction links report mount-point errors.
+  - Added direct standalone CPython 3.12 download and pure archive extraction fallback (`python-build-standalone`) when junction-based package management is blocked by OS security policies.
+  - Upgraded standalone `uv` toolchain version to `0.12.12`.
+- **Version Alignment**:
+  - Updated application version, installer scripts, and plugin manifests to v2.8.2.
+
 ## v2.8.1
 - **Default Transcription Model**:
   - Set `Parakeet ONNX Fast TDT` as the out-of-the-box default transcription model across settings stores, preference dialogs, batch jobs, and project initializations.

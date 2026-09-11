@@ -43,7 +43,7 @@ BUILD = ROOT / "build"
 APP_NAME = "RadioTVSegmenter"
 ENTRY_POINT = "RadioTVSegmenter.py"
 
-UV_VERSION = "0.12.7"
+UV_VERSION = "0.12.12"
 UV_URLS = {
     "win32-x86_64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-x86_64-pc-windows-msvc.zip",
     "win32-arm64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-aarch64-pc-windows-msvc.zip",
@@ -57,7 +57,7 @@ try:
     from prs_shared import APP_DISPLAY_NAME, PROJECT_VERSION
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.8.1"
+    PROJECT_VERSION = "2.8.2"
 
 # Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]

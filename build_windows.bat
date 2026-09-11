@@ -99,7 +99,7 @@ if defined ISCC_PATH (
     if not defined APP_VER (
         for /f "tokens=*" %%v in ('!PYTHON_EXE! -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2^>nul') do set "APP_VER=%%v"
     )
-    if not defined APP_VER set "APP_VER=2.8.1"
+    if not defined APP_VER set "APP_VER=2.8.2"
     echo Building installer version: !APP_VER!
     "!ISCC_PATH!" /DMyAppVersion="!APP_VER!" installer\Windows\RadioTVStorySegmenter.iss
     if %ERRORLEVEL% equ 0 (

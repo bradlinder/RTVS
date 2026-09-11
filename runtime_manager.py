@@ -8,7 +8,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-UV_VERSION = "0.12.7"
+UV_VERSION = "0.12.12"
 UV_URLS = {
     "win32-x86_64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-x86_64-pc-windows-msvc.zip",
     "win32-arm64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-aarch64-pc-windows-msvc.zip",
@@ -16,6 +16,17 @@ UV_URLS = {
     "darwin-arm64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-aarch64-apple-darwin.tar.gz",
     "linux-x86_64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz",
     "linux-aarch64": f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-aarch64-unknown-linux-gnu.tar.gz",
+}
+
+STANDALONE_PYTHON_TAG = "20250228"
+STANDALONE_PYTHON_VERSION = "3.12.9"
+STANDALONE_PYTHON_URLS = {
+    "win32-x86_64": f"https://github.com/astral-sh/python-build-standalone/releases/download/{STANDALONE_PYTHON_TAG}/cpython-{STANDALONE_PYTHON_VERSION}%2B{STANDALONE_PYTHON_TAG}-x86_64-pc-windows-msvc-install_only.tar.gz",
+    "win32-arm64": f"https://github.com/astral-sh/python-build-standalone/releases/download/{STANDALONE_PYTHON_TAG}/cpython-{STANDALONE_PYTHON_VERSION}%2B{STANDALONE_PYTHON_TAG}-aarch64-pc-windows-msvc-install_only.tar.gz",
+    "darwin-x86_64": f"https://github.com/astral-sh/python-build-standalone/releases/download/{STANDALONE_PYTHON_TAG}/cpython-{STANDALONE_PYTHON_VERSION}%2B{STANDALONE_PYTHON_TAG}-x86_64-apple-darwin-install_only.tar.gz",
+    "darwin-arm64": f"https://github.com/astral-sh/python-build-standalone/releases/download/{STANDALONE_PYTHON_TAG}/cpython-{STANDALONE_PYTHON_VERSION}%2B{STANDALONE_PYTHON_TAG}-aarch64-apple-darwin-install_only.tar.gz",
+    "linux-x86_64": f"https://github.com/astral-sh/python-build-standalone/releases/download/{STANDALONE_PYTHON_TAG}/cpython-{STANDALONE_PYTHON_VERSION}%2B{STANDALONE_PYTHON_TAG}-x86_64-unknown-linux-gnu-install_only.tar.gz",
+    "linux-aarch64": f"https://github.com/astral-sh/python-build-standalone/releases/download/{STANDALONE_PYTHON_TAG}/cpython-{STANDALONE_PYTHON_VERSION}%2B{STANDALONE_PYTHON_TAG}-aarch64-unknown-linux-gnu-install_only.tar.gz",
 }
 
 # Track active subprocesses spawned by feature environments or external runners
@@ -303,11 +314,88 @@ class RuntimeManager:
     def _get_uv_env(self) -> dict:
         """Constructs environment dictionary with managed Python directory for uv."""
         python_dir = self.runtimes_dir / "python"
+        cache_dir = self.runtimes_dir / "cache"
+        data_dir = self.runtimes_dir / "data"
         python_dir.mkdir(parents=True, exist_ok=True)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        data_dir.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
         env["UV_PYTHON_INSTALL_DIR"] = str(python_dir)
+        env["UV_CACHE_DIR"] = str(cache_dir)
+        env["UV_DATA_DIR"] = str(data_dir)
         env["UV_PYTHON_PREFERENCE"] = "only-managed"
+        env["UV_LINK_MODE"] = "copy"
         return env
+
+    def _find_extracted_python(self, target_version: str = "3.12") -> str:
+        """Scan managed python directory for a working extracted python binary."""
+        python_dir = self.runtimes_dir / "python"
+        if not python_dir.exists():
+            return ""
+
+        target_name = "python.exe" if sys.platform == "win32" else "python"
+        candidates = []
+        try:
+            for p in python_dir.rglob(target_name):
+                if p.is_file():
+                    p_parts = [part.lower() for part in p.parts]
+                    if "scripts" in p_parts or "_env" in str(p):
+                        continue
+                    candidates.append(p)
+        except Exception:
+            pass
+
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        for cand in sorted(candidates, key=lambda x: len(str(x)), reverse=True):
+            try:
+                res = subprocess.run(
+                    [str(cand), "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+                    capture_output=True, text=True, timeout=5, creationflags=creationflags
+                )
+                if res.returncode == 0 and res.stdout.strip() == target_version:
+                    return str(cand)
+            except Exception:
+                continue
+        return ""
+
+    def _download_standalone_python(self, target_version: str = "3.12", progress_cb=None) -> str:
+        """Directly download and extract standalone CPython distribution without symlinks."""
+        import platform
+        import urllib.request
+        import tarfile
+
+        machine = (os.environ.get("PROCESSOR_ARCHITECTURE", "") or platform.machine()).lower()
+        is_arm = "arm" in machine or "aarch64" in machine
+        if sys.platform == "win32":
+            arch_key = "win32-arm64" if is_arm else "win32-x86_64"
+        elif sys.platform == "darwin":
+            arch_key = "darwin-arm64" if is_arm else "darwin-x86_64"
+        else:
+            arch_key = "linux-aarch64" if is_arm else "linux-x86_64"
+
+        url = STANDALONE_PYTHON_URLS.get(arch_key)
+        if not url:
+            return ""
+
+        dest_dir = self.runtimes_dir / "python" / f"cpython-{target_version}-standalone"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        archive_path = self.runtimes_dir / "python_standalone.tar.gz"
+
+        try:
+            if progress_cb:
+                progress_cb(f"Downloading standalone Python {target_version}…")
+            urllib.request.urlretrieve(url, archive_path)
+            if progress_cb:
+                progress_cb(f"Extracting standalone Python {target_version}…")
+            with tarfile.open(archive_path, "r:*") as tar:
+                tar.extractall(path=dest_dir)
+
+            return self._find_extracted_python(target_version)
+        except Exception as exc:
+            logger.warning("Could not download standalone Python: %s", exc)
+            return ""
+        finally:
+            archive_path.unlink(missing_ok=True)
 
     def ensure_managed_python(self, target_version: str = "3.12", progress_cb=None) -> str:
         """Provision a private Python runtime with uv when the host has no matching Python.
@@ -315,34 +403,58 @@ class RuntimeManager:
         This is used for optional and plugin feature environments. The base installer remains
         independent of system Python.
         """
+        # 1. First check if a matching Python is already downloaded/extracted on disk
+        existing = self._find_extracted_python(target_version)
+        if existing:
+            return existing
+
         uv = self.ensure_uv(progress_cb=progress_cb)
-        if not uv or not uv.is_file():
-            self._last_error = f"The isolated runtime installer (uv) is unavailable to provision Python {target_version}."
-            return ""
         env = self._get_uv_env()
-        try:
-            if progress_cb:
-                progress_cb(f"Preparing private Python {target_version} runtime…")
-            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            subprocess.run([str(uv), "python", "install", target_version], check=True, env=env,
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
-            res = subprocess.run([str(uv), "python", "find", target_version], check=True, env=env,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
-            exe = res.stdout.strip().splitlines()[-1] if res.stdout.strip() else ""
-            return exe if exe and Path(exe).exists() else ""
-        except subprocess.CalledProcessError as cpe:
-            err = (cpe.stderr or cpe.stdout or str(cpe)).strip()
-            self._last_error = f"Managed Python install failed: {err}"
-            logger.error(self._last_error)
-            if progress_cb:
-                progress_cb(self._last_error)
-            return ""
-        except Exception as exc:
-            self._last_error = f"Could not provision managed Python {target_version}: {exc}"
-            logger.error(self._last_error)
-            if progress_cb:
-                progress_cb(self._last_error)
-            return ""
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+
+        if uv and uv.is_file():
+            try:
+                if progress_cb:
+                    progress_cb(f"Preparing private Python {target_version} runtime…")
+                # Run uv python install with copy link mode
+                res = subprocess.run([str(uv), "python", "install", target_version],
+                                     env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     text=True, creationflags=creationflags)
+
+                # Check if Python is now extracted (recovers even if junction/minor link creation had an untrusted mount point error)
+                found = self._find_extracted_python(target_version)
+                if found:
+                    return found
+
+                # Also try uv python find
+                res_find = subprocess.run([str(uv), "python", "find", target_version],
+                                          env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                          text=True, creationflags=creationflags)
+                exe = res_find.stdout.strip().splitlines()[-1] if res_find.stdout.strip() else ""
+                if exe and Path(exe).exists():
+                    return exe
+
+                if res.returncode != 0:
+                    err = (res.stderr or res.stdout or "").strip()
+                    logger.warning("uv python install reported: %s", err)
+            except Exception as exc:
+                logger.warning("uv python install error: %s", exc)
+
+        # 2. Re-scan extracted python directory
+        found = self._find_extracted_python(target_version)
+        if found:
+            return found
+
+        # 3. Direct standalone download fallback (guaranteed clean extract without symlinks/junctions)
+        fallback_exe = self._download_standalone_python(target_version, progress_cb=progress_cb)
+        if fallback_exe:
+            return fallback_exe
+
+        self._last_error = f"Could not provision managed Python {target_version} runtime."
+        logger.error(self._last_error)
+        if progress_cb:
+            progress_cb(self._last_error)
+        return ""
 
     def remove_environment(self, feature_name: str) -> bool:
         """Remove an isolated feature environment without touching its models."""
@@ -513,14 +625,14 @@ class RuntimeManager:
             if uv and uv.is_file():
                 # uv creates a venv without requiring pip to be bundled in the managed Python.
                 res_venv = subprocess.run(
-                    [str(uv), "venv", "--python", python_binary, str(env_dir)],
+                    [str(uv), "venv", "--python", python_binary, "--link-mode", "copy", str(env_dir)],
                     check=True, env=uv_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     text=True, creationflags=creationflags
                 )
                 env_py = str(self._get_raw_executable(feature_name))
                 if progress_cb:
                     progress_cb(f"Installing dependencies for '{feature_name}'…")
-                cmd_pip = [str(uv), "pip", "install", "--python", env_py, "--no-cache", "--upgrade"]
+                cmd_pip = [str(uv), "pip", "install", "--python", env_py, "--link-mode", "copy", "--no-cache", "--upgrade"]
                 if extra_index_url:
                     cmd_pip += ["--extra-index-url", extra_index_url]
                 cmd_pip += packages
