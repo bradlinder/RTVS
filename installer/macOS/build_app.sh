@@ -3,7 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 APP_NAME="RadioTVSegmenter"
-VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text()).group(1))" 2>/dev/null || echo "2.8.3")
+VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('$ROOT/prs_shared.py').read_text(encoding='utf-8')).group(1))")
+if [[ -z "$VERSION" ]]; then
+  echo "ERROR: Could not extract PROJECT_VERSION from prs_shared.py"
+  exit 1
+fi
 DIST="$ROOT/dist"
 APP="$DIST/${APP_NAME}.app"
 DMG="$DIST/${APP_NAME}-${VERSION}-macOS.dmg"

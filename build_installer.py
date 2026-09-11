@@ -477,6 +477,20 @@ def sync_installer_scripts(project_version: str) -> None:
             iss_file.write_text(new_content, encoding="utf-8")
             print(f"[BUILD] Synchronized Inno Setup script {iss_file.name} to version {project_version}")
 
+    # Synchronize plugin manifests with current project_version
+    for pid in ("wordpress", "youtube", "translation"):
+        m_file = ROOT / "plugins" / pid / "manifest.json"
+        if m_file.exists():
+            try:
+                import json
+                m_data = json.loads(m_file.read_text(encoding="utf-8"))
+                if m_data.get("version") != project_version:
+                    m_data["version"] = project_version
+                    m_file.write_text(json.dumps(m_data, indent=2) + "\n", encoding="utf-8")
+                    print(f"[BUILD] Synchronized plugin '{pid}' manifest to version {project_version}")
+            except Exception as e:
+                print(f"[BUILD] Warning: Could not sync plugin '{pid}' manifest: {e}")
+
 
 def compile_windows_installer(project_version: str) -> bool:
     """Compile the Windows Inno Setup installer executable if ISCC is installed."""

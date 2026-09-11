@@ -43,7 +43,11 @@ python3 build_installer.py
 
 # 5. Build Debian package & distributable tarball
 echo "[5/5] Packaging Linux distributions (.deb & .tar.gz)..."
-VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text()).group(1))" 2>/dev/null || echo "2.8.3")
+VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
+if [ -z "$VERSION" ]; then
+    echo "[ERROR] Could not extract PROJECT_VERSION from prs_shared.py"
+    exit 1
+fi
 
 if [ -f "installer/Linux/build_deb.sh" ] && command -v dpkg-deb >/dev/null 2>&1; then
     bash installer/Linux/build_deb.sh
