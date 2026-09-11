@@ -121,11 +121,13 @@ except Exception:
 def parse_version_tuple(version_str: str) -> tuple[tuple[int, ...], int]:
     """Parse version string into comparable numerical components and a stability weight.
     Releases without pre-release tags receive weight 1; pre-releases ('-beta', '-rc') receive 0.
+    Handles 'v2.8.5', 'v.2.8.5', 'version-2.8.5', and raw '2.8.5'.
     """
     if not version_str:
         return ((0, 0, 0), 0)
-    cleaned = re.sub(r"^[vV]", "", version_str.strip())
-    is_prerelease = bool(re.search(r"[-_.]?(beta|alpha|rc|dev|preview)", cleaned, re.IGNORECASE))
+    # Strip any leading 'version', 'ver', 'v', dots, underscores, dashes, or whitespace
+    cleaned = re.sub(r"^(?:version|ver|v)?[.\s_-]*", "", version_str.strip(), flags=re.IGNORECASE)
+    is_prerelease = bool(re.search(r"[-_.]?(beta|alpha|rc|dev|preview)", version_str, re.IGNORECASE))
 
     parts = []
     for chunk in cleaned.split("."):
@@ -219,7 +221,7 @@ def select_best_asset_for_platform(assets: list[dict], target_version: str = "")
 
     current_os = sys.platform
     candidates: list[tuple[int, dict]] = []
-    clean_ver = target_version.lstrip("vV").strip().lower() if target_version else ""
+    clean_ver = re.sub(r"^(?:version|ver|v)?[.\s_-]*", "", target_version.strip(), flags=re.IGNORECASE).lower() if target_version else ""
 
     for asset in assets:
         name = asset.get("name", "").lower()
