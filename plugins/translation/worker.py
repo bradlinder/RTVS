@@ -142,11 +142,8 @@ class TranslationWorker(QObject):
         return cls.model_root(variant) / f"{from_code}-{to_code}"
 
     @classmethod
-    def _model_is_installed_in_dir(cls, directory):
+    def _has_required_model_files(cls, directory):
         directory = Path(directory)
-        marker = directory / ".complete"
-        if not marker.is_file():
-            return False
         required = ["config.json", "tokenizer_config.json", "source.spm", "target.spm"]
         if not all((directory / name).is_file() and (directory / name).stat().st_size > 0 for name in required):
             return False
@@ -154,6 +151,14 @@ class TranslationWorker(QObject):
         if not any(path.is_file() and path.stat().st_size > 0 for path in weights):
             return False
         return True
+
+    @classmethod
+    def _model_is_installed_in_dir(cls, directory):
+        directory = Path(directory)
+        marker = directory / ".complete"
+        if not marker.is_file():
+            return False
+        return cls._has_required_model_files(directory)
 
     @classmethod
     def model_is_installed(cls, from_code, to_code, variant="tiny"):
@@ -171,7 +176,7 @@ class TranslationWorker(QObject):
         import urllib.error
 
         destination.parent.mkdir(parents=True, exist_ok=True)
-        temp = destination.with_suffix(destination.suffix + ".download")
+        temp = destination.with_name(destination.name + ".download")
         url = f"https://huggingface.co/{repo}/resolve/main/{filename}?download=true"
         request = urllib.request.Request(url, headers={"User-Agent": "Radio-TV-Story-Segmenter/60-opus-mt-tiny"})
         try:
@@ -237,7 +242,7 @@ class TranslationWorker(QObject):
                     repo_id=repo,
                     local_dir=str(staging_dir),
                 )
-                if self._model_is_installed_in_dir(staging_dir):
+                if self._has_required_model_files(staging_dir):
                     download_success = True
             except Exception:
                 download_success = False

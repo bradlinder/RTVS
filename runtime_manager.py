@@ -621,15 +621,17 @@ class RuntimeManager:
         uv_env = self._get_uv_env()
         creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
 
-        try:
-            if uv and uv.is_file():
-                # uv creates a venv without requiring pip to be bundled in the managed Python.
+        env_py = str(self._get_raw_executable(feature_name))
+        success = False
+
+        # Attempt 1: Fast installation via uv
+        if uv and uv.is_file():
+            try:
                 res_venv = subprocess.run(
                     [str(uv), "venv", "--python", python_binary, "--link-mode", "copy", str(env_dir)],
                     check=True, env=uv_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     text=True, creationflags=creationflags
                 )
-                env_py = str(self._get_raw_executable(feature_name))
                 if progress_cb:
                     progress_cb(f"Installing dependencies for '{feature_name}'…")
                 cmd_pip = [str(uv), "pip", "install", "--python", env_py, "--link-mode", "copy", "--no-cache", "--upgrade"]
@@ -640,13 +642,40 @@ class RuntimeManager:
                     cmd_pip, check=True, env=uv_env, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, creationflags=creationflags
                 )
-            else:
+                success = True
+            except (subprocess.CalledProcessError, Exception) as uv_exc:
+                err_msg = str(uv_exc.stderr if hasattr(uv_exc, 'stderr') and uv_exc.stderr else uv_exc)
+                logger.warning(
+                    f"Fast uv installation failed for '{feature_name}' ({err_msg}). "
+                    "Switching to resilient standard Python/pip fallback without junctions..."
+                )
+                if progress_cb:
+                    progress_cb(f"Configuring environment via standalone Python fallback...")
+                self.remove_environment(feature_name)
+                success = False
+
+        # Attempt 2: Resilient standalone python -m venv --copies + pip fallback
+        if not success:
+            try:
+                if progress_cb:
+                    progress_cb(f"Creating isolated environment (direct copy mode)...")
+                # Create venv using native python with --copies to eliminate Windows NTFS symlink/junction mount point issues
                 subprocess.run(
-                    [python_binary, "-m", "venv", str(env_dir)],
+                    [python_binary, "-m", "venv", "--copies", str(env_dir)],
                     check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     text=True, creationflags=creationflags
                 )
                 env_py = str(self._get_raw_executable(feature_name))
+
+                # Ensure pip is present in the isolated virtual environment
+                if progress_cb:
+                    progress_cb(f"Verifying package manager for '{feature_name}'…")
+                subprocess.run(
+                    [env_py, "-m", "ensurepip", "--upgrade"],
+                    check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    creationflags=creationflags
+                )
+
                 if progress_cb:
                     progress_cb(f"Installing dependencies for '{feature_name}'…")
                 cmd_pip = [env_py, "-m", "pip", "install", "--no-cache-dir", "--upgrade"]
@@ -657,26 +686,28 @@ class RuntimeManager:
                     cmd_pip, check=True, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, creationflags=creationflags
                 )
+                success = True
+            except subprocess.CalledProcessError as cpe:
+                err_details = (cpe.stderr or cpe.stdout or str(cpe)).strip()
+                self._last_error = f"Installation command failed (exit code {cpe.returncode}):\n{err_details}"
+                logger.error(f"Failed to prepare environment '{feature_name}': {self._last_error}")
+                if progress_cb:
+                    progress_cb(f"Error setting up '{feature_name}': {self._last_error}")
+                self.remove_environment(feature_name)
+                return False
+            except Exception as e:
+                self._last_error = str(e)
+                logger.error(f"Failed to prepare environment '{feature_name}': {e}")
+                if progress_cb:
+                    progress_cb(f"Error setting up '{feature_name}': {e}")
+                self.remove_environment(feature_name)
+                return False
 
+        if success:
             # Record manifest for future version checks
             self.write_manifest(feature_name, python_binary, packages=packages)
-
             if progress_cb:
                 progress_cb(f"Runtime '{feature_name}' setup complete.")
             return True
 
-        except subprocess.CalledProcessError as cpe:
-            err_details = (cpe.stderr or cpe.stdout or str(cpe)).strip()
-            self._last_error = f"Installation command failed (exit code {cpe.returncode}):\n{err_details}"
-            logger.error(f"Failed to prepare environment '{feature_name}': {self._last_error}")
-            if progress_cb:
-                progress_cb(f"Error setting up '{feature_name}': {self._last_error}")
-            self.remove_environment(feature_name)
-            return False
-        except Exception as e:
-            self._last_error = str(e)
-            logger.error(f"Failed to prepare environment '{feature_name}': {e}")
-            if progress_cb:
-                progress_cb(f"Error setting up '{feature_name}': {e}")
-            self.remove_environment(feature_name)
-            return False
+        return False

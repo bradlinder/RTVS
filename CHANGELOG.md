@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.8.4
+- **Conditional Whisper Speed / Quality Setting**:
+  - Dynamically hides the **Transcription Speed / Quality** setting (`whisper_beam_size`) in Preferences whenever non-autoregressive models (such as Parakeet ONNX) are selected, displaying it exclusively for Whisper models.
+- **Multi-Select & Batch Operations in Plugin Manager**:
+  - Added multi-selection support with item checkboxes and batch actions in both the GitHub Plugins Browser and Local Plugin Manager.
+  - Added batch toolbar actions: **Select All**, **Deselect All**, **Download & Install Selected**, **Enable Selected**, **Disable Selected**, and **Uninstall Selected**.
+  - Added multi-package add-on import and batch export capabilities.
+- **Translation Model Staging & Verification Resilience**:
+  - Fixed snapshot download verification in `TranslationWorker` to check required file presence before checking `.complete` marker, ensuring successful Hugging Face transfers complete without unnecessary fallback retries.
+
 ## v2.8.3
 - **Non-Blocking Translation Runtime Setup**:
   - Moved initial isolated translation runtime environment provisioning (`manager.ensure_environment`) off the main Qt GUI thread to a background `QThread` (`TranslationEnvSetupWorker`).

@@ -1435,7 +1435,7 @@ class PlaybackPreferencesMixin:
             pref_whisper_combo.setCurrentIndex(w_idx)
         mod_form.addRow("Transcription Model:", pref_whisper_combo)
 
-        # Transcription Decoding Speed / Quality (beam_size)
+        # Transcription Decoding Speed / Quality (beam_size) - only active for Whisper models
         pref_beam_combo = QComboBox()
         pref_beam_combo.addItem("High-Speed Greedy Decoding (beam_size=1, up to 2x faster)", 1)
         pref_beam_combo.addItem("Standard Quality Decoding (beam_size=5, default)", 5)
@@ -1445,7 +1445,17 @@ class PlaybackPreferencesMixin:
             pref_beam_combo.setCurrentIndex(beam_idx)
         else:
             pref_beam_combo.setCurrentIndex(1)
-        mod_form.addRow("Transcription Speed / Quality:", pref_beam_combo)
+        pref_beam_label = QLabel("Transcription Speed / Quality:")
+        mod_form.addRow(pref_beam_label, pref_beam_combo)
+
+        def _update_beam_visibility():
+            selected_model = str(pref_whisper_combo.currentData() or "").lower()
+            is_whisper = selected_model != "parakeet-onnx" and bool(selected_model)
+            pref_beam_label.setVisible(is_whisper)
+            pref_beam_combo.setVisible(is_whisper)
+
+        pref_whisper_combo.currentIndexChanged.connect(_update_beam_visibility)
+        _update_beam_visibility()
 
         # Translation Model (OPUS-MT) selector
         pref_trans_combo = QComboBox()
