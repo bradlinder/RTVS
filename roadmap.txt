@@ -17,33 +17,40 @@ ROADMAP MAINTENANCE POLICY: N-1 SLIDING-WINDOW HORIZON
 --------------------------------------------------------------------------------
 TABLE OF CONTENTS
 --------------------------------------------------------------------------------
-1. CURRENT RELEASE (v2.9.2): MAINTENANCE, DOCUMENTATION & RUNTIME CLARITY [COMPLETED]
+1. PREVIOUS RELEASE (v2.9.2): MAINTENANCE, DOCUMENTATION & RUNTIME CLARITY [COMPLETED]
    1.1 Documentation Alignment & Post-Plugin Architecture Audit
    1.2 WeSpeaker ONNX Runtime Embedding Engine Clarification
    1.3 Repository Hygiene, Binary Blob Governance & Git History Purge
+   1.4 Version-Tagged Plugin Packaging & Asset Standardization
 
-2. UPCOMING MILESTONE (v3.0): CORE ASYNC PROVISIONING & TRANSCRIPT CLEANING (PHASE 1)
-   2.1 Unified Core Async Runtime Provisioner (RuntimeManager Engine)
-   2.2 Whisper Hallucination & Degenerate Loop Scrubber
-   2.3 Multi-Lingual Filler Word & Disfluency Detection
-   2.4 Pipeline Integration & UI Controls
-   2.5 Version Rollback & Historical Release Selector (Updater Engine)
+2. CURRENT RELEASE (v2.9.3): BUILD PIPELINE TAG SYNCHRONIZATION & ASSET RESILIENCE [COMPLETED]
+   2.1 CI/CD Version Tag Alignment in GitHub Actions Workflow
+   2.2 Build System Dynamic Version Overrides (--version and BUILD_VERSION)
+   2.3 In-App Updater Release Asset Verification & Tag Mismatch Warning
+   2.4 Standardized Synchronous Version Alignment across Core and Add-ons
 
-3. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
-   3.1 Cockos Reaper Project (.rpp) Generator
-   3.2 Magix Samplitude EDL (v1.5) Export
-   3.3 Video NLE Interchange (FCPXML, Premiere / DaVinci Resolve xmeml XML)
-   3.4 Avid / Pro Tools AAF Composition
-   3.5 Rational Timecode & Audio Sample Rate Math
+3. UPCOMING MILESTONE (v3.0): CORE ASYNC PROVISIONING & TRANSCRIPT CLEANING (PHASE 1)
+   3.1 Unified Core Async Runtime Provisioner (RuntimeManager Engine)
+   3.2 Whisper Hallucination & Degenerate Loop Scrubber
+   3.3 Multi-Lingual Filler Word & Disfluency Detection
+   3.4 Pipeline Integration & UI Controls
+   3.5 Version Rollback & Historical Release Selector (Updater Engine)
 
-4. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
+4. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
+   4.1 Cockos Reaper Project (.rpp) Generator
+   4.2 Magix Samplitude EDL (v1.5) Export
+   4.3 Video NLE Interchange (FCPXML, Premiere / DaVinci Resolve xmeml XML)
+   4.4 Avid / Pro Tools AAF Composition
+   4.5 Rational Timecode & Audio Sample Rate Math
+
+5. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
    4.1 "Text-as-Timeline" Rough-Cut Editing Engine
    4.2 Seamless Non-Destructive Playback Preview
    4.3 CTC Word Boundary Refinement & Forced Alignment
    4.4 Memory-Bounded Diarization & Chunked Streaming
 
 ================================================================================
-1. CURRENT RELEASE (v2.9.2): MAINTENANCE, DOCUMENTATION & RUNTIME CLARITY [COMPLETED]
+1. PREVIOUS RELEASE (v2.9.2): MAINTENANCE, DOCUMENTATION & RUNTIME CLARITY [COMPLETED]
 ================================================================================
 
 1.1 DOCUMENTATION ALIGNMENT & POST-PLUGIN ARCHITECTURE AUDIT
@@ -90,7 +97,30 @@ inference engine for speaker diarization:
 - Updated `build_installer.py` and `plugins/manager.py` to eliminate redundant unversioned asset duplication on GitHub Releases while ensuring robust local fallback behavior.
 
 ================================================================================
-2. VERSION 3.0: CORE ASYNC PROVISIONING & TRANSCRIPT CLEANING (PHASE 1)
+2. CURRENT RELEASE (v2.9.3): BUILD PIPELINE TAG SYNCHRONIZATION & ASSET RESILIENCE [COMPLETED]
+================================================================================
+
+2.1 CI/CD VERSION TAG ALIGNMENT IN GITHUB ACTIONS WORKFLOW
+----------------------------------------------------------
+- Resolved release asset mismatch root cause where CI/CD workflows packaged binaries using stale codebase versions rather than git release tag version names.
+- Updated all build jobs (`build-plugins`, `build-windows`, `build-macos`, `build-linux`) in `.github/workflows/build.yml` to extract the release tag (`GITHUB_REF_NAME` or `inputs.release_tag`) and inject `BUILD_VERSION` into build environments.
+
+2.2 BUILD SYSTEM DYNAMIC VERSION OVERRIDES (--version AND BUILD_VERSION)
+-----------------------------------------------------------------------
+- Enhanced `build_installer.py` to accept `--version <version>` CLI parameter and respect `BUILD_VERSION` environment variable.
+- Dynamically synchronizes Inno Setup installer scripts and artifact output filenames with the active build version.
+
+2.3 IN-APP UPDATER RELEASE ASSET VERIFICATION & TAG MISMATCH WARNING
+-------------------------------------------------------------------
+- Updated `updater.py` with asset version detection logic in `_on_update_available`.
+- Added defensive warning banner when remote GitHub release tags and attached binary package filenames diverge, guiding users clearly.
+
+2.4 STANDARDIZED SYNCHRONOUS VERSION ALIGNMENT ACROSS CORE AND ADD-ONS
+----------------------------------------------------------------------
+- Bumped application and all plugin manifests to `v2.9.3` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`, and plugin manifests.
+
+================================================================================
+3. UPCOMING MILESTONE (v3.0): CORE ASYNC PROVISIONING & TRANSCRIPT CLEANING (PHASE 1)
 ================================================================================
 
 2.1 UNIFIED CORE ASYNC RUNTIME PROVISIONER (RUNTIMEMANAGER ENGINE)

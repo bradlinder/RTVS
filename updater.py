@@ -55,7 +55,7 @@ try:
     )
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.9.2"
+    PROJECT_VERSION = "2.9.3"
     DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
     INTERNAL_APP_ID = "RadioTVStorySegmenter"
@@ -627,7 +627,16 @@ class CheckUpdateDialog(QDialog):
         if asset_info and asset_info.get("browser_download_url"):
             asset_name = asset_info.get("name", "installer package")
             asset_size = format_byte_size(asset_info.get("size", 0))
-            self.asset_info_label.setText(f"Platform installer: <b>{asset_name}</b> ({asset_size})")
+
+            clean_tag = re.sub(r"^(?:version|ver|v)?[.\s_-]*", "", tag.strip(), flags=re.IGNORECASE).lower()
+            asset_ver_match = re.search(r"(\d+\.\d+(?:\.\d+)?)", asset_name)
+            asset_ver = asset_ver_match.group(1) if asset_ver_match else ""
+
+            notice_html = ""
+            if asset_ver and clean_tag and asset_ver != clean_tag:
+                notice_html = f"<br><span style='color: #e65100; font-size: 11px;'>⚠️ Notice: Attached asset is labeled v{asset_ver}, which differs from release tag {tag}.</span>"
+
+            self.asset_info_label.setText(f"Platform installer: <b>{asset_name}</b> ({asset_size}){notice_html}")
             self.asset_info_label.show()
             self.action_btn.setText("Download and Install")
         else:

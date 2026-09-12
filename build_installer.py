@@ -59,11 +59,15 @@ try:
 except ImportError as e:
     print(f"[BUILD] Warning: Could not import prs_shared ({e}), using fallback values")
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.9.2"
-
+    PROJECT_VERSION = "2.9.3"
 except Exception as e:
     print(f"[BUILD] Unexpected error importing prs_shared: {type(e).__name__}: {e}")
     raise
+
+# Allow environment variable override if set by CI or build runner
+if os.environ.get("BUILD_VERSION"):
+    PROJECT_VERSION = os.environ.get("BUILD_VERSION").strip().lstrip("v")
+    print(f"[BUILD] Overriding PROJECT_VERSION with BUILD_VERSION environment variable: '{PROJECT_VERSION}'")
 
 # Only the PySide6 submodules this app actually imports
 PYSIDE6_USED_SUBMODULES = ["QtCore", "QtGui", "QtWidgets", "QtMultimedia", "QtMultimediaWidgets"]
@@ -563,6 +567,12 @@ def parse_build_args():
         action="store_true",
         help="Skip automatic compilation of Windows installer (useful when CI compiles in a separate step).",
     )
+    parser.add_argument(
+        "--version",
+        type=str,
+        default=None,
+        help="Explicit project version to use for output packages and installer filenames.",
+    )
     args = parser.parse_known_args()[0]
     if args.single_plugin:
         p = str(args.single_plugin).strip().lower()
@@ -665,8 +675,12 @@ def main() -> None:
             f"[FATAL BUILD ERROR] Required file not found: {prs_shared_file}\n"
             "This file must exist in the project root and contain PROJECT_VERSION and APP_DISPLAY_NAME."
         )
-    sync_installer_scripts(PROJECT_VERSION)
     args = parse_build_args()
+    if getattr(args, "version", None):
+        global PROJECT_VERSION
+        PROJECT_VERSION = str(args.version).strip().lstrip("v")
+        print(f"[BUILD] Overriding PROJECT_VERSION with CLI --version argument: '{PROJECT_VERSION}'")
+    sync_installer_scripts(PROJECT_VERSION)
     target = str(args.target).strip().lower()
     is_plugins_only = target in ("plugins", "plugins only")
     is_core_only = target in ("core", "core app only")

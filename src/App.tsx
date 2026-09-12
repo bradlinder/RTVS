@@ -19,6 +19,19 @@ import {
 // Complete changelog source of truth matching CHANGELOG.md
 const CHANGELOG_MARKDOWN = `# Changelog
 
+## v2.9.3
+- **CI/CD Version Tag Synchronization**:
+  - Fixed workflow release packaging to dynamically extract the release version from git tags (GITHUB_REF_NAME) or manual workflow inputs rather than falling back to stale local files.
+  - Injected BUILD_VERSION into all platform build jobs (build-plugins, build-windows, build-macos, build-linux) in .github/workflows/build.yml.
+- **Dynamic Build System Overrides**:
+  - Enhanced build_installer.py with --version <version> CLI parameter and BUILD_VERSION environment variable support.
+  - Automatically updates Inno Setup compilation flags, Debian packaging names, and distributable artifact filenames to match the active build tag.
+- **In-App Updater Release Asset Verification**:
+  - Added real-time asset filename inspection to updater.py in _on_update_available.
+  - Displays a warning notice if a remote GitHub release tag contains binary assets labeled with an mismatched version, guiding users before downloading.
+- **Full Project Version Alignment**:
+  - Synchronized v2.9.3 across prs_shared.py, updater.py, build_installer.py, RadioTVStorySegmenter.iss, package.json, metadata.json, index.html, transcript_story.py, and plugin manifests (wordpress, youtube, translation).
+
 ## v2.9.2
 - **Documentation Alignment & Post-Plugin Architecture Audit**:
   - Reconciled STABILITY_NOTES.md and BUILD_INSTRUCTIONS.txt to remove stale references claiming Hugging Face Transformers is tested in the core frozen binary, documenting that it lives strictly within the isolated plugins/translation/ virtual environment.
@@ -30,6 +43,9 @@ const CHANGELOG_MARKDOWN = `# Changelog
   - Enforced release archive distribution governance via GitHub Releases.
 - **Version Alignment**:
   - Bumped application version to v2.9.2 across prs_shared.py, updater.py, build_installer.py, RadioTVStorySegmenter.iss, package.json, plugin manifests (wordpress, youtube, translation), metadata, and documentation.
+- **Version-Tagged Plugin Packaging & Asset Standardization**:
+  - Standardized plugin release assets to exclusively publish version-tagged .rtvs-addon packages (rtvs-plugin-{id}-v{version}.rtvs-addon) along with matching .zip archives.
+  - Updated build_installer.py and plugins/manager.py to eliminate redundant unversioned asset duplication on GitHub Releases while ensuring robust local fallback behavior.
 
 ## v2.9.1
 - **Seamless App Upgrade Plugin Synchronization**:
@@ -99,7 +115,7 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVersion, setSelectedVersion] = useState('all');
   const [copiedVersion, setCopiedVersion] = useState<string | null>(null);
-  const [expandedVersions, setExpandedVersions] = useState<Record<string, boolean>>({ 'v2.9.2': true, 'v2.9.1': true });
+  const [expandedVersions, setExpandedVersions] = useState<Record<string, boolean>>({ 'v2.9.3': true, 'v2.9.2': true });
 
 
   const releases: ReleaseSection[] = useMemo(() => {
@@ -161,7 +177,7 @@ export function App() {
               <div className="flex items-center gap-2">
                 <span className="font-bold text-base sm:text-lg tracking-tight text-white">Radio & TV Segmenter</span>
                 <span className="px-2.5 py-0.5 text-xs font-semibold bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 rounded-full flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" /> v2.9.2 Latest
+                  <Sparkles className="w-3 h-3" /> v2.9.3 Latest
                 </span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">Full Interactive Project Release Changelog</p>
@@ -328,7 +344,7 @@ export function App() {
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-slate-900/40 py-6 mt-12 text-center text-xs text-slate-500">
-        <p>Radio & TV Segmenter v2.9.2 — Professional Broadcast Story Segmentation & Modular Publishing Suite</p>
+        <p>Radio & TV Segmenter v2.9.3 — Professional Broadcast Story Segmentation & Modular Publishing Suite</p>
       </footer>
 
     </div>

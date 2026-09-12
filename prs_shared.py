@@ -305,7 +305,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "2.9.2"
+PROJECT_VERSION = "2.9.3"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 

@@ -71,8 +71,28 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Extract Project Version
+        id: get_version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.release_tag }}" ] && [[ "${{ inputs.release_tag }}" =~ ^v[0-9] ]]; then
+            VERSION="${{ inputs.release_tag }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not extract version"
+            exit 1
+          fi
+          echo "Extracted version: ${VERSION}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
       - name: Package Selected Plugins
         env:
+          BUILD_VERSION: ${{ steps.get_version.outputs.version }}
           BUILD_TARGET: 'plugins'
           BUILD_PLUGIN_WORDPRESS: ${{ inputs.plugin_wordpress != false }}
           BUILD_PLUGIN_YOUTUBE: ${{ inputs.plugin_youtube != false }}
@@ -144,9 +164,16 @@ jobs:
         id: get_version
         shell: bash
         run: |
-          VERSION=$(python -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.release_tag }}" ] && [[ "${{ inputs.release_tag }}" =~ ^v[0-9] ]]; then
+            VERSION="${{ inputs.release_tag }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
+          fi
           if [ -z "$VERSION" ]; then
-            echo "::error::Could not extract PROJECT_VERSION from prs_shared.py"
+            echo "::error::Could not extract PROJECT_VERSION"
             exit 1
           fi
           echo "Extracted version: ${VERSION}"
@@ -154,6 +181,7 @@ jobs:
 
       - name: Run PyInstaller build
         env:
+          BUILD_VERSION: ${{ steps.get_version.outputs.version }}
           BUILD_TARGET: 'all'
           BUILD_PLUGIN_WORDPRESS: ${{ inputs.plugin_wordpress != false }}
           BUILD_PLUGIN_YOUTUBE: ${{ inputs.plugin_youtube != false }}
@@ -265,8 +293,28 @@ jobs:
         run: |
           uv pip install --system -r requirements.txt -r requirements-build.txt
 
+      - name: Extract Project Version
+        id: get_version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.release_tag }}" ] && [[ "${{ inputs.release_tag }}" =~ ^v[0-9] ]]; then
+            VERSION="${{ inputs.release_tag }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not extract version"
+            exit 1
+          fi
+          echo "Extracted version: ${VERSION}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
       - name: Run PyInstaller build
         env:
+          BUILD_VERSION: ${{ steps.get_version.outputs.version }}
           BUILD_TARGET: 'all'
           BUILD_PLUGIN_WORDPRESS: ${{ inputs.plugin_wordpress != false }}
           BUILD_PLUGIN_YOUTUBE: ${{ inputs.plugin_youtube != false }}
@@ -327,8 +375,28 @@ jobs:
           uv pip install --system --no-deps --index-url https://download.pytorch.org/whl/cpu "torch>=2.0.0,<2.4.0" "torchaudio>=2.0.0,<2.4.0"
           uv pip install --system -r requirements.txt -r requirements-build.txt
 
+      - name: Extract Project Version
+        id: get_version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.release_tag }}" ] && [[ "${{ inputs.release_tag }}" =~ ^v[0-9] ]]; then
+            VERSION="${{ inputs.release_tag }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not extract version"
+            exit 1
+          fi
+          echo "Extracted version: ${VERSION}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
       - name: Run PyInstaller build
         env:
+          BUILD_VERSION: ${{ steps.get_version.outputs.version }}
           BUILD_TARGET: 'all'
           BUILD_PLUGIN_WORDPRESS: ${{ inputs.plugin_wordpress != false }}
           BUILD_PLUGIN_YOUTUBE: ${{ inputs.plugin_youtube != false }}
@@ -336,12 +404,13 @@ jobs:
         run: python3 build_installer.py
 
       - name: Package Debian (.deb) & Distributable Tarball (.tar.gz)
+        env:
+          BUILD_VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           bash installer/Linux/build_deb.sh
-          VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
+          VERSION="${BUILD_VERSION}"
           if [ -z "$VERSION" ]; then
-            echo "::error::Could not extract PROJECT_VERSION from prs_shared.py"
-            exit 1
+            VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
           fi
           cd dist
           GZIP=-9 tar -czvf "RadioTVSegmenter-${VERSION}-Linux-x86_64.tar.gz" RadioTVSegmenter/

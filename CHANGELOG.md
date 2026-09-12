@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.9.3
+- **CI/CD Version Tag Synchronization**:
+  - Fixed workflow release packaging to dynamically extract the release version from git tags (`GITHUB_REF_NAME`) or manual workflow inputs rather than falling back to stale local files.
+  - Injected `BUILD_VERSION` into all platform build jobs (`build-plugins`, `build-windows`, `build-macos`, `build-linux`) in `.github/workflows/build.yml`.
+- **Dynamic Build System Overrides**:
+  - Enhanced `build_installer.py` with `--version <version>` CLI parameter and `BUILD_VERSION` environment variable support.
+  - Automatically updates Inno Setup compilation flags, Debian packaging names, and distributable artifact filenames to match the active build tag.
+- **In-App Updater Release Asset Verification**:
+  - Added real-time asset filename inspection to `updater.py` in `_on_update_available`.
+  - Displays a warning notice if a remote GitHub release tag contains binary assets labeled with an mismatched version, guiding users before downloading.
+- **Full Project Version Alignment**:
+  - Synchronized `v2.9.3` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`, `transcript_story.py`, and plugin manifests (`wordpress`, `youtube`, `translation`).
+
 ## v2.9.2
 - **Documentation Alignment & Post-Plugin Architecture Audit**:
   - Reconciled `STABILITY_NOTES.md` and `BUILD_INSTRUCTIONS.txt` to remove stale references claiming Hugging Face `Transformers` is tested in the core frozen binary, documenting that it lives strictly within the isolated `plugins/translation/` virtual environment.
