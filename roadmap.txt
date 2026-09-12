@@ -18,6 +18,7 @@ TABLE OF CONTENTS
    2.2 Whisper Hallucination & Degenerate Loop Scrubber
    2.3 Multi-Lingual Filler Word & Disfluency Detection
    2.4 Pipeline Integration & UI Controls
+   2.5 Version Rollback & Historical Release Selector (Updater Engine)
 
 3. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
    3.1 Cockos Reaper Project (.rpp) Generator
@@ -157,6 +158,29 @@ Implementation Details:
   acoustic engine in `StoryAutoDetectWorker`.
 - Hook into batch processing worker (`radio_tv_story_segmenter_worker.py`) so cleaning
   occurs automatically after ASR before story segment segmentation.
+
+2.5 VERSION ROLLBACK & HISTORICAL RELEASE SELECTOR (UPDATER ENGINE)
+------------------------------------------------------------------
+Expand the "Check for Updates" dialog (`updater.py`) with an interactive version
+history selector, allowing users to view, inspect release notes for, and install
+both latest updates and previous stable releases.
+
+Implementation Details:
+- Target File: `updater.py`
+- GitHub API: Query `/repos/{owner}/{repo}/releases` (paginated list of all releases)
+  instead of solely `/releases/latest`.
+- UI Components:
+  * Dropdown selector (`QComboBox`) listing available releases with tags (e.g. `v2.9.2 (Current)`, `v2.9.1`, `v2.8.7`).
+  * Real-time release notes rendering in `QTextBrowser` when switching dropdown items.
+  * Action button dynamically changes label & behavior: "Update to vX.X", "Reinstall vX.X", or "Rollback to vX.X".
+- Downgrade Risk Safeguards & Mitigations:
+  * Modal Warning Dialog: When selecting a version lower than `PROJECT_VERSION`, show
+    a prominent confirmation dialog:
+    [!] "Warning: Installing an older version (vX.X) may cause configuration or project file
+        incompatibilities with newer data formats. It is recommended to back up your project data.
+        Would you like to proceed?"
+  * Checksum & asset matching: Downloads platform-appropriate installer asset for the
+    selected tag and verifies SHA-256 before executing the installer.
 
 ================================================================================
 3. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
