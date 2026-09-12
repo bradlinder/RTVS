@@ -25,6 +25,9 @@ When bumping or updating the application version number, you MUST update **ALL**
 6. `transcript_story.py` (docstring version header)
 7. `package.json`, `metadata.json`, and `index.html` (title & meta tags)
 8. `CHANGELOG.md` & `/src/App.tsx` (version notes and expanded accordion defaults)
+9. `roadmap.txt` (N-1 Sliding-Window Policy):
+   - Always ensure the newly shipped version and its completed items are recorded in the roadmap (even if they were unplanned bugfixes or immediate maintenance).
+   - Retain only the active release ($N$) and its immediate predecessor ($N-1$); prune any versions older than $N-1$ from `roadmap.txt` so it stays focused on the present build and upcoming releases.
 
 ## 3. Pre-Completion Verification
 Before completing code modifications:
