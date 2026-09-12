@@ -55,12 +55,24 @@ inference engine for speaker diarization:
   embedding extraction without heavy PyTorch PyAnnote dependencies.
 - Retain existing PyInstaller hooks (`torch_dll_hook.py`) and CI/CD self-test validation.
 
-1.3 REPOSITORY HYGIENE & BINARY BLOB GOVERNANCE
-----------------------------------------------
+1.3 REPOSITORY HYGIENE, BINARY BLOB GOVERNANCE & GIT HISTORY PURGE
+------------------------------------------------------------------
 - Maintain `.gitignore` rules preventing temporary files (`node_modules/`, `.vite/`,
   `.env.local`, `.venv/`, `__pycache__/`) from being tracked in Git.
 - Enforce storing snapshot release archives exclusively on GitHub Releases rather than
   committing binary `.zip` blobs into version control history.
+- Historical Binary Blob Purge Runbook (for maintainers via local CLI):
+  To permanently purge legacy committed `.zip` snapshot archives from remote GitHub history:
+  1. Install `git-filter-repo`:
+     `pip install git-filter-repo`
+  2. Perform a fresh, clean clone of the repository:
+     `git clone https://github.com/bradlinder/RTVS.git RTVS-cleanup && cd RTVS-cleanup`
+  3. Purge the historical binary paths across all commits:
+     `git filter-repo --invert-paths --path RadioTVSegmenter_v2.76c_source.zip`
+     (or for all zip blobs: `git filter-repo --invert-paths --path-glob '*.zip'`)
+  4. Re-attach origin remote and force-push the rewritten history:
+     `git remote add origin https://github.com/bradlinder/RTVS.git`
+     `git push origin --force --all && git push origin --force --tags`
 
 ================================================================================
 2. VERSION 3.0: CORE ASYNC PROVISIONING & TRANSCRIPT CLEANING (PHASE 1)
