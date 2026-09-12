@@ -246,7 +246,7 @@ def _find_release_checksum(release_info: dict, asset_name: str) -> str | None:
 
 def select_best_asset_for_platform(assets: list[dict], target_version: str = "", repo: str = "") -> dict:
     """Select the most suitable release asset dictionary for the current operating system,
-    with automatic fallback/synthetic asset generation matching standard GitHub release naming conventions.
+    with robust matching for installer executables and archives.
     """
     if assets:
         current_os = sys.platform
@@ -256,42 +256,45 @@ def select_best_asset_for_platform(assets: list[dict], target_version: str = "",
 
         for asset in assets:
             name = asset.get("name", "").lower()
-            norm_name = re.sub(r"\.+", ".", name)
-            score = 1  # Base score so any valid platform asset matches if no version match
+            url = asset.get("browser_download_url", "")
+            if not url:
+                continue
 
-            # Prioritize assets containing the specific target version string (matching both raw and normalized names)
+            norm_name = re.sub(r"\.+", ".", name)
+            score = 10  # Base score for any valid asset with download URL
+
+            # Prioritize assets containing the specific target version string
             if clean_ver and (clean_ver in name or clean_ver in norm_name):
                 score += 50
 
             if current_os == "win32":
-                if any(name.endswith(ext) for ext in [".exe", ".msi", ".zip", ".rar", ".7z"]):
-                    score += 20
+                if name.endswith(".exe"):
+                    score += 100
                     if any(kw in name for kw in ["setup", "installer", "radiotv", "segmenter", "win", "windows"]):
-                        score += 20
-                    candidates.append((score, asset))
+                        score += 50
+                elif any(name.endswith(ext) for ext in [".msi", ".zip", ".rar", ".7z"]):
+                    score += 40
             elif current_os == "darwin":
-                if any(name.endswith(ext) for ext in [".dmg", ".pkg", ".zip", ".app"]):
-                    score += 30
-                    candidates.append((score, asset))
+                if any(name.endswith(ext) for ext in [".dmg", ".pkg"]):
+                    score += 100
+                elif any(name.endswith(ext) for ext in [".zip", ".app"]):
+                    score += 50
             else:
-                if any(name.endswith(ext) for ext in [".deb", ".tar.gz", ".tgz", ".appimage"]):
-                    score += 25
-                    candidates.append((score, asset))
+                if name.endswith(".deb"):
+                    score += 100
+                elif any(name.endswith(ext) for ext in [".tar.gz", ".tgz", ".appimage"]):
+                    score += 80
 
-            if asset.get("browser_download_url"):
-                candidates.append((score, asset))
+            candidates.append((score, asset))
 
         if candidates:
             candidates.sort(key=lambda x: x[0], reverse=True)
             return candidates[0][1]
 
-        # Absolute fallback: return first asset with a download URL
+        # Fallback to first asset with download URL
         for asset in assets:
             if asset.get("browser_download_url"):
                 return asset
-
-        if assets:
-            return assets[0]
 
     # Synthetic fallback asset generation if GitHub release metadata assets list is empty or unavailable
     target_repo = repo or get_github_repo() or DEFAULT_GITHUB_REPO
@@ -315,7 +318,7 @@ def select_best_asset_for_platform(assets: list[dict], target_version: str = "",
 
 
 def fetch_releases(repo: str, max_releases: int = 30) -> list[dict]:
-    """Query GitHub API for published releases (including pre-releases), sorted by tag/date,
+    """Query GitHub API for published releases (including pre-releases), sorted semantically by version number,
     with robust offline/fallback release data.
     """
     url = f"https://api.github.com/repos/{repo}/releases?per_page={max(10, min(100, max_releases))}"
@@ -327,7 +330,7 @@ def fetch_releases(repo: str, max_releases: int = 30) -> list[dict]:
                 "Accept": "application/vnd.github.v3+json",
             },
         )
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with urllib.request.urlopen(req, timeout=8) as response:
             status = response.getcode()
             if status == 200:
                 raw = response.read().decode("utf-8")
@@ -335,6 +338,8 @@ def fetch_releases(repo: str, max_releases: int = 30) -> list[dict]:
                 if isinstance(releases, list) and releases:
                     published = [r for r in releases if isinstance(r, dict) and not r.get("draft", False) and r.get("tag_name")]
                     if published:
+                        # Sort semantically newest to oldest using parse_version_tuple
+                        published.sort(key=lambda r: parse_version_tuple(r.get("tag_name", "")), reverse=True)
                         return published
             elif isinstance(releases, dict) and "tag_name" in releases and not releases.get("draft", False):
                 return [releases]
@@ -928,15 +933,25 @@ class CheckUpdateDialog(QDialog):
         self.close_btn.setText("Later")
 
     def _on_download_error(self, message: str):
+        self.progress_bar.hide()
         self.status_label.setText(
             f"Download Error:\n{message}\n\n"
-            "Note: If the release tag exists on GitHub but the installer binary has not yet been uploaded or attached, "
-            "please click 'Open Download Page' to view releases on GitHub."
+            "The direct installer binary for this release is not yet attached on GitHub.\n"
+            "Opening the GitHub Releases page in your web browser..."
         )
         self.status_label.setStyleSheet("font-size: 13px; color: #d32f2f;")
         self.action_btn.setText("Open Download Page")
         self.action_btn.setEnabled(True)
         self.close_btn.setText("Close")
+
+        QMessageBox.warning(
+            self,
+            "Installer Binary Not Found",
+            f"Could not download installer directly:\n{message}\n\n"
+            "The release tag exists on GitHub, but the Windows Setup .exe has not yet been uploaded as a release asset.\n\n"
+            "Opening https://github.com/bradlinder/RTVS/releases in your browser now.",
+        )
+        self._open_github_release()
 
     def _install_and_restart(self):
         if not self.downloaded_path:
