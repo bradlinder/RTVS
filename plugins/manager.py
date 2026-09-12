@@ -525,8 +525,8 @@ class GitHubPluginsWorker(QThread):
                 "version": PROJECT_VERSION,
                 "description": "Publishes broadcast video stories to YouTube with chapter timestamps, frame grabs/custom thumbnails, tags, and assisted YouTube Studio upload.",
                 "author": "Radio & TV Segmenter Team",
-                "asset_name": "youtube.rtvs-addon",
-                "download_url": f"https://github.com/{self.repo}/releases/download/v{PROJECT_VERSION}/youtube.rtvs-addon",
+                "asset_name": f"rtvs-plugin-youtube-v{PROJECT_VERSION}.rtvs-addon",
+                "download_url": f"https://github.com/{self.repo}/releases/download/v{PROJECT_VERSION}/rtvs-plugin-youtube-v{PROJECT_VERSION}.rtvs-addon",
                 "fallback_url": f"https://raw.githubusercontent.com/{self.repo}/main/plugins/youtube.rtvs-addon",
             },
             {
@@ -536,8 +536,8 @@ class GitHubPluginsWorker(QThread):
                 "version": PROJECT_VERSION,
                 "description": "Publishes segmented audio/video stories, transcripts, excerpts, and custom featured images directly to WordPress posts via the WP REST API.",
                 "author": "Radio & TV Segmenter Team",
-                "asset_name": "wordpress.rtvs-addon",
-                "download_url": f"https://github.com/{self.repo}/releases/download/v{PROJECT_VERSION}/wordpress.rtvs-addon",
+                "asset_name": f"rtvs-plugin-wordpress-v{PROJECT_VERSION}.rtvs-addon",
+                "download_url": f"https://github.com/{self.repo}/releases/download/v{PROJECT_VERSION}/rtvs-plugin-wordpress-v{PROJECT_VERSION}.rtvs-addon",
                 "fallback_url": f"https://raw.githubusercontent.com/{self.repo}/main/plugins/wordpress.rtvs-addon",
             },
             {
@@ -547,8 +547,8 @@ class GitHubPluginsWorker(QThread):
                 "version": PROJECT_VERSION,
                 "description": "Provides local multi-language neural machine translation (MarianMT and NLLB models) with synchronized bilingual split-view editing and translated exports.",
                 "author": "Radio & TV Segmenter Team",
-                "asset_name": "translation.rtvs-addon",
-                "download_url": f"https://github.com/{self.repo}/releases/download/v{PROJECT_VERSION}/translation.rtvs-addon",
+                "asset_name": f"rtvs-plugin-translation-v{PROJECT_VERSION}.rtvs-addon",
+                "download_url": f"https://github.com/{self.repo}/releases/download/v{PROJECT_VERSION}/rtvs-plugin-translation-v{PROJECT_VERSION}.rtvs-addon",
                 "fallback_url": f"https://raw.githubusercontent.com/{self.repo}/main/plugins/translation.rtvs-addon",
             },
         ]

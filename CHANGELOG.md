@@ -11,6 +11,9 @@
   - Enforced release archive distribution governance via GitHub Releases.
 - **Version Alignment**:
   - Bumped application version to `v2.9.2` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, plugin manifests (`wordpress`, `youtube`, `translation`), metadata, and documentation.
+- **Version-Tagged Plugin Packaging & Asset Standardization**:
+  - Standardized plugin release assets to exclusively publish version-tagged `.rtvs-addon` packages (`rtvs-plugin-{id}-v{version}.rtvs-addon`) along with matching `.zip` archives.
+  - Updated `build_installer.py` and `plugins/manager.py` to eliminate redundant unversioned asset duplication on GitHub Releases while ensuring robust local fallback behavior.
 
 ## v2.9.1
 

@@ -84,6 +84,11 @@ inference engine for speaker diarization:
      `git remote add origin https://github.com/bradlinder/RTVS.git`
      `git push origin --force --all && git push origin --force --tags`
 
+1.4 VERSION-TAGGED PLUGIN PACKAGING & ASSET STANDARDIZATION
+-----------------------------------------------------------
+- Standardized plugin release assets to exclusively publish version-tagged `.rtvs-addon` packages (`rtvs-plugin-{id}-v{version}.rtvs-addon`) along with matching `.zip` archives.
+- Updated `build_installer.py` and `plugins/manager.py` to eliminate redundant unversioned asset duplication on GitHub Releases while ensuring robust local fallback behavior.
+
 ================================================================================
 2. VERSION 3.0: CORE ASYNC PROVISIONING & TRANSCRIPT CLEANING (PHASE 1)
 ================================================================================

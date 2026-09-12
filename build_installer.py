@@ -623,25 +623,23 @@ def package_plugins(
                 pass
 
         zip_path = dist_plugins / f"rtvs-plugin-{plugin_id}-v{p_ver}.zip"
-        addon_path = dist_plugins / f"{plugin_id}.rtvs-addon"
         addon_ver_path = dist_plugins / f"rtvs-plugin-{plugin_id}-v{p_ver}.rtvs-addon"
         local_addon_in_sub = p_dir / f"{plugin_id}.rtvs-addon"
         local_addon_in_root = plugins_src / f"{plugin_id}.rtvs-addon"
 
-        print(f"[BUILD] Packaging plugin '{plugin_id}' (v{p_ver}) -> {addon_path.name}")
-        # Build .rtvs-addon archive (which contains the plugin files)
-        with zipfile.ZipFile(addon_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        print(f"[BUILD] Packaging plugin '{plugin_id}' (v{p_ver}) -> {addon_ver_path.name}")
+        # Build versioned .rtvs-addon archive (which contains the plugin files)
+        with zipfile.ZipFile(addon_ver_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for item in p_dir.rglob("*"):
                 if item.is_file() and "__pycache__" not in item.parts and not item.name.endswith((".pyc", ".pyo", ".rtvs-addon")):
                     rel = item.relative_to(p_dir)
                     zf.write(item, rel)
 
-        # Mirror as versioned .rtvs-addon and .zip for release downloads
-        shutil.copy2(addon_path, addon_ver_path)
-        shutil.copy2(addon_path, zip_path)
-        shutil.copy2(addon_path, local_addon_in_sub)
-        shutil.copy2(addon_path, local_addon_in_root)
-        generated_zips.extend([addon_path, addon_ver_path, zip_path])
+        # Mirror as versioned .zip for release downloads (same archive payload)
+        shutil.copy2(addon_ver_path, zip_path)
+        shutil.copy2(addon_ver_path, local_addon_in_sub)
+        shutil.copy2(addon_ver_path, local_addon_in_root)
+        generated_zips.extend([addon_ver_path, zip_path])
 
         if app_root is not None:
             dest_plugin_dir = app_root / "plugins" / plugin_id
@@ -652,10 +650,10 @@ def package_plugins(
                     target = dest_plugin_dir / rel
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(item, target)
-            # Ensure .rtvs-addon is also in app_root/plugins/
-            shutil.copy2(addon_path, dest_plugin_dir / f"{plugin_id}.rtvs-addon")
-            shutil.copy2(addon_path, app_root / "plugins" / f"{plugin_id}.rtvs-addon")
-            print(f"[BUILD] Bundled plugin '{plugin_id}' and .rtvs-addon into {dest_plugin_dir}")
+            # Ensure unversioned .rtvs-addon copy exists locally for fallback loading
+            shutil.copy2(addon_ver_path, dest_plugin_dir / f"{plugin_id}.rtvs-addon")
+            shutil.copy2(addon_ver_path, app_root / "plugins" / f"{plugin_id}.rtvs-addon")
+            print(f"[BUILD] Bundled plugin '{plugin_id}' and versioned add-on into {dest_plugin_dir}")
 
     return generated_zips
 
