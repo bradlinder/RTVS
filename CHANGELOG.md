@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.9.6
+- **Windows & Cross-Platform Artifact Naming Normalization**:
+  - Resolved an issue in the packaging pipeline where double dots (e.g. `2.9..6`) could be introduced into Windows installer executable names (`RadioTVSegmenter-2.9.6-Windows-Setup.exe`) and Linux tarball archives.
+  - Hardened version extraction in `build_installer.py`, `build_windows.bat`, `build_deb.sh`, `build_app.sh`, and `.github/workflows/build.yml` with strict dot-collapsing and semantic versioning sanitization (`re.sub(r"\.+", ".", v)` / `tr -s '.'`).
+- **Updater Engine Resilient Asset Matching & Semantic Verification**:
+  - Enhanced `updater.py` with normalized string and semantic comparison logic across `parse_version_tuple`, `_find_release_checksum`, `select_best_asset_for_platform`, and `_display_release`.
+  - Checksum discovery and asset matching now seamlessly handle normalized filenames (collapsing any legacy double-dot naming), ensuring download and verification never fail due to minor formatting discrepancies.
+  - Asset label mismatch notices now evaluate numerical semantic version tuples rather than raw string comparisons to eliminate false-alarm warning banners.
+- **Full Project Version Alignment**:
+  - Synchronized `v2.9.6` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`, `transcript_story.py`, and plugin manifests (`wordpress`, `youtube`, `translation`).
+
 ## v2.9.5
 - **WordPress Export Media Notice Placement**:
   - Refined custom notice placement in `wordpress_export.py` so that top-positioned header notices appear directly beneath embedded audio (`<!-- wp:audio -->`) or video (`<!-- wp:video -->`) players, ensuring media player controls stay prominently at the top of the post.

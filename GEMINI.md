@@ -17,7 +17,8 @@
 
 ## 2. Standardized Version Bump Checklist
 - **Incremental Point Release Policy**:
-  - Incrementally update the version number with a point release (e.g., `v2.9.4` -> `v2.9.5`) whenever you make an update, bug fix, or feature enhancement to the core app, unless the user explicitly specifies a different version number to apply.
+  - Incrementally update the version number with a point release (e.g., `v2.9.5` -> `v2.9.6`, `v2.9.7`, `v2.10.1`) whenever you make an update, bug fix, or feature enhancement to the core app, unless the user explicitly specifies a different version number to apply.
+  - Always format version strings strictly as standard semantic numbers with single period delimiters (e.g. `2.9.6`, `2.9.7`, `2.10.1`). Never introduce double dots (e.g. `2.9..6`).
   - Execute the full version bump checklist below synchronously with every update.
 
 When bumping or updating the application version number, you MUST update **ALL** of the following locations synchronously:
@@ -32,10 +33,13 @@ When bumping or updating the application version number, you MUST update **ALL**
 9. `roadmap.txt & CHANGELOG.md (N-1 Sliding-Window & Real-Time Sync Policy)`:
    - Whenever any code change, bug fix, packaging adjustment, or feature refinement is made during a release cycle, it MUST be recorded immediately in the current release section of `roadmap.txt` and `CHANGELOG.md` (even if it occurs after the initial version number bump).
    - Retain only the active release ($N$) and its immediate predecessor ($N-1$); prune any versions older than $N-1$ from `roadmap.txt`.
-10. `Roadmap Item Status Tracking Policy`:
-   - `roadmap.txt` items and milestones MUST be annotated with status notations: `[NOT STARTED]`, `[IN-PROGRESS]`, or `[COMPLETED]`.
-   - When work starts on an item in the roadmap, mark it immediately as `[IN-PROGRESS]`.
-   - Mark an item as `[COMPLETED]` when implementation is finalized, or ask the user if it's time to mark an item as completed, or infer based on whether development has moved on to another part of the roadmap.
+10. `Roadmap Item Status Tracking Policy (Social Digest Progress Indicator Style)`:
+   - `roadmap.txt` milestones and feature items MUST be annotated with explicit progress checkboxes and status notations:
+     * `[x]` for completed items / releases (e.g. `[x] 1.1 Feature Title` or `(Completed in vX.X)`)
+     * `[-]` for in-progress items (e.g. `[-] 3.1 Feature Title`)
+     * `[ ]` for planned / not started items (e.g. `[ ] 3.2 Feature Title` or `[NOT STARTED]`)
+   - When work starts on an item in the roadmap, mark it immediately as in-progress (`[-]`).
+   - Mark an item as completed (`[x]`) when implementation is finalized, or ask the user if it's time to mark an item as completed, or infer based on whether development has moved on to another part of the roadmap.
 
 ## 3. Pre-Completion Verification
 Before completing code modifications:

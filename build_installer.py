@@ -59,10 +59,13 @@ try:
 except ImportError as e:
     print(f"[BUILD] Warning: Could not import prs_shared ({e}), using fallback values")
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.9.5"
+    PROJECT_VERSION = "2.9.6"
 except Exception as e:
     print(f"[BUILD] Unexpected error importing prs_shared: {type(e).__name__}: {e}")
     raise
+
+# Ensure PROJECT_VERSION is clean and free of duplicate dots
+PROJECT_VERSION = re.sub(r"\.+", ".", str(PROJECT_VERSION).strip().lstrip("v"))
 
 # Allow environment variable override if set by CI or build runner
 if os.environ.get("BUILD_VERSION"):
@@ -510,13 +513,14 @@ def compile_windows_installer(project_version: str) -> bool:
             iscc_path = str(cand)
             break
 
+    clean_version = re.sub(r"\.+", ".", str(project_version).strip().lstrip("v"))
     if not iscc_path:
         print("\n[BUILD] Note: Inno Setup compiler (ISCC.exe) was not found in PATH or standard directories.")
-        print(f"[BUILD] To compile the Windows installer package, run: iscc /DMyAppVersion=\"{project_version}\" {iss_file}")
+        print(f"[BUILD] To compile the Windows installer package, run: iscc /DMyAppVersion=\"{clean_version}\" {iss_file}")
         return False
 
-    print(f"\n[BUILD] Compiling Windows setup installer executable (v{project_version}) with {iscc_path}...")
-    cmd = [iscc_path, f"/DMyAppVersion={project_version}", str(iss_file)]
+    print(f"\n[BUILD] Compiling Windows setup installer executable (v{clean_version}) with {iscc_path}...")
+    cmd = [iscc_path, f"/DMyAppVersion={clean_version}", str(iss_file)]
     ret = subprocess.run(cmd, cwd=str(ROOT))
     if ret.returncode == 0:
         print(f"[SUCCESS] Windows Installer created for v{project_version} in dist/installer/")

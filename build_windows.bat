@@ -95,12 +95,12 @@ if defined ISCC_PATH (
     echo [BONUS] Inno Setup compiler found at "!ISCC_PATH!".
     echo Compiling Windows setup installer executable...
     set "APP_VER="
-    for /f "tokens=*" %%v in ('!PYTHON_EXE! -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))" 2^>nul') do set "APP_VER=%%v"
+    for /f "tokens=*" %%v in ('!PYTHON_EXE! -c "import re, pathlib; v = re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1); print(re.sub(r'\.+', '.', v.strip().lstrip('v')))" 2^>nul') do set "APP_VER=%%v"
     if not defined APP_VER (
-        for /f "tokens=*" %%v in ('!PYTHON_EXE! -c "from prs_shared import PROJECT_VERSION; print(PROJECT_VERSION)" 2^>nul') do set "APP_VER=%%v"
+        for /f "tokens=*" %%v in ('!PYTHON_EXE! -c "import re; from prs_shared import PROJECT_VERSION; print(re.sub(r'\.+', '.', str(PROJECT_VERSION).strip().lstrip('v')))" 2^>nul') do set "APP_VER=%%v"
     )
     if not defined APP_VER (
-        for /f "tokens=*" %%v in ('!PYTHON_EXE! -c "import json, pathlib; print(json.loads(pathlib.Path('package.json').read_text(encoding='utf-8')).get('version', ''))" 2^>nul') do set "APP_VER=%%v"
+        for /f "tokens=*" %%v in ('!PYTHON_EXE! -c "import json, pathlib, re; v = json.loads(pathlib.Path('package.json').read_text(encoding='utf-8')).get('version', ''); print(re.sub(r'\.+', '.', v.strip().lstrip('v')))" 2^>nul') do set "APP_VER=%%v"
     )
     echo Building installer version: !APP_VER!
     "!ISCC_PATH!" /DMyAppVersion="!APP_VER!" installer\Windows\RadioTVStorySegmenter.iss

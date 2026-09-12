@@ -56,7 +56,7 @@ try:
     )
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.9.5"
+    PROJECT_VERSION = "2.9.6"
     DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
     INTERNAL_APP_ID = "RadioTVStorySegmenter"
@@ -132,16 +132,20 @@ except Exception:
 def parse_version_tuple(version_str: str) -> tuple[tuple[int, ...], int]:
     """Parse version string into comparable numerical components and a stability weight.
     Releases without pre-release tags receive weight 1; pre-releases ('-beta', '-rc') receive 0.
-    Handles 'v2.8.5', 'v.2.8.5', 'version-2.8.5', and raw '2.8.5'.
+    Handles 'v2.8.5', 'v.2.8.5', 'version-2.8.5', '2.9..6', and raw '2.8.5'.
     """
     if not version_str:
         return ((0, 0, 0), 0)
     # Strip any leading 'version', 'ver', 'v', dots, underscores, dashes, or whitespace
     cleaned = re.sub(r"^(?:version|ver|v)?[.\s_-]*", "", version_str.strip(), flags=re.IGNORECASE)
+    # Collapse any duplicate/consecutive dots
+    cleaned = re.sub(r"\.+", ".", cleaned)
     is_prerelease = bool(re.search(r"[-_.]?(beta|alpha|rc|dev|preview)", version_str, re.IGNORECASE))
 
     parts = []
     for chunk in cleaned.split("."):
+        if not chunk:
+            continue
         m = re.match(r"^(\d+)", chunk)
         if m:
             parts.append(int(m.group(1)))
@@ -201,6 +205,7 @@ def _is_trusted_download_url(url: str) -> bool:
 def _find_release_checksum(release_info: dict, asset_name: str) -> str | None:
     assets = (release_info or {}).get("assets", []) or []
     asset_name_lower = asset_name.lower()
+    asset_name_normalized = re.sub(r"\.+", ".", asset_name_lower)
 
     def _fetch_text(url: str) -> str | None:
         if not _is_trusted_download_url(url):
@@ -214,7 +219,9 @@ def _find_release_checksum(release_info: dict, asset_name: str) -> str | None:
 
     for asset in assets:
         name = str(asset.get("name", ""))
-        if name.lower() == f"{asset_name_lower}.sha256":
+        name_lower = name.lower()
+        name_normalized = re.sub(r"\.+", ".", name_lower)
+        if name_lower == f"{asset_name_lower}.sha256" or name_normalized == f"{asset_name_normalized}.sha256":
             text = _fetch_text(asset.get("browser_download_url", ""))
             if text:
                 token = text.strip().split()[0] if text.strip() else ""
@@ -229,9 +236,11 @@ def _find_release_checksum(release_info: dict, asset_name: str) -> str | None:
                 continue
             for line in text.splitlines():
                 parts = line.strip().split()
-                if len(parts) >= 2 and parts[1].lstrip("*").lower() == asset_name_lower:
-                    if re.fullmatch(r"[0-9a-fA-F]{64}", parts[0]):
-                        return parts[0].lower()
+                if len(parts) >= 2:
+                    checksum_file = parts[1].lstrip("*").lower()
+                    if checksum_file == asset_name_lower or re.sub(r"\.+", ".", checksum_file) == asset_name_normalized:
+                        if re.fullmatch(r"[0-9a-fA-F]{64}", parts[0]):
+                            return parts[0].lower()
     return None
 
 
@@ -245,13 +254,15 @@ def select_best_asset_for_platform(assets: list[dict], target_version: str = "")
     current_os = sys.platform
     candidates: list[tuple[int, dict]] = []
     clean_ver = re.sub(r"^(?:version|ver|v)?[.\s_-]*", "", target_version.strip(), flags=re.IGNORECASE).lower() if target_version else ""
+    clean_ver = re.sub(r"\.+", ".", clean_ver).strip(".")
 
     for asset in assets:
         name = asset.get("name", "").lower()
+        norm_name = re.sub(r"\.+", ".", name)
         score = 1  # Base score so any valid platform asset matches if no version match
 
-        # Prioritize assets containing the specific target version string
-        if clean_ver and clean_ver in name:
+        # Prioritize assets containing the specific target version string (matching both raw and normalized names)
+        if clean_ver and (clean_ver in name or clean_ver in norm_name):
             score += 50
 
         if current_os == "win32":
@@ -743,12 +754,15 @@ class CheckUpdateDialog(QDialog):
             asset_name = self.asset_info.get("name", "installer package")
             asset_size = format_byte_size(self.asset_info.get("size", 0))
 
-            asset_ver_match = re.search(r"(\d+\.\d+(?:\.\d+)?)", asset_name)
+            normalized_asset_name = re.sub(r"\.+", ".", asset_name)
+            asset_ver_match = re.search(r"(\d+(?:\.\d+)+)", normalized_asset_name)
             asset_ver = asset_ver_match.group(1) if asset_ver_match else ""
 
             notice_html = ""
-            if asset_ver and clean_tag and asset_ver != clean_tag:
-                notice_html = f"<br><span style='color: #e65100; font-size: 11px;'>⚠️ Notice: Attached asset is labeled v{asset_ver}, which differs from release tag {tag}.</span>"
+            if asset_ver and clean_tag:
+                # Compare semantic versions rather than raw strings to avoid false alarms from formatting differences
+                if parse_version_tuple(asset_ver)[0] != parse_version_tuple(clean_tag)[0]:
+                    notice_html = f"<br><span style='color: #e65100; font-size: 11px;'>⚠️ Notice: Attached asset is labeled v{asset_ver}, which differs from release tag {tag}.</span>"
 
             self.asset_info_label.setText(f"Platform package: <b>{asset_name}</b> ({asset_size}){notice_html}")
             self.asset_info_label.show()
