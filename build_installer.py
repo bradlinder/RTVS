@@ -67,6 +67,7 @@ except Exception as e:
 # Allow environment variable override if set by CI or build runner
 if os.environ.get("BUILD_VERSION"):
     PROJECT_VERSION = os.environ.get("BUILD_VERSION").strip().lstrip("v")
+    PROJECT_VERSION = re.sub(r"\.+", ".", PROJECT_VERSION)
     print(f"[BUILD] Overriding PROJECT_VERSION with BUILD_VERSION environment variable: '{PROJECT_VERSION}'")
 
 # Only the PySide6 submodules this app actually imports

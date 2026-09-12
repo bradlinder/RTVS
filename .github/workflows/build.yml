@@ -77,12 +77,14 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
-          elif [ -n "${{ inputs.release_tag }}" ] && [[ "${{ inputs.release_tag }}" =~ ^v[0-9] ]]; then
+          elif [ -n "${{ inputs.release_tag }}" ]; then
             VERSION="${{ inputs.release_tag }}"
             VERSION="${VERSION#v}"
           else
             VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
           fi
+          # Sanitize duplicate dots or invalid characters (e.g. 2.9..5 -> 2.9.5)
+          VERSION=$(echo "$VERSION" | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
           if [ -z "$VERSION" ]; then
             echo "::error::Could not extract version"
             exit 1
@@ -166,12 +168,14 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
-          elif [ -n "${{ inputs.release_tag }}" ] && [[ "${{ inputs.release_tag }}" =~ ^v[0-9] ]]; then
+          elif [ -n "${{ inputs.release_tag }}" ]; then
             VERSION="${{ inputs.release_tag }}"
             VERSION="${VERSION#v}"
           else
             VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
           fi
+          # Sanitize duplicate dots or invalid characters (e.g. 2.9..5 -> 2.9.5)
+          VERSION=$(echo "$VERSION" | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
           if [ -z "$VERSION" ]; then
             echo "::error::Could not extract PROJECT_VERSION"
             exit 1
@@ -299,12 +303,14 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
-          elif [ -n "${{ inputs.release_tag }}" ] && [[ "${{ inputs.release_tag }}" =~ ^v[0-9] ]]; then
+          elif [ -n "${{ inputs.release_tag }}" ]; then
             VERSION="${{ inputs.release_tag }}"
             VERSION="${VERSION#v}"
           else
             VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
           fi
+          # Sanitize duplicate dots or invalid characters (e.g. 2.9..5 -> 2.9.5)
+          VERSION=$(echo "$VERSION" | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
           if [ -z "$VERSION" ]; then
             echo "::error::Could not extract version"
             exit 1
@@ -381,12 +387,14 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
-          elif [ -n "${{ inputs.release_tag }}" ] && [[ "${{ inputs.release_tag }}" =~ ^v[0-9] ]]; then
+          elif [ -n "${{ inputs.release_tag }}" ]; then
             VERSION="${{ inputs.release_tag }}"
             VERSION="${VERSION#v}"
           else
             VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
           fi
+          # Sanitize duplicate dots or invalid characters (e.g. 2.9..5 -> 2.9.5)
+          VERSION=$(echo "$VERSION" | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
           if [ -z "$VERSION" ]; then
             echo "::error::Could not extract version"
             exit 1
@@ -452,6 +460,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -477,17 +488,28 @@ jobs:
 
       - name: Determine Release Tag
         id: vars
+        shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          if [ "$EVENT_NAME" = "push" ]; then
-            echo "tag=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          if [ "$EVENT_NAME" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
+            TAG="${GITHUB_REF_NAME}"
           elif [ -n "$RELEASE_TAG" ]; then
-            echo "tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+            CLEAN_TAG=$(echo "$RELEASE_TAG" | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
+            if [[ ! "$CLEAN_TAG" =~ ^v ]]; then
+              TAG="v${CLEAN_TAG}"
+            else
+              TAG="${CLEAN_TAG}"
+            fi
           else
-            echo "tag=v2.8" >> $GITHUB_OUTPUT
+            VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
+            TAG="v${VERSION}"
           fi
+          # Ensure clean tag (no consecutive dots or trailing dots)
+          TAG=$(echo "$TAG" | tr -s '.' | sed 's/\.*$//')
+          echo "Determined release tag: ${TAG}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release & Upload Binaries
         uses: softprops/action-gh-release@v2
