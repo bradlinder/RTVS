@@ -33,6 +33,7 @@ try:
         get_github_repo,
         QApplication,
         QColor,
+        QComboBox,
         QCursor,
         QDesktopServices,
         QDialog,
@@ -55,7 +56,7 @@ try:
     )
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.9.3"
+    PROJECT_VERSION = "2.9.4"
     DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
     INTERNAL_APP_ID = "RadioTVStorySegmenter"
@@ -76,6 +77,7 @@ except Exception:
         from PySide6.QtGui import QColor, QCursor, QDesktopServices, QIcon
         from PySide6.QtWidgets import (
             QApplication,
+            QComboBox,
             QDialog,
             QFrame,
             QHBoxLayout,
@@ -98,6 +100,14 @@ except Exception:
             def connect(self, *args): pass
         class QWidget: pass
         class QDialog(QWidget): pass
+        class QComboBox(QWidget):
+            def __init__(self, parent=None): pass
+            def addItem(self, *args): pass
+            def clear(self): pass
+            def count(self): return 0
+            def currentData(self): return None
+            def currentIndex(self): return -1
+            def setCurrentIndex(self, i): pass
         class QSettings:
             def __init__(self, *args): pass
             def value(self, key, default=None): return default
@@ -268,9 +278,9 @@ def select_best_asset_for_platform(assets: list[dict], target_version: str = "")
     return None
 
 
-def fetch_latest_release(repo: str) -> dict:
-    """Query GitHub API for the most recent release (including pre-releases)."""
-    url = f"https://api.github.com/repos/{repo}/releases?per_page=5"
+def fetch_releases(repo: str, max_releases: int = 30) -> list[dict]:
+    """Query GitHub API for published releases (including pre-releases), sorted by tag/date."""
+    url = f"https://api.github.com/repos/{repo}/releases?per_page={max(10, min(100, max_releases))}"
     req = urllib.request.Request(
         url,
         headers={
@@ -278,19 +288,27 @@ def fetch_latest_release(repo: str) -> dict:
             "Accept": "application/vnd.github.v3+json",
         },
     )
-    with urllib.request.urlopen(req, timeout=12) as response:
+    with urllib.request.urlopen(req, timeout=15) as response:
         status = response.getcode()
         if status != 200:
             raise RuntimeError(f"GitHub API returned HTTP status {status}")
         raw = response.read().decode("utf-8")
         releases = json.loads(raw)
         if isinstance(releases, list) and releases:
-            published = [r for r in releases if not r.get("draft", False)]
+            published = [r for r in releases if isinstance(r, dict) and not r.get("draft", False) and r.get("tag_name")]
             if published:
-                return published[0]
-        elif isinstance(releases, dict) and "tag_name" in releases:
-            return releases
+                return published
+        elif isinstance(releases, dict) and "tag_name" in releases and not releases.get("draft", False):
+            return [releases]
         raise RuntimeError("No published releases found.")
+
+
+def fetch_latest_release(repo: str) -> dict:
+    """Query GitHub API for the most recent release (backward-compatibility wrapper)."""
+    releases = fetch_releases(repo, max_releases=10)
+    if releases:
+        return releases[0]
+    raise RuntimeError("No published releases found.")
 
 
 def launch_and_install(file_path: str, parent: QWidget | None = None) -> bool:
@@ -338,6 +356,7 @@ def launch_and_install(file_path: str, parent: QWidget | None = None) -> bool:
 
 
 class CheckUpdateWorker(QThread):
+    releases_loaded = Signal(list)
     update_available = Signal(dict, dict, bool)
     up_to_date = Signal(str, str)
     error = Signal(str)
@@ -348,7 +367,14 @@ class CheckUpdateWorker(QThread):
 
     def run(self):
         try:
-            release_data = fetch_latest_release(self.repo)
+            releases = fetch_releases(self.repo)
+            if not releases:
+                self.error.emit(f"No published releases found for repository '{self.repo}'.")
+                return
+
+            self.releases_loaded.emit(releases)
+
+            release_data = releases[0]
             tag_name = release_data.get("tag_name", "")
             if not tag_name:
                 self.error.emit("GitHub release does not have a valid tag name.")
@@ -472,11 +498,13 @@ class CheckUpdateDialog(QDialog):
     def __init__(self, parent: QWidget | None = None, auto_start: bool = True):
         super().__init__(parent)
         self.setWindowTitle(f"Check for Updates — {APP_DISPLAY_NAME}")
-        self.setMinimumWidth(560)
-        self.setMinimumHeight(440)
-        self.resize(580, 460)
+        self.setMinimumWidth(580)
+        self.setMinimumHeight(480)
+        self.resize(600, 500)
 
         self.repo = get_github_repo()
+        self.releases: list[dict] = []
+        self.selected_release_idx: int = 0
         self.release_info: dict = {}
         self.asset_info: dict = {}
         self.downloaded_path: str | None = None
@@ -533,8 +561,26 @@ class CheckUpdateDialog(QDialog):
         self.progress_bar.setFixedHeight(18)
         main_layout.addWidget(self.progress_bar)
 
+        # Version selection dropdown row (Historical Release Selector)
+        self.version_select_layout = QHBoxLayout()
+        self.version_select_layout.setSpacing(8)
+
+        self.version_select_label = QLabel("Select Version:")
+        self.version_select_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+        self.version_select_layout.addWidget(self.version_select_label)
+
+        self.version_combo = QComboBox()
+        self.version_combo.setStyleSheet("font-size: 12px; padding: 3px 8px; min-width: 220px;")
+        self.version_combo.currentIndexChanged.connect(self._on_version_selected)
+        self.version_select_layout.addWidget(self.version_combo, 1)
+
+        self.version_select_container = QWidget()
+        self.version_select_container.setLayout(self.version_select_layout)
+        self.version_select_container.hide()
+        main_layout.addWidget(self.version_select_container)
+
         self.notes_label = QLabel("Release Notes:")
-        self.notes_label.setStyleSheet("font-size: 12px; font-weight: bold; margin-top: 6px;")
+        self.notes_label.setStyleSheet("font-size: 12px; font-weight: bold; margin-top: 4px;")
         self.notes_label.hide()
         main_layout.addWidget(self.notes_label)
 
@@ -579,6 +625,7 @@ class CheckUpdateDialog(QDialog):
         self.status_label.setText(f"Checking for updates from {self.repo}...")
         self.progress_bar.show()
         self.progress_bar.setRange(0, 0)
+        self.version_select_container.hide()
         self.notes_label.hide()
         self.notes_browser.hide()
         self.asset_info_label.hide()
@@ -586,35 +633,68 @@ class CheckUpdateDialog(QDialog):
         self.action_btn.setEnabled(False)
 
         self.check_worker = CheckUpdateWorker(self.repo, self)
+        self.check_worker.releases_loaded.connect(self._on_releases_loaded)
         self.check_worker.update_available.connect(self._on_update_available)
         self.check_worker.up_to_date.connect(self._on_up_to_date)
         self.check_worker.error.connect(self._on_check_error)
         self.check_worker.start()
 
-    def _on_up_to_date(self, current_ver: str, remote_tag: str):
-        self.progress_bar.hide()
-        self.status_label.setText(
-            f"✓ Radio & TV Segmenter is up to date!\n\n"
-            f"You are running version {current_ver}, which is the latest available release ({remote_tag})."
-        )
-        self.status_label.setStyleSheet("font-size: 13px; color: #2e7d32; font-weight: bold;")
-        self.action_btn.setText("Check Again")
-        self.action_btn.setEnabled(True)
-        self.github_link_btn.show()
+    def _on_releases_loaded(self, releases: list):
+        self.releases = releases
+        self.version_combo.blockSignals(True)
+        self.version_combo.clear()
 
-    def _on_update_available(self, release_info: dict, asset_info: dict, is_newer: bool):
+        clean_cur = re.sub(r"^(?:version|ver|v)?[.\s_-]*", "", PROJECT_VERSION.strip(), flags=re.IGNORECASE).lower()
+
+        for idx, r in enumerate(releases):
+            tag = r.get("tag_name", "")
+            name = r.get("name") or tag
+            clean_tag = re.sub(r"^(?:version|ver|v)?[.\s_-]*", "", tag.strip(), flags=re.IGNORECASE).lower()
+
+            is_cur = (clean_tag == clean_cur)
+            is_new = is_version_newer(tag, PROJECT_VERSION)
+            is_old = is_version_older(tag, PROJECT_VERSION)
+
+            label_parts = [name if name != tag else tag]
+            if name != tag:
+                label_parts.append(f"({tag})")
+
+            if idx == 0 and is_new:
+                label_parts.append("★ Latest Update")
+            elif idx == 0:
+                label_parts.append("★ Latest")
+
+            if is_cur:
+                label_parts.append("[Installed]")
+            elif is_old:
+                label_parts.append("(Older)")
+
+            display_text = " ".join(label_parts)
+            self.version_combo.addItem(display_text, idx)
+
+        self.version_combo.setCurrentIndex(0)
+        self.version_combo.blockSignals(False)
+        self.version_select_container.show()
+
+    def _on_version_selected(self, index: int):
+        if index < 0 or index >= len(self.releases):
+            return
+        selected_release = self.releases[index]
+        self._display_release(selected_release)
+
+    def _display_release(self, release_info: dict):
         self.release_info = release_info
-        self.asset_info = asset_info
         tag = release_info.get("tag_name", "Unknown")
         name = release_info.get("name", tag)
         body = release_info.get("body", "No release notes provided.")
 
-        self.progress_bar.hide()
-        self.status_label.setText(f"★ A new update is available: {name}")
-        self.status_label.setStyleSheet("font-size: 14px; color: #1976d2; font-weight: bold;")
+        assets = release_info.get("assets", [])
+        self.asset_info = select_best_asset_for_platform(assets, target_version=tag) or {}
 
+        self.progress_bar.hide()
         self.notes_label.show()
         self.notes_browser.show()
+
         formatted_body = body.replace("\r\n", "\n").replace("\n", "<br>")
         self.notes_browser.setHtml(
             f"<div style='font-family: sans-serif; line-height: 1.4;'>"
@@ -624,11 +704,33 @@ class CheckUpdateDialog(QDialog):
             f"</div>"
         )
 
-        if asset_info and asset_info.get("browser_download_url"):
-            asset_name = asset_info.get("name", "installer package")
-            asset_size = format_byte_size(asset_info.get("size", 0))
+        clean_cur = re.sub(r"^(?:version|ver|v)?[.\s_-]*", "", PROJECT_VERSION.strip(), flags=re.IGNORECASE).lower()
+        clean_tag = re.sub(r"^(?:version|ver|v)?[.\s_-]*", "", tag.strip(), flags=re.IGNORECASE).lower()
+        is_newer = is_version_newer(tag, PROJECT_VERSION)
+        is_older = is_version_older(tag, PROJECT_VERSION)
+        is_current = (clean_cur == clean_tag)
 
-            clean_tag = re.sub(r"^(?:version|ver|v)?[.\s_-]*", "", tag.strip(), flags=re.IGNORECASE).lower()
+        if is_newer:
+            self.status_label.setText(f"★ A newer version is available: {name} ({tag})")
+            self.status_label.setStyleSheet("font-size: 14px; color: #1976d2; font-weight: bold;")
+            primary_verb = "Update to"
+        elif is_older:
+            self.status_label.setText(f"⚠️ Selected release ({tag}) is older than installed version (v{PROJECT_VERSION})")
+            self.status_label.setStyleSheet("font-size: 13px; color: #e65100; font-weight: bold;")
+            primary_verb = "Rollback to"
+        elif is_current:
+            self.status_label.setText(f"✓ You are currently running this version (v{PROJECT_VERSION})")
+            self.status_label.setStyleSheet("font-size: 13px; color: #2e7d32; font-weight: bold;")
+            primary_verb = "Reinstall"
+        else:
+            self.status_label.setText(f"Selected release: {name} ({tag})")
+            self.status_label.setStyleSheet("font-size: 13px; font-weight: bold;")
+            primary_verb = "Install"
+
+        if self.asset_info and self.asset_info.get("browser_download_url"):
+            asset_name = self.asset_info.get("name", "installer package")
+            asset_size = format_byte_size(self.asset_info.get("size", 0))
+
             asset_ver_match = re.search(r"(\d+\.\d+(?:\.\d+)?)", asset_name)
             asset_ver = asset_ver_match.group(1) if asset_ver_match else ""
 
@@ -636,9 +738,9 @@ class CheckUpdateDialog(QDialog):
             if asset_ver and clean_tag and asset_ver != clean_tag:
                 notice_html = f"<br><span style='color: #e65100; font-size: 11px;'>⚠️ Notice: Attached asset is labeled v{asset_ver}, which differs from release tag {tag}.</span>"
 
-            self.asset_info_label.setText(f"Platform installer: <b>{asset_name}</b> ({asset_size}){notice_html}")
+            self.asset_info_label.setText(f"Platform package: <b>{asset_name}</b> ({asset_size}){notice_html}")
             self.asset_info_label.show()
-            self.action_btn.setText("Download and Install")
+            self.action_btn.setText(f"{primary_verb} {tag}")
         else:
             self.asset_info_label.setText("No automated binary package detected for your OS. Visit GitHub to download.")
             self.asset_info_label.show()
@@ -646,6 +748,23 @@ class CheckUpdateDialog(QDialog):
 
         self.action_btn.setEnabled(True)
         self.github_link_btn.show()
+
+    def _on_up_to_date(self, current_ver: str, remote_tag: str):
+        if self.releases:
+            self._display_release(self.releases[0])
+        else:
+            self.progress_bar.hide()
+            self.status_label.setText(
+                f"✓ Radio & TV Segmenter is up to date!\n\n"
+                f"You are running version {current_ver}, which is the latest available release ({remote_tag})."
+            )
+            self.status_label.setStyleSheet("font-size: 13px; color: #2e7d32; font-weight: bold;")
+            self.action_btn.setText("Check Again")
+            self.action_btn.setEnabled(True)
+            self.github_link_btn.show()
+
+    def _on_update_available(self, release_info: dict, asset_info: dict, is_newer: bool):
+        self._display_release(release_info)
 
     def _on_check_error(self, message: str):
         self.progress_bar.hide()
@@ -659,16 +778,39 @@ class CheckUpdateDialog(QDialog):
         btn_text = self.action_btn.text()
         if btn_text in ("Check Again", "Retry Check"):
             self.start_check()
-        elif btn_text == "Download and Install":
-            self.start_download()
         elif btn_text == "Open Download Page":
             self._open_github_release()
         elif btn_text == "Install & Restart":
             self._install_and_restart()
+        else:
+            tag = self.release_info.get("tag_name", "")
+            if is_version_older(tag, PROJECT_VERSION):
+                proceed = self._confirm_downgrade(tag)
+                if not proceed:
+                    return
+            self.start_download()
+
+    def _confirm_downgrade(self, target_version: str) -> bool:
+        """Modal Warning Dialog when selecting a version lower than installed PROJECT_VERSION."""
+        warn_box = QMessageBox(self)
+        warn_box.setIcon(QMessageBox.Icon.Warning)
+        warn_box.setWindowTitle("Confirm Version Rollback")
+        warn_box.setText(
+            f"<b>Warning: Potential Version Incompatibility</b><br><br>"
+            f"You are about to roll back from <b>v{PROJECT_VERSION}</b> to older release <b>{target_version}</b>.<br><br>"
+            f"Installing an older version may cause configuration or project file "
+            f"incompatibilities with newer data formats.<br><br>"
+            f"It is strongly recommended to back up your project data before proceeding.<br><br>"
+            f"Would you like to proceed with the rollback?"
+        )
+        warn_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        warn_box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        return warn_box.exec() == QMessageBox.StandardButton.Yes
 
     def start_download(self):
         download_url = self.asset_info.get("browser_download_url")
-        file_name = self.asset_info.get("name", f"RadioTVSegmenter-Update-{self.release_info.get('tag_name')}.exe")
+        tag = self.release_info.get("tag_name", "update")
+        file_name = self.asset_info.get("name", f"RadioTVSegmenter-Update-{tag}.exe")
 
         if not download_url:
             self._open_github_release()
@@ -683,7 +825,7 @@ class CheckUpdateDialog(QDialog):
             self._open_github_release()
             return
 
-        self.status_label.setText(f"Downloading update: {file_name}...")
+        self.status_label.setText(f"Downloading {tag}: {file_name}...")
         self.status_label.setStyleSheet("font-size: 13px; font-weight: bold;")
         self.progress_bar.show()
         self.progress_bar.setRange(0, 100)
@@ -723,11 +865,12 @@ class CheckUpdateDialog(QDialog):
         if not self.downloaded_path:
             return
 
+        tag = self.release_info.get("tag_name", "update")
         confirm = QMessageBox.question(
             self,
             "Install Update",
-            f"Radio & TV Segmenter will now launch the update installer and exit.\n\n"
-            f"Proceed with update?",
+            f"Radio & TV Segmenter will now launch the installer for {tag} and exit.\n\n"
+            f"Proceed with installation?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
@@ -746,6 +889,7 @@ class CheckUpdateDialog(QDialog):
     def _handle_close(self):
         if self.check_worker and self.check_worker.isRunning():
             try:
+                self.check_worker.releases_loaded.disconnect(self._on_releases_loaded)
                 self.check_worker.update_available.disconnect(self._on_update_available)
                 self.check_worker.up_to_date.disconnect(self._on_up_to_date)
                 self.check_worker.error.disconnect(self._on_check_error)

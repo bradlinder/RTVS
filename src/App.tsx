@@ -19,6 +19,15 @@ import {
 // Complete changelog source of truth matching CHANGELOG.md
 const CHANGELOG_MARKDOWN = `# Changelog
 
+## v2.9.4
+- **Version Rollback & Historical Release Selector (Updater Engine)**:
+  - Upgraded the "Check for Updates" dialog (updater.py) with an interactive historical release selector dropdown (QComboBox).
+  - Fetches and displays all available GitHub releases with real-time release notes rendering in QTextBrowser upon selecting any past or current version.
+  - Dynamically updates action button context and labels: "Update to v...", "Reinstall v...", or "Rollback to v...".
+  - Implemented a safety warning modal confirmation dialog (_confirm_downgrade) when selecting an older version than currently installed to protect against configuration and project data incompatibilities.
+- **Full Project Version Alignment**:
+  - Synchronized v2.9.4 across prs_shared.py, updater.py, build_installer.py, RadioTVStorySegmenter.iss, package.json, metadata.json, index.html, transcript_story.py, and plugin manifests (wordpress, youtube, translation).
+
 ## v2.9.3
 - **CI/CD Version Tag Synchronization**:
   - Fixed workflow release packaging to dynamically extract the release version from git tags (GITHUB_REF_NAME) or manual workflow inputs rather than falling back to stale local files.
@@ -115,7 +124,7 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVersion, setSelectedVersion] = useState('all');
   const [copiedVersion, setCopiedVersion] = useState<string | null>(null);
-  const [expandedVersions, setExpandedVersions] = useState<Record<string, boolean>>({ 'v2.9.3': true, 'v2.9.2': true });
+  const [expandedVersions, setExpandedVersions] = useState<Record<string, boolean>>({ 'v2.9.4': true, 'v2.9.3': true });
 
 
   const releases: ReleaseSection[] = useMemo(() => {
@@ -177,7 +186,7 @@ export function App() {
               <div className="flex items-center gap-2">
                 <span className="font-bold text-base sm:text-lg tracking-tight text-white">Radio & TV Segmenter</span>
                 <span className="px-2.5 py-0.5 text-xs font-semibold bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 rounded-full flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" /> v2.9.3 Latest
+                  <Sparkles className="w-3 h-3" /> v2.9.4 Latest
                 </span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">Full Interactive Project Release Changelog</p>
@@ -344,7 +353,7 @@ export function App() {
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-slate-900/40 py-6 mt-12 text-center text-xs text-slate-500">
-        <p>Radio & TV Segmenter v2.9.3 — Professional Broadcast Story Segmentation & Modular Publishing Suite</p>
+        <p>Radio & TV Segmenter v2.9.4 — Professional Broadcast Story Segmentation & Modular Publishing Suite</p>
       </footer>
 
     </div>

@@ -13,28 +13,32 @@ ROADMAP MAINTENANCE POLICY: N-1 SLIDING-WINDOW HORIZON
   milestones ($N$, $N+1$).
 - When a new version is built, its completed specifications are recorded, and any
   versions older than $N-1$ are pruned to keep the document focused and actionable.
+- Whenever any code change, bug fix, packaging adjustment, or feature refinement is
+  made during a release cycle, it MUST be recorded immediately in the current release
+  section of roadmap.txt and CHANGELOG.md (even if it occurs after the initial version
+  number bump).
 
 --------------------------------------------------------------------------------
 TABLE OF CONTENTS
 --------------------------------------------------------------------------------
-1. PREVIOUS RELEASE (v2.9.2): MAINTENANCE, DOCUMENTATION & RUNTIME CLARITY [COMPLETED]
-   1.1 Documentation Alignment & Post-Plugin Architecture Audit
-   1.2 WeSpeaker ONNX Runtime Embedding Engine Clarification
-   1.3 Repository Hygiene, Binary Blob Governance & Git History Purge
-   1.4 Version-Tagged Plugin Packaging & Asset Standardization
+1. PREVIOUS RELEASE (v2.9.3): BUILD PIPELINE TAG SYNCHRONIZATION & ASSET RESILIENCE [COMPLETED]
+   1.1 CI/CD Version Tag Alignment in GitHub Actions Workflow
+   1.2 Build System Dynamic Version Overrides (--version and BUILD_VERSION)
+   1.3 In-App Updater Release Asset Verification & Tag Mismatch Warning
+   1.4 Standardized Synchronous Version Alignment across Core and Add-ons
 
-2. CURRENT RELEASE (v2.9.3): BUILD PIPELINE TAG SYNCHRONIZATION & ASSET RESILIENCE [COMPLETED]
-   2.1 CI/CD Version Tag Alignment in GitHub Actions Workflow
-   2.2 Build System Dynamic Version Overrides (--version and BUILD_VERSION)
-   2.3 In-App Updater Release Asset Verification & Tag Mismatch Warning
-   2.4 Standardized Synchronous Version Alignment across Core and Add-ons
+2. CURRENT RELEASE (v2.9.4): VERSION ROLLBACK & HISTORICAL RELEASE SELECTOR [COMPLETED]
+   2.1 Historical GitHub Releases API Ingestion & Pagination
+   2.2 Interactive Version Selection Dropdown (QComboBox)
+   2.3 Dynamic Release Notes & Contextual Action Controls
+   2.4 Safety Safeguards & Downgrade Confirmation Warning Dialog
+   2.5 Synchronized Project Version Bump across Core and Add-ons
 
 3. UPCOMING MILESTONE (v3.0): CORE ASYNC PROVISIONING & TRANSCRIPT CLEANING (PHASE 1)
    3.1 Unified Core Async Runtime Provisioner (RuntimeManager Engine)
    3.2 Whisper Hallucination & Degenerate Loop Scrubber
    3.3 Multi-Lingual Filler Word & Disfluency Detection
    3.4 Pipeline Integration & UI Controls
-   3.5 Version Rollback & Historical Release Selector (Updater Engine)
 
 4. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
    4.1 Cockos Reaper Project (.rpp) Generator
@@ -44,86 +48,75 @@ TABLE OF CONTENTS
    4.5 Rational Timecode & Audio Sample Rate Math
 
 5. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
-   4.1 "Text-as-Timeline" Rough-Cut Editing Engine
-   4.2 Seamless Non-Destructive Playback Preview
-   4.3 CTC Word Boundary Refinement & Forced Alignment
-   4.4 Memory-Bounded Diarization & Chunked Streaming
+   5.1 "Text-as-Timeline" Rough-Cut Editing Engine
+   5.2 Seamless Non-Destructive Playback Preview
+   5.3 CTC Word Boundary Refinement & Forced Alignment
+   5.4 Memory-Bounded Diarization & Chunked Streaming
 
 ================================================================================
-1. PREVIOUS RELEASE (v2.9.2): MAINTENANCE, DOCUMENTATION & RUNTIME CLARITY [COMPLETED]
+1. PREVIOUS RELEASE (v2.9.3): BUILD PIPELINE TAG SYNCHRONIZATION & ASSET RESILIENCE [COMPLETED]
 ================================================================================
 
-1.1 DOCUMENTATION ALIGNMENT & POST-PLUGIN ARCHITECTURE AUDIT
------------------------------------------------------------
-Following the modularization of translation and publishing into independent add-ons,
-core documentation must accurately reflect component boundaries:
-- Update `STABILITY_NOTES.md` and `BUILD_INSTRUCTIONS.txt` to remove stale references
-  claiming Hugging Face `Transformers` is validated as part of the core frozen binary.
-- Document that `Transformers`, MarianMT, and Seq2Seq translation models live strictly
-  within the isolated `plugins/translation/` plugin virtual environment.
-- Keep `NOTICES.txt` and `README.md` synchronized with all bundled licenses.
-
-1.2 WESPEAKER ONNX RUNTIME EMBEDDING ENGINE CLARIFICATION
----------------------------------------------------------
-Confirm and document that `wespeakerruntime` is the dedicated, lightweight ONNX
-inference engine for speaker diarization:
-- Clarify in `requirements.txt` and `radio_tv_story_segmenter_worker.py` docstrings that
-  `wespeakerruntime` is actively used by `wespeaker_rt.Speaker(lang="en")` for rapid speaker
-  embedding extraction without heavy PyTorch PyAnnote dependencies.
-- Retain existing PyInstaller hooks (`torch_dll_hook.py`) and CI/CD self-test validation.
-
-1.3 REPOSITORY HYGIENE, BINARY BLOB GOVERNANCE & GIT HISTORY PURGE
-------------------------------------------------------------------
-- Maintain `.gitignore` rules preventing temporary files (`node_modules/`, `.vite/`,
-  `.env.local`, `.venv/`, `__pycache__/`) from being tracked in Git.
-- Enforce storing snapshot release archives exclusively on GitHub Releases rather than
-  committing binary `.zip` blobs into version control history.
-- Historical Binary Blob Purge Runbook (for maintainers via local CLI):
-  To permanently purge legacy committed `.zip` snapshot archives from remote GitHub history:
-  1. Install `git-filter-repo`:
-     `pip install git-filter-repo`
-  2. Perform a fresh, clean clone of the repository:
-     `git clone https://github.com/bradlinder/RTVS.git RTVS-cleanup && cd RTVS-cleanup`
-  3. Purge the historical binary paths across all commits:
-     `git filter-repo --invert-paths --path RadioTVSegmenter_v2.76c_source.zip`
-     (or for all zip blobs: `git filter-repo --invert-paths --path-glob '*.zip'`)
-  4. Re-attach origin remote and force-push the rewritten history:
-     `git remote add origin https://github.com/bradlinder/RTVS.git`
-     `git push origin --force --all && git push origin --force --tags`
-
-1.4 VERSION-TAGGED PLUGIN PACKAGING & ASSET STANDARDIZATION
------------------------------------------------------------
-- Standardized plugin release assets to exclusively publish version-tagged `.rtvs-addon` packages (`rtvs-plugin-{id}-v{version}.rtvs-addon`) along with matching `.zip` archives.
-- Updated `build_installer.py` and `plugins/manager.py` to eliminate redundant unversioned asset duplication on GitHub Releases while ensuring robust local fallback behavior.
-
-================================================================================
-2. CURRENT RELEASE (v2.9.3): BUILD PIPELINE TAG SYNCHRONIZATION & ASSET RESILIENCE [COMPLETED]
-================================================================================
-
-2.1 CI/CD VERSION TAG ALIGNMENT IN GITHUB ACTIONS WORKFLOW
+1.1 CI/CD VERSION TAG ALIGNMENT IN GITHUB ACTIONS WORKFLOW
 ----------------------------------------------------------
 - Resolved release asset mismatch root cause where CI/CD workflows packaged binaries using stale codebase versions rather than git release tag version names.
 - Updated all build jobs (`build-plugins`, `build-windows`, `build-macos`, `build-linux`) in `.github/workflows/build.yml` to extract the release tag (`GITHUB_REF_NAME` or `inputs.release_tag`) and inject `BUILD_VERSION` into build environments.
 
-2.2 BUILD SYSTEM DYNAMIC VERSION OVERRIDES (--version AND BUILD_VERSION)
+1.2 BUILD SYSTEM DYNAMIC VERSION OVERRIDES (--version AND BUILD_VERSION)
 -----------------------------------------------------------------------
 - Enhanced `build_installer.py` to accept `--version <version>` CLI parameter and respect `BUILD_VERSION` environment variable.
 - Dynamically synchronizes Inno Setup installer scripts and artifact output filenames with the active build version.
 
-2.3 IN-APP UPDATER RELEASE ASSET VERIFICATION & TAG MISMATCH WARNING
+1.3 IN-APP UPDATER RELEASE ASSET VERIFICATION & TAG MISMATCH WARNING
 -------------------------------------------------------------------
 - Updated `updater.py` with asset version detection logic in `_on_update_available`.
 - Added defensive warning banner when remote GitHub release tags and attached binary package filenames diverge, guiding users clearly.
 
-2.4 STANDARDIZED SYNCHRONOUS VERSION ALIGNMENT ACROSS CORE AND ADD-ONS
+1.4 STANDARDIZED SYNCHRONOUS VERSION ALIGNMENT ACROSS CORE AND ADD-ONS
 ----------------------------------------------------------------------
 - Bumped application and all plugin manifests to `v2.9.3` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`, and plugin manifests.
+
+================================================================================
+2. CURRENT RELEASE (v2.9.4): VERSION ROLLBACK & HISTORICAL RELEASE SELECTOR [COMPLETED]
+================================================================================
+
+2.1 HISTORICAL GITHUB RELEASES API INGESTION & PAGINATION
+---------------------------------------------------------
+- Expanded updater GitHub API integration (`fetch_releases` in `updater.py`) to query up to 30 published releases instead of solely the single latest tag.
+- Retained backward-compatible `fetch_latest_release` wrapper.
+- Emitted `releases_loaded(list)` signal from `CheckUpdateWorker` alongside primary update status signals.
+
+2.2 INTERACTIVE VERSION SELECTION DROPDOWN (QComboBox)
+------------------------------------------------------
+- Added interactive `QComboBox` version selector to `CheckUpdateDialog` in `updater.py`.
+- Formats entries clearly with tag names, release titles, and contextual indicators:
+  * `[Installed]` for the currently running project version
+  * `★ Latest Update` / `★ Latest` for the most recent remote release
+  * `(Older)` for previous legacy versions
+
+2.3 DYNAMIC RELEASE NOTES & CONTEXTUAL ACTION CONTROLS
+------------------------------------------------------
+- Dynamically re-renders HTML formatted release notes in `QTextBrowser` whenever the user selects a release from the dropdown.
+- Inspects attached platform release assets and updates the primary action button:
+  * "Update to vX.X" for newer releases
+  * "Reinstall vX.X" for the currently installed release
+  * "Rollback to vX.X" for older releases
+
+2.4 SAFETY SAFEGUARDS & DOWNGRADE CONFIRMATION WARNING DIALOG
+-------------------------------------------------------------
+- Added prominent modal confirmation warning dialog (`_confirm_downgrade`) when a user selects a version older than `PROJECT_VERSION`.
+- Explicitly warns users about potential project data or configuration incompatibilities before initiating an older package download.
+- Verifies SHA-256 checksums of downloaded historical packages before launching installers.
+
+2.5 SYNCHRONIZED PROJECT VERSION BUMP ACROSS CORE AND ADD-ONS
+-------------------------------------------------------------
+- Synchronized `v2.9.4` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`, `transcript_story.py`, and all plugin manifests (`wordpress`, `youtube`, `translation`).
 
 ================================================================================
 3. UPCOMING MILESTONE (v3.0): CORE ASYNC PROVISIONING & TRANSCRIPT CLEANING (PHASE 1)
 ================================================================================
 
-2.1 UNIFIED CORE ASYNC RUNTIME PROVISIONER (RUNTIMEMANAGER ENGINE)
+3.1 UNIFIED CORE ASYNC RUNTIME PROVISIONER (RUNTIMEMANAGER ENGINE)
 ------------------------------------------------------------------
 Consolidate separate background venv setup mechanisms (`processing.py`'s modal
 QEventLoop dialog and `translation.py`'s QThread.moveToThread worker) into a single,
@@ -145,7 +138,7 @@ Architectural Rules & Implementation Details:
 - Benefits: Eliminates code duplication, prevents "bug drift" in pip/venv provisioning,
   standardizes progress/error reporting, and simplifies future plugin development.
 
-2.2 WHISPER HALLUCINATION & DEGENERATE LOOP SCRUBBER
+3.2 WHISPER HALLUCINATION & DEGENERATE LOOP SCRUBBER
 ---------------------------------------------------
 Whisper frequently enters repeating hallucination loops on audio with low SNR,
 background music, or long silences, and emits standard ASR artifact phrases.
@@ -174,7 +167,7 @@ Implementation Details:
     - Sequentially executes collapse_repeating_ngrams -> strip_hallucination_phrases
       -> trim_trailing_degenerate_tail and re-indexes word timestamps/IDs.
 
-2.3 MULTI-LINGUAL FILLER WORD & DISFLUENCY DETECTION
+3.3 MULTI-LINGUAL FILLER WORD & DISFLUENCY DETECTION
 ----------------------------------------------------
 Identifies hesitations and filled pauses without altering genuine semantic vocabulary.
 
@@ -193,7 +186,7 @@ Implementation Details:
 - Disfluency handling: Support placeholder tags (e.g. `[pause]`, `...`, `[groan]`)
   produced by specialized ASR models.
 
-2.4 PIPELINE INTEGRATION & UI CONTROLS
+3.4 PIPELINE INTEGRATION & UI CONTROLS
 --------------------------------------
 - Add preferences / checkboxes to Settings and Processing dialog:
   [x] Scrub Whisper Hallucination Loops & Artifacts
@@ -203,34 +196,11 @@ Implementation Details:
 - Hook into batch processing worker (`radio_tv_story_segmenter_worker.py`) so cleaning
   occurs automatically after ASR before story segment segmentation.
 
-2.5 VERSION ROLLBACK & HISTORICAL RELEASE SELECTOR (UPDATER ENGINE)
-------------------------------------------------------------------
-Expand the "Check for Updates" dialog (`updater.py`) with an interactive version
-history selector, allowing users to view, inspect release notes for, and install
-both latest updates and previous stable releases.
-
-Implementation Details:
-- Target File: `updater.py`
-- GitHub API: Query `/repos/{owner}/{repo}/releases` (paginated list of all releases)
-  instead of solely `/releases/latest`.
-- UI Components:
-  * Dropdown selector (`QComboBox`) listing available releases with tags (e.g. `v2.9.2 (Current)`, `v2.9.1`, `v2.8.7`).
-  * Real-time release notes rendering in `QTextBrowser` when switching dropdown items.
-  * Action button dynamically changes label & behavior: "Update to vX.X", "Reinstall vX.X", or "Rollback to vX.X".
-- Downgrade Risk Safeguards & Mitigations:
-  * Modal Warning Dialog: When selecting a version lower than `PROJECT_VERSION`, show
-    a prominent confirmation dialog:
-    [!] "Warning: Installing an older version (vX.X) may cause configuration or project file
-        incompatibilities with newer data formats. It is recommended to back up your project data.
-        Would you like to proceed?"
-  * Checksum & asset matching: Downloads platform-appropriate installer asset for the
-    selected tag and verifies SHA-256 before executing the installer.
-
 ================================================================================
-3. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
+4. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
 ================================================================================
 
-3.1 COCKOS REAPER PROJECT (.rpp) GENERATOR
+4.1 COCKOS REAPER PROJECT (.rpp) GENERATOR
 ------------------------------------------
 Upgrades the simple EDL marker export to full multi-track Reaper project files.
 
@@ -248,7 +218,7 @@ Implementation Details:
     - `<SOURCE WAVE/MP3 FILE "<media_path>">`
 - Supports both relative paths and absolute media paths for instant opening in Reaper.
 
-3.2 MAGIX SAMPLITUDE EDL (v1.5) EXPORT
+4.2 MAGIX SAMPLITUDE EDL (v1.5) EXPORT
 --------------------------------------
 Sample-accurate text-based cut-list widely supported by legacy radio broadcast consoles
 and DAW tools.
@@ -258,7 +228,7 @@ Implementation Details:
 - Sample calculations: `samples = round(seconds * audio_sample_rate)`
 - Columns: Source, Track, Play-In, Play-Out, Record-In, Record-Out, Volume, Pan, Fades, Name.
 
-3.3 VIDEO NLE INTERCHANGE (FCPXML & XMEML XML)
+4.3 VIDEO NLE INTERCHANGE (FCPXML & XMEML XML)
 ----------------------------------------------
 Generates sequence timelines for video newsrooms and multi-cam podcast edits.
 
@@ -274,12 +244,12 @@ Implementation Details:
     30 (30/1), 50 (50/1), 59.94 (60000/1001), 60 (60/1) fps.
   * Time conversion helper: `seconds_to_rational(seconds, framerate)` to prevent drift.
 
-3.4 AVID & PRO TOOLS AAF COMPOSITION
+4.4 AVID & PRO TOOLS AAF COMPOSITION
 ------------------------------------
 - Support AAF composition export for high-end post-production facilities (Pro Tools / Avid Media Composer).
 - Reference-only metadata composition pointing to broadcast WAV (BWF) media files.
 
-3.5 UI & BATCH EXPORT INTEGRATION
+4.5 UI & BATCH EXPORT INTEGRATION
 ---------------------------------
 - Expand Export Menu in `RadioTVSegmenter.py`:
   * Export -> DAW Project (Reaper .rpp, Samplitude .edl)
@@ -287,10 +257,10 @@ Implementation Details:
 - Framerate selection popup dialog when exporting video timeline files.
 
 ================================================================================
-4. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
+5. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
 ================================================================================
 
-4.1 "TEXT-AS-TIMELINE" ROUGH-CUT EDITING ENGINE
+5.1 "TEXT-AS-TIMELINE" ROUGH-CUT EDITING ENGINE
 -----------------------------------------------
 Allows journalists to edit audio/video directly by striking through or deleting words
 in the transcript UI.
@@ -304,14 +274,14 @@ Implementation Details:
 - Word bar / timeline sync: Deleting text instantly recalculates segment boundaries
   and updates the duration counter in real time.
 
-4.2 SEAMLESS NON-DESTRUCTIVE PLAYBACK PREVIEW
+5.2 SEAMLESS NON-DESTRUCTIVE PLAYBACK PREVIEW
 ---------------------------------------------
 - Custom audio playback handler in PySide6 / QMediaPlayer / sounddevice:
   * Plays only inside `keep_ranges`.
   * When playback cursor reaches a cut point, instantly seeks to the start of the next
     keep range with a 5ms linear volume crossfade to avoid popping artifacts.
 
-4.3 CTC WORD BOUNDARY REFINEMENT & FORCED ALIGNMENT
+5.3 CTC WORD BOUNDARY REFINEMENT & FORCED ALIGNMENT
 ---------------------------------------------------
 - Whisper's token timestamps can have 50-150ms acoustic jitter.
 - Optional secondary alignment pass using a lightweight Wav2Vec2 / MMS / CTC model:
@@ -319,7 +289,7 @@ Implementation Details:
     onsets and vowel/consonant transitions.
   * Result: Subtitle files (SRT/VTT) and audio slices are frame-accurate to 10ms.
 
-4.4 MEMORY-BOUNDED DIARIZATION & CHUNKED STREAMING
+5.4 MEMORY-BOUNDED DIARIZATION & CHUNKED STREAMING
 --------------------------------------------------
 - For long broadcast files (e.g. 2-6 hour council meetings or continuous broadcasts):
   * Segment audio into overlapping windows (`MAX_SEGMENT_S = 120s`).

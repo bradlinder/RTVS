@@ -1,7 +1,7 @@
 {
   "id": "wordpress",
   "name": "WordPress Publisher",
-  "version": "2.9.3",
+  "version": "2.9.4",
   "description": "Publishes segmented audio/video stories, transcripts, excerpts, and custom featured images directly to WordPress posts via the WP REST API.",
 
   "author": "Radio & TV Segmenter Team",

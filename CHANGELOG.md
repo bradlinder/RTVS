@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.9.4
+- **Version Rollback & Historical Release Selector (Updater Engine)**:
+  - Upgraded the "Check for Updates" dialog (`updater.py`) with an interactive historical release selector dropdown (`QComboBox`).
+  - Fetches and displays all available GitHub releases with real-time release notes rendering in `QTextBrowser` upon selecting any past or current version.
+  - Dynamically updates action button context and labels: "Update to v...", "Reinstall v...", or "Rollback to v...".
+  - Implemented a safety warning modal confirmation dialog (`_confirm_downgrade`) when selecting an older version than currently installed to protect against configuration and project data incompatibilities.
+- **Full Project Version Alignment**:
+  - Synchronized `v2.9.4` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`, `transcript_story.py`, and plugin manifests (`wordpress`, `youtube`, `translation`).
+
 ## v2.9.3
 - **CI/CD Version Tag Synchronization**:
   - Fixed workflow release packaging to dynamically extract the release version from git tags (`GITHUB_REF_NAME`) or manual workflow inputs rather than falling back to stale local files.
