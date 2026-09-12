@@ -28,6 +28,15 @@ ENV/
 .DS_Store
 Thumbs.db
 
+# Stray Node/Vite/AI-Studio scaffolding (unrelated to the PySide6 desktop
+# app; see roadmap notes -- this should not be installed/committed at all
+# once cleaned up, but ignore it in the meantime so it can't leak secrets
+# or bloat future commits)
+node_modules/
+.vite/
+.env.local
+.env.*.local
+
 # Environment variables
 .env*
 !.env.example

@@ -1,6 +1,19 @@
 # Changelog
 
+## v2.9.2
+- **Documentation Alignment & Post-Plugin Architecture Audit**:
+  - Reconciled `STABILITY_NOTES.md` and `BUILD_INSTRUCTIONS.txt` to remove stale references claiming Hugging Face `Transformers` is tested in the core frozen binary, documenting that it lives strictly within the isolated `plugins/translation/` virtual environment.
+  - Aligned core application runtime documentation with the modular post-plugin architecture.
+- **WeSpeaker ONNX Embedding Engine Clarification**:
+  - Confirmed and documented `wespeakerruntime` in `requirements.txt` and `radio_tv_story_segmenter_worker.py` as the dedicated, high-performance ONNX speaker voice embedding engine (`wespeaker_rt.Speaker(lang="en")`) for speaker diarization.
+- **Repository Hygiene & Release Governance**:
+  - Maintained `.gitignore` patterns preventing temporary build artifacts and virtual environments from being tracked.
+  - Enforced release archive distribution governance via GitHub Releases.
+- **Version Alignment**:
+  - Bumped application version to `v2.9.2` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, plugin manifests (`wordpress`, `youtube`, `translation`), metadata, and documentation.
+
 ## v2.9.1
+
 - **Seamless App Upgrade Plugin Synchronization**:
   - Automatically checks and upgrades installed plugins in the user directory when a newer bundled version is shipped with an application update.
   - Ensures existing users who upgrade the desktop application automatically receive all updated core plugin features without requiring manual reinstallation.

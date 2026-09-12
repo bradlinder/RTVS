@@ -1,13 +1,18 @@
-## v2.2 stability notes
+## v2.9.2 stability notes
 
-The Windows frozen build now creates and installs a dedicated `workers/prs_worker.exe`
-with its complete PyInstaller `_internal` runtime. The GUI no longer falls back to
-executing itself as the AI worker. Both the GUI and worker are smoke-tested during
-the build for PyTorch, `torch._C`, CTranslate2, Transformers and Silero VAD.
+The core desktop application and standalone AI worker (`workers/prs_worker.exe`)
+are built CPU-first with Faster-Whisper, Silero VAD, CTranslate2, PyTorch, and
+WeSpeaker ONNX (`wespeakerruntime`).
 
-The Windows build scripts also re-install and verify CPU-only PyTorch 2.3.1 after
-normal dependency resolution so a CUDA-enabled PyPI wheel cannot silently enter the
-release build.
+- Post-Plugin Modular Architecture: Heavy machine translation (Hugging Face `Transformers`,
+  MarianMT, and Seq2Seq models) runs strictly in an isolated, on-demand virtual environment
+  managed by the `plugins/translation/` add-on rather than the core frozen runtime.
+- Diarization Runtime: Speaker diarization utilizes the native ONNX WeSpeaker ResNet34-LM
+  embedding engine (`wespeakerruntime`) with in-memory Fbank computation, eliminating
+  heavy PyTorch PyAnnote dependencies from core runtime packaging.
+- GPU Acceleration: On Windows, optional NVIDIA CUDA acceleration is provisioned on demand
+  via `uv` and remains completely isolated from the base installer.
+
 
 # Release hardening notes — 1.1.1
 

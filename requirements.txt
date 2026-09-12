@@ -37,4 +37,6 @@ onnxruntime>=1.17,<2
 sherpa-onnx>=1.13,<2
 scipy>=1.11.0,<1.15.0
 scikit-learn>=1.4.0,<1.6.0
+# Speaker diarization ONNX voice embedding engine (WeSpeaker ResNet34-LM)
 wespeakerruntime>=1.0.0,<2.0.0
+

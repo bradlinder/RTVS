@@ -891,6 +891,9 @@ def extract_embeddings_batched(
     """Extract 256-dim speaker embeddings using WeSpeaker ResNet34-LM (ONNX)
     with in-memory Fbank computation and batched ONNX session inference (batch size 16-32).
     Completely eliminates disk temp file I/O and maximizes SIMD/AVX-512 register utilization.
+
+    Uses `wespeakerruntime` as the lightweight native ONNX embedding engine for the
+    diarization pipeline, avoiding heavy PyTorch PyAnnote dependencies.
     """
     import numpy as np
     import soundfile as sf

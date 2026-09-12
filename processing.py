@@ -45,15 +45,17 @@ class RuntimeSetupWorker(QThread):
     progress = Signal(str)
     finished_ok = Signal(bool)
 
-    def __init__(self, runtime_mgr, feature, parent=None):
+    def __init__(self, runtime_mgr, feature, parent=None, ensure_kwargs=None):
         super().__init__(parent)
         self.runtime_mgr = runtime_mgr
         self.feature = feature
+        self.ensure_kwargs = dict(ensure_kwargs or {})
 
     def run(self):
         try:
             ok = self.runtime_mgr.ensure_environment(
-                self.feature, progress_cb=lambda msg: self.progress.emit(msg)
+                self.feature, progress_cb=lambda msg: self.progress.emit(msg),
+                **self.ensure_kwargs,
             )
         except Exception as exc:
             self.progress.emit(f"Error: {exc}")
@@ -62,23 +64,32 @@ class RuntimeSetupWorker(QThread):
 
 
 class ProcessingMixin:
-    def _ensure_runtime_environment_responsive(self, feature) -> bool:
-        """Make sure the isolated venv for `feature` ('transcribe' or
-        'diarize') is ready before launching the local worker, without
-        freezing the GUI if it still needs to be created or upgraded.
+    # Features genuinely baked into the frozen core app (no venv is ever
+    # created for these) -- everything else (e.g. "translate", which is
+    # provisioned by its own plugin on first use) needs real provisioning
+    # even in a frozen/installed build, not just when running from source.
+    _CORE_BUNDLED_FEATURES = {"transcribe", "diarize"}
+
+    def _ensure_runtime_environment_responsive(self, feature, **ensure_kwargs) -> bool:
+        """Make sure the isolated venv for `feature` is ready before
+        launching the local worker, without freezing the GUI if it still
+        needs to be created or upgraded.
+
+        Extra keyword arguments (e.g. `plugin_dir=...` for the translation
+        plugin) are passed straight through to runtime_mgr.ensure_environment().
 
         Returns True once ready to proceed, False if setup failed or the
         user cancelled -- callers should abort the launch in that case,
         the same way they already do for a FileNotFoundError raised by
         _worker_command()/_resolve_worker_command().
         """
-        if getattr(sys, "frozen", False):
+        if getattr(sys, "frozen", False) and feature in self._CORE_BUNDLED_FEATURES:
             return True  # frozen builds use a pre-built worker executable; no venv is ever created here
         runtime_mgr = getattr(self, "runtime_mgr", None)
         if runtime_mgr is None:
             return True
         gpu_launch_fn = getattr(self, "gpu_worker_launch_info", None)
-        if callable(gpu_launch_fn) and gpu_launch_fn() is not None:
+        if feature in self._CORE_BUNDLED_FEATURES and callable(gpu_launch_fn) and gpu_launch_fn() is not None:
             return True  # the GPU path provisions its own environment elsewhere
 
         try:
@@ -97,11 +108,14 @@ class ProcessingMixin:
         progress_dialog.setAutoClose(True)
         progress_dialog.setAutoReset(True)
 
-        worker = RuntimeSetupWorker(runtime_mgr, feature, self)
+        worker = RuntimeSetupWorker(runtime_mgr, feature, self, ensure_kwargs=ensure_kwargs)
         loop = QEventLoop(self)
         result = {"ok": False}
 
         worker.progress.connect(progress_dialog.setLabelText)
+        if hasattr(self, "set_processing_stage"):
+            worker.progress.connect(lambda msg: self.set_processing_stage(f"{feature.title()} Runtime", msg))
+
 
         def _on_finished(ok):
             result["ok"] = ok
@@ -127,9 +141,15 @@ class ProcessingMixin:
             return False
 
         if not result["ok"]:
+            err_detail = None
+            try:
+                err_detail = runtime_mgr.get_last_error()
+            except Exception:
+                pass
+            detail_text = f"\n\nDetails:\n{err_detail}" if err_detail else ""
             QMessageBox.critical(
                 self, "Environment Setup Failed",
-                f"Could not prepare the local {feature} environment. Check the activity log for details.",
+                f"Could not prepare the local {feature} environment. Check the activity log for details.{detail_text}",
             )
         return result["ok"]
 

@@ -3,34 +3,92 @@ RADIO & TV STORY SEGMENTER - DEVELOPMENT ROADMAP & TECHNICAL SPECIFICATION
 ================================================================================
 This document outlines the architectural roadmap and implementation specifications
 for future versions of the Radio & TV Story Segmenter. Adapted from best-in-class
-heuristics and timeline serialization algorithms.
+heuristics, modular runtime architectures, and timeline serialization algorithms.
 
 --------------------------------------------------------------------------------
 TABLE OF CONTENTS
 --------------------------------------------------------------------------------
-1. VERSION 3.0: HEURISTIC POST-PROCESSING & TRANSCRIPT CLEANING (PHASE 1)
-   1.1 Whisper Hallucination & Degenerate Loop Scrubber
-   1.2 Multi-Lingual Filler Word & Disfluency Detection
-   1.3 Pipeline Integration & UI Controls
+1. VERSION 2.9.2: MAINTENANCE, DOCUMENTATION & RUNTIME CLARITY (NEAR-TERM)
+   1.1 Documentation Alignment & Post-Plugin Architecture Audit
+   1.2 WeSpeaker ONNX Runtime Embedding Engine Clarification
+   1.3 Repository Hygiene & Binary Blob Governance
 
-2. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
-   2.1 Cockos Reaper Project (.rpp) Generator
-   2.2 Magix Samplitude EDL (v1.5) Export
-   2.3 Video NLE Interchange (FCPXML, Premiere / DaVinci Resolve xmeml XML)
-   2.4 Avid / Pro Tools AAF Composition
-   2.5 Rational Timecode & Audio Sample Rate Math
+2. VERSION 3.0: CORE ASYNC PROVISIONING & TRANSCRIPT CLEANING (PHASE 1)
+   2.1 Unified Core Async Runtime Provisioner (RuntimeManager Engine)
+   2.2 Whisper Hallucination & Degenerate Loop Scrubber
+   2.3 Multi-Lingual Filler Word & Disfluency Detection
+   2.4 Pipeline Integration & UI Controls
 
-3. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
-   3.1 "Text-as-Timeline" Rough-Cut Editing Engine
-   3.2 Seamless Non-Destructive Playback Preview
-   3.3 CTC Word Boundary Refinement & Forced Alignment
-   3.4 Memory-Bounded Diarization & Chunked Streaming
+3. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
+   3.1 Cockos Reaper Project (.rpp) Generator
+   3.2 Magix Samplitude EDL (v1.5) Export
+   3.3 Video NLE Interchange (FCPXML, Premiere / DaVinci Resolve xmeml XML)
+   3.4 Avid / Pro Tools AAF Composition
+   3.5 Rational Timecode & Audio Sample Rate Math
+
+4. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
+   4.1 "Text-as-Timeline" Rough-Cut Editing Engine
+   4.2 Seamless Non-Destructive Playback Preview
+   4.3 CTC Word Boundary Refinement & Forced Alignment
+   4.4 Memory-Bounded Diarization & Chunked Streaming
 
 ================================================================================
-1. VERSION 3.0: HEURISTIC POST-PROCESSING & TRANSCRIPT CLEANING (PHASE 1)
+1. VERSION 2.9.2: MAINTENANCE, DOCUMENTATION & RUNTIME CLARITY (NEAR-TERM)
 ================================================================================
 
-1.1 WHISPER HALLUCINATION & DEGENERATE LOOP SCRUBBER
+1.1 DOCUMENTATION ALIGNMENT & POST-PLUGIN ARCHITECTURE AUDIT
+-----------------------------------------------------------
+Following the modularization of translation and publishing into independent add-ons,
+core documentation must accurately reflect component boundaries:
+- Update `STABILITY_NOTES.md` and `BUILD_INSTRUCTIONS.txt` to remove stale references
+  claiming Hugging Face `Transformers` is validated as part of the core frozen binary.
+- Document that `Transformers`, MarianMT, and Seq2Seq translation models live strictly
+  within the isolated `plugins/translation/` plugin virtual environment.
+- Keep `NOTICES.txt` and `README.md` synchronized with all bundled licenses.
+
+1.2 WESPEAKER ONNX RUNTIME EMBEDDING ENGINE CLARIFICATION
+---------------------------------------------------------
+Confirm and document that `wespeakerruntime` is the dedicated, lightweight ONNX
+inference engine for speaker diarization:
+- Clarify in `requirements.txt` and `radio_tv_story_segmenter_worker.py` docstrings that
+  `wespeakerruntime` is actively used by `wespeaker_rt.Speaker(lang="en")` for rapid speaker
+  embedding extraction without heavy PyTorch PyAnnote dependencies.
+- Retain existing PyInstaller hooks (`torch_dll_hook.py`) and CI/CD self-test validation.
+
+1.3 REPOSITORY HYGIENE & BINARY BLOB GOVERNANCE
+----------------------------------------------
+- Maintain `.gitignore` rules preventing temporary files (`node_modules/`, `.vite/`,
+  `.env.local`, `.venv/`, `__pycache__/`) from being tracked in Git.
+- Enforce storing snapshot release archives exclusively on GitHub Releases rather than
+  committing binary `.zip` blobs into version control history.
+
+================================================================================
+2. VERSION 3.0: CORE ASYNC PROVISIONING & TRANSCRIPT CLEANING (PHASE 1)
+================================================================================
+
+2.1 UNIFIED CORE ASYNC RUNTIME PROVISIONER (RUNTIMEMANAGER ENGINE)
+------------------------------------------------------------------
+Consolidate separate background venv setup mechanisms (`processing.py`'s modal
+QEventLoop dialog and `translation.py`'s QThread.moveToThread worker) into a single,
+shared asynchronous engine inside `runtime_manager.py`.
+
+Architectural Rules & Implementation Details:
+- Target File: `runtime_manager.py` (Core)
+- Decoupling Directive: Core modules MUST NOT import from `plugins/`. Plugins may import
+  and consume core runtime helpers.
+- Implementation:
+  * `RuntimeSetupWorker(QObject)`: Universal background worker handling `ensure_environment()`.
+  * `RuntimeManager.ensure_environment_async(feature_name, on_progress, on_finished, parent, **kwargs)`:
+    Returns the managed `QThread` instance with automated lifecycle cleanup (`deleteLater`).
+- Consumer Integration:
+  * `processing.py` (Core: Whisper & Diarization): Taps into `ensure_environment_async()`
+    with modal progress feedback, preserving synchronous flow without nested loop bugs.
+  * `translation.py` (Optional Plugin): Taps into `ensure_environment_async()` with
+    non-blocking background callbacks, automatically passing `plugin_dir` when installed.
+- Benefits: Eliminates code duplication, prevents "bug drift" in pip/venv provisioning,
+  standardizes progress/error reporting, and simplifies future plugin development.
+
+2.2 WHISPER HALLUCINATION & DEGENERATE LOOP SCRUBBER
 ---------------------------------------------------
 Whisper frequently enters repeating hallucination loops on audio with low SNR,
 background music, or long silences, and emits standard ASR artifact phrases.
@@ -59,7 +117,7 @@ Implementation Details:
     - Sequentially executes collapse_repeating_ngrams -> strip_hallucination_phrases
       -> trim_trailing_degenerate_tail and re-indexes word timestamps/IDs.
 
-1.2 MULTI-LINGUAL FILLER WORD & DISFLUENCY DETECTION
+2.3 MULTI-LINGUAL FILLER WORD & DISFLUENCY DETECTION
 ----------------------------------------------------
 Identifies hesitations and filled pauses without altering genuine semantic vocabulary.
 
@@ -78,7 +136,7 @@ Implementation Details:
 - Disfluency handling: Support placeholder tags (e.g. `[pause]`, `...`, `[groan]`)
   produced by specialized ASR models.
 
-1.3 PIPELINE INTEGRATION & UI CONTROLS
+2.4 PIPELINE INTEGRATION & UI CONTROLS
 --------------------------------------
 - Add preferences / checkboxes to Settings and Processing dialog:
   [x] Scrub Whisper Hallucination Loops & Artifacts
@@ -89,10 +147,10 @@ Implementation Details:
   occurs automatically after ASR before story segment segmentation.
 
 ================================================================================
-2. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
+3. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
 ================================================================================
 
-2.1 COCKOS REAPER PROJECT (.rpp) GENERATOR
+3.1 COCKOS REAPER PROJECT (.rpp) GENERATOR
 ------------------------------------------
 Upgrades the simple EDL marker export to full multi-track Reaper project files.
 
@@ -110,7 +168,7 @@ Implementation Details:
     - `<SOURCE WAVE/MP3 FILE "<media_path>">`
 - Supports both relative paths and absolute media paths for instant opening in Reaper.
 
-2.2 MAGIX SAMPLITUDE EDL (v1.5) EXPORT
+3.2 MAGIX SAMPLITUDE EDL (v1.5) EXPORT
 --------------------------------------
 Sample-accurate text-based cut-list widely supported by legacy radio broadcast consoles
 and DAW tools.
@@ -120,7 +178,7 @@ Implementation Details:
 - Sample calculations: `samples = round(seconds * audio_sample_rate)`
 - Columns: Source, Track, Play-In, Play-Out, Record-In, Record-Out, Volume, Pan, Fades, Name.
 
-2.3 VIDEO NLE INTERCHANGE (FCPXML & XMEML XML)
+3.3 VIDEO NLE INTERCHANGE (FCPXML & XMEML XML)
 ----------------------------------------------
 Generates sequence timelines for video newsrooms and multi-cam podcast edits.
 
@@ -136,12 +194,12 @@ Implementation Details:
     30 (30/1), 50 (50/1), 59.94 (60000/1001), 60 (60/1) fps.
   * Time conversion helper: `seconds_to_rational(seconds, framerate)` to prevent drift.
 
-2.4 AVID & PRO TOOLS AAF COMPOSITION
+3.4 AVID & PRO TOOLS AAF COMPOSITION
 ------------------------------------
 - Support AAF composition export for high-end post-production facilities (Pro Tools / Avid Media Composer).
 - Reference-only metadata composition pointing to broadcast WAV (BWF) media files.
 
-2.5 UI & BATCH EXPORT INTEGRATION
+3.5 UI & BATCH EXPORT INTEGRATION
 ---------------------------------
 - Expand Export Menu in `RadioTVSegmenter.py`:
   * Export -> DAW Project (Reaper .rpp, Samplitude .edl)
@@ -149,10 +207,10 @@ Implementation Details:
 - Framerate selection popup dialog when exporting video timeline files.
 
 ================================================================================
-3. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
+4. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
 ================================================================================
 
-3.1 "TEXT-AS-TIMELINE" ROUGH-CUT EDITING ENGINE
+4.1 "TEXT-AS-TIMELINE" ROUGH-CUT EDITING ENGINE
 -----------------------------------------------
 Allows journalists to edit audio/video directly by striking through or deleting words
 in the transcript UI.
@@ -166,14 +224,14 @@ Implementation Details:
 - Word bar / timeline sync: Deleting text instantly recalculates segment boundaries
   and updates the duration counter in real time.
 
-3.2 SEAMLESS NON-DESTRUCTIVE PLAYBACK PREVIEW
+4.2 SEAMLESS NON-DESTRUCTIVE PLAYBACK PREVIEW
 ---------------------------------------------
 - Custom audio playback handler in PySide6 / QMediaPlayer / sounddevice:
   * Plays only inside `keep_ranges`.
   * When playback cursor reaches a cut point, instantly seeks to the start of the next
     keep range with a 5ms linear volume crossfade to avoid popping artifacts.
 
-3.3 CTC WORD BOUNDARY REFINEMENT & FORCED ALIGNMENT
+4.3 CTC WORD BOUNDARY REFINEMENT & FORCED ALIGNMENT
 ---------------------------------------------------
 - Whisper's token timestamps can have 50-150ms acoustic jitter.
 - Optional secondary alignment pass using a lightweight Wav2Vec2 / MMS / CTC model:
@@ -181,7 +239,7 @@ Implementation Details:
     onsets and vowel/consonant transitions.
   * Result: Subtitle files (SRT/VTT) and audio slices are frame-accurate to 10ms.
 
-3.4 MEMORY-BOUNDED DIARIZATION & CHUNKED STREAMING
+4.4 MEMORY-BOUNDED DIARIZATION & CHUNKED STREAMING
 --------------------------------------------------
 - For long broadcast files (e.g. 2-6 hour council meetings or continuous broadcasts):
   * Segment audio into overlapping windows (`MAX_SEGMENT_S = 120s`).
