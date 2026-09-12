@@ -6,11 +6,17 @@ for future versions of the Radio & TV Story Segmenter. Adapted from best-in-clas
 heuristics, modular runtime architectures, and timeline serialization algorithms.
 
 --------------------------------------------------------------------------------
-ROADMAP MAINTENANCE POLICY: N-1 SLIDING-WINDOW HORIZON
+ROADMAP MAINTENANCE POLICY: N-1 SLIDING-WINDOW & STATUS TRACKING
 --------------------------------------------------------------------------------
 - The roadmap maintains a rolling window: it displays the current/immediate past
-  release ($N-1$) for baseline context, followed by the active upcoming development
+  release ($N-1$) for baseline context, followed by active upcoming development
   milestones ($N$, $N+1$).
+- Status Notation Policy:
+  * All milestones and roadmap items MUST be annotated with status tags:
+    [NOT STARTED], [IN-PROGRESS], or [COMPLETED].
+  * When work commences on an item, mark it immediately as [IN-PROGRESS].
+  * Mark an item as [COMPLETED] when implementation is finalized, upon user
+    confirmation, or inferred when development transitions to another part of the roadmap.
 - When a new version is built, its completed specifications are recorded, and any
   versions older than $N-1$ are pruned to keep the document focused and actionable.
 - Whenever any code change, bug fix, packaging adjustment, or feature refinement is
@@ -21,103 +27,130 @@ ROADMAP MAINTENANCE POLICY: N-1 SLIDING-WINDOW HORIZON
 --------------------------------------------------------------------------------
 TABLE OF CONTENTS
 --------------------------------------------------------------------------------
-1. PREVIOUS RELEASE (v2.9.3): BUILD PIPELINE TAG SYNCHRONIZATION & ASSET RESILIENCE [COMPLETED]
-   1.1 CI/CD Version Tag Alignment in GitHub Actions Workflow
-   1.2 Build System Dynamic Version Overrides (--version and BUILD_VERSION)
-   1.3 In-App Updater Release Asset Verification & Tag Mismatch Warning
-   1.4 Standardized Synchronous Version Alignment across Core and Add-ons
+1. PREVIOUS RELEASE (v2.9.4): VERSION ROLLBACK & HISTORICAL RELEASE SELECTOR [COMPLETED]
+   1.1 Historical GitHub Releases API Ingestion & Pagination [COMPLETED]
+   1.2 Interactive Version Selection Dropdown (QComboBox) [COMPLETED]
+   1.3 Dynamic Release Notes & Contextual Action Controls [COMPLETED]
+   1.4 Safety Safeguards & Downgrade Confirmation Warning Dialog [COMPLETED]
+   1.5 Synchronized Project Version Bump across Core and Add-ons [COMPLETED]
 
-2. CURRENT RELEASE (v2.9.4): VERSION ROLLBACK & HISTORICAL RELEASE SELECTOR [COMPLETED]
-   2.1 Historical GitHub Releases API Ingestion & Pagination
-   2.2 Interactive Version Selection Dropdown (QComboBox)
-   2.3 Dynamic Release Notes & Contextual Action Controls
-   2.4 Safety Safeguards & Downgrade Confirmation Warning Dialog
-   2.5 Synchronized Project Version Bump across Core and Add-ons
+2. CURRENT RELEASE (v2.9.5): UPDATER COMPARISON STABILITY & INCREMENTAL POINT POLICY [COMPLETED]
+   2.1 Semantic Version Evaluation Engine Fix (is_version_older) [COMPLETED]
+   2.2 Release Selector Dropdown Visibility Restoration [COMPLETED]
+   2.3 Full Project Version Synchronization across Core and Add-ons [COMPLETED]
+   2.4 Project Policy Institutionalization: Automatic Incremental Point Release Bumps [COMPLETED]
+   2.5 WordPress Media Player & Custom Notice Placement Optimization [COMPLETED]
 
-3. UPCOMING MILESTONE (v3.0): CORE ASYNC PROVISIONING & TRANSCRIPT CLEANING (PHASE 1)
-   3.1 Unified Core Async Runtime Provisioner (RuntimeManager Engine)
-   3.2 Whisper Hallucination & Degenerate Loop Scrubber
-   3.3 Multi-Lingual Filler Word & Disfluency Detection
-   3.4 Pipeline Integration & UI Controls
+3. UPCOMING MILESTONE (v3.0): MEDIA TRANSCODING, ASYNC PROVISIONING & TRANSCRIPT CLEANING [NOT STARTED]
+   3.1 Media Transcoding & Format Conversion on Export (Audio & Video Codecs) [NOT STARTED]
+   3.2 Unified Core Async Runtime Provisioner (RuntimeManager Engine) [NOT STARTED]
+   3.3 Whisper Hallucination & Degenerate Loop Scrubber [NOT STARTED]
+   3.4 Multi-Lingual Filler Word & Disfluency Detection [NOT STARTED]
+   3.5 Pipeline Integration & UI Controls [NOT STARTED]
 
-4. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
-   4.1 Cockos Reaper Project (.rpp) Generator
-   4.2 Magix Samplitude EDL (v1.5) Export
-   4.3 Video NLE Interchange (FCPXML, Premiere / DaVinci Resolve xmeml XML)
-   4.4 Avid / Pro Tools AAF Composition
-   4.5 Rational Timecode & Audio Sample Rate Math
+4. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2) [NOT STARTED]
+   4.1 Cockos Reaper Project (.rpp) Generator [NOT STARTED]
+   4.2 Magix Samplitude EDL (v1.5) Export [NOT STARTED]
+   4.3 Video NLE Interchange (FCPXML, Premiere / DaVinci Resolve xmeml XML) [NOT STARTED]
+   4.4 Avid / Pro Tools AAF Composition [NOT STARTED]
+   4.5 Rational Timecode & Audio Sample Rate Math [NOT STARTED]
+   4.6 UI & Batch Export Integration [NOT STARTED]
 
-5. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
-   5.1 "Text-as-Timeline" Rough-Cut Editing Engine
-   5.2 Seamless Non-Destructive Playback Preview
-   5.3 CTC Word Boundary Refinement & Forced Alignment
-   5.4 Memory-Bounded Diarization & Chunked Streaming
-
-================================================================================
-1. PREVIOUS RELEASE (v2.9.3): BUILD PIPELINE TAG SYNCHRONIZATION & ASSET RESILIENCE [COMPLETED]
-================================================================================
-
-1.1 CI/CD VERSION TAG ALIGNMENT IN GITHUB ACTIONS WORKFLOW
-----------------------------------------------------------
-- Resolved release asset mismatch root cause where CI/CD workflows packaged binaries using stale codebase versions rather than git release tag version names.
-- Updated all build jobs (`build-plugins`, `build-windows`, `build-macos`, `build-linux`) in `.github/workflows/build.yml` to extract the release tag (`GITHUB_REF_NAME` or `inputs.release_tag`) and inject `BUILD_VERSION` into build environments.
-
-1.2 BUILD SYSTEM DYNAMIC VERSION OVERRIDES (--version AND BUILD_VERSION)
------------------------------------------------------------------------
-- Enhanced `build_installer.py` to accept `--version <version>` CLI parameter and respect `BUILD_VERSION` environment variable.
-- Dynamically synchronizes Inno Setup installer scripts and artifact output filenames with the active build version.
-
-1.3 IN-APP UPDATER RELEASE ASSET VERIFICATION & TAG MISMATCH WARNING
--------------------------------------------------------------------
-- Updated `updater.py` with asset version detection logic in `_on_update_available`.
-- Added defensive warning banner when remote GitHub release tags and attached binary package filenames diverge, guiding users clearly.
-
-1.4 STANDARDIZED SYNCHRONOUS VERSION ALIGNMENT ACROSS CORE AND ADD-ONS
-----------------------------------------------------------------------
-- Bumped application and all plugin manifests to `v2.9.3` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`, and plugin manifests.
+5. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL) [NOT STARTED]
+   5.1 "Text-as-Timeline" Rough-Cut Editing Engine [NOT STARTED]
+   5.2 Seamless Non-Destructive Playback Preview [NOT STARTED]
+   5.3 CTC Word Boundary Refinement & Forced Alignment [NOT STARTED]
+   5.4 Memory-Bounded Diarization & Chunked Streaming [NOT STARTED]
 
 ================================================================================
-2. CURRENT RELEASE (v2.9.4): VERSION ROLLBACK & HISTORICAL RELEASE SELECTOR [COMPLETED]
+1. PREVIOUS RELEASE (v2.9.4): VERSION ROLLBACK & HISTORICAL RELEASE SELECTOR [COMPLETED]
 ================================================================================
 
-2.1 HISTORICAL GITHUB RELEASES API INGESTION & PAGINATION
----------------------------------------------------------
+1.1 HISTORICAL GITHUB RELEASES API INGESTION & PAGINATION [COMPLETED]
+---------------------------------------------------------------------
 - Expanded updater GitHub API integration (`fetch_releases` in `updater.py`) to query up to 30 published releases instead of solely the single latest tag.
 - Retained backward-compatible `fetch_latest_release` wrapper.
 - Emitted `releases_loaded(list)` signal from `CheckUpdateWorker` alongside primary update status signals.
 
-2.2 INTERACTIVE VERSION SELECTION DROPDOWN (QComboBox)
-------------------------------------------------------
+1.2 INTERACTIVE VERSION SELECTION DROPDOWN (QComboBox) [COMPLETED]
+------------------------------------------------------------------
 - Added interactive `QComboBox` version selector to `CheckUpdateDialog` in `updater.py`.
 - Formats entries clearly with tag names, release titles, and contextual indicators:
   * `[Installed]` for the currently running project version
   * `★ Latest Update` / `★ Latest` for the most recent remote release
   * `(Older)` for previous legacy versions
 
-2.3 DYNAMIC RELEASE NOTES & CONTEXTUAL ACTION CONTROLS
-------------------------------------------------------
+1.3 DYNAMIC RELEASE NOTES & CONTEXTUAL ACTION CONTROLS [COMPLETED]
+------------------------------------------------------------------
 - Dynamically re-renders HTML formatted release notes in `QTextBrowser` whenever the user selects a release from the dropdown.
 - Inspects attached platform release assets and updates the primary action button:
   * "Update to vX.X" for newer releases
   * "Reinstall vX.X" for the currently installed release
   * "Rollback to vX.X" for older releases
 
-2.4 SAFETY SAFEGUARDS & DOWNGRADE CONFIRMATION WARNING DIALOG
--------------------------------------------------------------
+1.4 SAFETY SAFEGUARDS & DOWNGRADE CONFIRMATION WARNING DIALOG [COMPLETED]
+-------------------------------------------------------------------------
 - Added prominent modal confirmation warning dialog (`_confirm_downgrade`) when a user selects a version older than `PROJECT_VERSION`.
 - Explicitly warns users about potential project data or configuration incompatibilities before initiating an older package download.
 - Verifies SHA-256 checksums of downloaded historical packages before launching installers.
 
-2.5 SYNCHRONIZED PROJECT VERSION BUMP ACROSS CORE AND ADD-ONS
--------------------------------------------------------------
+1.5 SYNCHRONIZED PROJECT VERSION BUMP ACROSS CORE AND ADD-ONS [COMPLETED]
+-------------------------------------------------------------------------
 - Synchronized `v2.9.4` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`, `transcript_story.py`, and all plugin manifests (`wordpress`, `youtube`, `translation`).
 
+===============================================================================
+2. CURRENT RELEASE (v2.9.5): UPDATER COMPARISON STABILITY & INCREMENTAL POINT POLICY [COMPLETED]
+===============================================================================
+
+2.1 SEMANTIC VERSION EVALUATION ENGINE FIX (is_version_older) [COMPLETED]
+-------------------------------------------------------------------------
+- Resolved `NameError: name 'is_version_older' is not defined` runtime exception during background release query parsing.
+- Implemented `is_version_older(remote_version_str, current_version_str)` in `updater.py` using robust numerical tuple and weight comparisons.
+- Restored unhindered visibility of the release selector dropdown in `CheckUpdateDialog`.
+
+2.2 FULL PROJECT VERSION SYNCHRONIZATION ACROSS CORE AND ADD-ONS [COMPLETED]
+-----------------------------------------------------------------------------
+- Synchronously bumped project version to `v2.9.5` across:
+  * Core: `prs_shared.py`, `updater.py`, `build_installer.py`, `transcript_story.py`
+  * Packaging: `installer/Windows/RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`
+  * Plugins: `plugins/wordpress/manifest.json`, `plugins/youtube/manifest.json`, `plugins/translation/manifest.json`
+  * Documentation & Applet: `CHANGELOG.md`, `roadmap.txt`, and `/src/App.tsx`
+
+2.3 PROJECT POLICY INSTITUTIONALIZATION: AUTOMATIC INCREMENTAL POINT RELEASE BUMPS [COMPLETED]
+----------------------------------------------------------------------------------------------
+- Formulated and documented mandatory automatic incremental point release policy in `AGENTS.md` and `GEMINI.md`:
+  * Core app changes, bug fixes, or enhancements automatically increment the point release (e.g., `v2.9.4` -> `v2.9.5`) unless an explicit version number is requested.
+  * Ensures every core code revision is packaged and trackable with complete multi-file version alignment.
+
+2.4 WORDPRESS MEDIA PLAYER & CUSTOM NOTICE PLACEMENT OPTIMIZATION [COMPLETED]
+-----------------------------------------------------------------------------
+- Refined `wordpress_export.py` custom notice placement logic:
+  * When custom header text position is set to "top", the notice (`rtvs-custom-notice` / `data-nosnippet`) is placed directly below the embedded audio (`<!-- wp:audio -->`) or video (`<!-- wp:video -->`) player block rather than above it.
+  * Ensures media playback controls remain prominent at the very top of published WordPress posts while disclaimers precede the text transcript.
+
 ================================================================================
-3. UPCOMING MILESTONE (v3.0): CORE ASYNC PROVISIONING & TRANSCRIPT CLEANING (PHASE 1)
+3. UPCOMING MILESTONE (v3.0): MEDIA TRANSCODING, ASYNC PROVISIONING & TRANSCRIPT CLEANING [NOT STARTED]
 ================================================================================
 
-3.1 UNIFIED CORE ASYNC RUNTIME PROVISIONER (RUNTIMEMANAGER ENGINE)
-------------------------------------------------------------------
+3.1 MEDIA TRANSCODING & FORMAT CONVERSION ON EXPORT (AUDIO & VIDEO CODECS) [NOT STARTED]
+----------------------------------------------------------------------------------------
+Provides an integrated export option to convert segmented media files to common standard formats
+(e.g., WAV -> MP3, MP3 -> WAV, AAC, FLAC, OGG, MP4, MKV) with support for standard audio and video codecs.
+
+Implementation Details:
+- Target Files: `processing.py`, `ui_layout.py`, and `RadioTVSegmenter.py`
+- Format Selection UI:
+  * Dropdown selector in the Export dialog / Export options menu:
+    - Audio Formats: MP3 (libmp3lame, 128k/192k/320k), WAV (pcm_s16le, pcm_s24le), AAC (aac), FLAC (flac), OGG (libvorbis)
+    - Video Formats: MP4 (H.264/AAC, H.265/HEVC), MKV (copy/transcode), WebM (VP9/Opus)
+    - Pass-through option: "Original Source Format (No Re-encoding)"
+- Engine & Pipeline:
+  * Uses project-bundled FFmpeg binary via `processing.py` transcoding routines.
+  * Preserves metadata tags (title, broadcast date, segment markers) across converted formats.
+  * Fast multi-threaded batch transcoding during multi-segment export operations.
+
+3.2 UNIFIED CORE ASYNC RUNTIME PROVISIONER (RUNTIMEMANAGER ENGINE) [NOT STARTED]
+--------------------------------------------------------------------------------
 Consolidate separate background venv setup mechanisms (`processing.py`'s modal
 QEventLoop dialog and `translation.py`'s QThread.moveToThread worker) into a single,
 shared asynchronous engine inside `runtime_manager.py`.
@@ -138,8 +171,8 @@ Architectural Rules & Implementation Details:
 - Benefits: Eliminates code duplication, prevents "bug drift" in pip/venv provisioning,
   standardizes progress/error reporting, and simplifies future plugin development.
 
-3.2 WHISPER HALLUCINATION & DEGENERATE LOOP SCRUBBER
----------------------------------------------------
+3.3 WHISPER HALLUCINATION & DEGENERATE LOOP SCRUBBER [NOT STARTED]
+------------------------------------------------------------------
 Whisper frequently enters repeating hallucination loops on audio with low SNR,
 background music, or long silences, and emits standard ASR artifact phrases.
 
@@ -167,8 +200,8 @@ Implementation Details:
     - Sequentially executes collapse_repeating_ngrams -> strip_hallucination_phrases
       -> trim_trailing_degenerate_tail and re-indexes word timestamps/IDs.
 
-3.3 MULTI-LINGUAL FILLER WORD & DISFLUENCY DETECTION
-----------------------------------------------------
+3.4 MULTI-LINGUAL FILLER WORD & DISFLUENCY DETECTION [NOT STARTED]
+-------------------------------------------------------------------
 Identifies hesitations and filled pauses without altering genuine semantic vocabulary.
 
 Implementation Details:
@@ -186,8 +219,8 @@ Implementation Details:
 - Disfluency handling: Support placeholder tags (e.g. `[pause]`, `...`, `[groan]`)
   produced by specialized ASR models.
 
-3.4 PIPELINE INTEGRATION & UI CONTROLS
---------------------------------------
+3.5 PIPELINE INTEGRATION & UI CONTROLS [NOT STARTED]
+-----------------------------------------------------
 - Add preferences / checkboxes to Settings and Processing dialog:
   [x] Scrub Whisper Hallucination Loops & Artifacts
   [x] Highlight / Auto-Tag Filler Words
@@ -197,11 +230,11 @@ Implementation Details:
   occurs automatically after ASR before story segment segmentation.
 
 ================================================================================
-4. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2)
+4. VERSION 3.1: EXPANDED NLE & DAW TIMELINE INTERCHANGE (PHASE 2) [NOT STARTED]
 ================================================================================
 
-4.1 COCKOS REAPER PROJECT (.rpp) GENERATOR
-------------------------------------------
+4.1 COCKOS REAPER PROJECT (.rpp) GENERATOR [NOT STARTED]
+---------------------------------------------------------
 Upgrades the simple EDL marker export to full multi-track Reaper project files.
 
 Implementation Details:
@@ -218,8 +251,8 @@ Implementation Details:
     - `<SOURCE WAVE/MP3 FILE "<media_path>">`
 - Supports both relative paths and absolute media paths for instant opening in Reaper.
 
-4.2 MAGIX SAMPLITUDE EDL (v1.5) EXPORT
---------------------------------------
+4.2 MAGIX SAMPLITUDE EDL (v1.5) EXPORT [NOT STARTED]
+-----------------------------------------------------
 Sample-accurate text-based cut-list widely supported by legacy radio broadcast consoles
 and DAW tools.
 
@@ -228,8 +261,8 @@ Implementation Details:
 - Sample calculations: `samples = round(seconds * audio_sample_rate)`
 - Columns: Source, Track, Play-In, Play-Out, Record-In, Record-Out, Volume, Pan, Fades, Name.
 
-4.3 VIDEO NLE INTERCHANGE (FCPXML & XMEML XML)
-----------------------------------------------
+4.3 VIDEO NLE INTERCHANGE (FCPXML & XMEML XML) [NOT STARTED]
+-------------------------------------------------------------
 Generates sequence timelines for video newsrooms and multi-cam podcast edits.
 
 Implementation Details:
@@ -244,24 +277,30 @@ Implementation Details:
     30 (30/1), 50 (50/1), 59.94 (60000/1001), 60 (60/1) fps.
   * Time conversion helper: `seconds_to_rational(seconds, framerate)` to prevent drift.
 
-4.4 AVID & PRO TOOLS AAF COMPOSITION
-------------------------------------
+4.4 AVID & PRO TOOLS AAF COMPOSITION [NOT STARTED]
+---------------------------------------------------
 - Support AAF composition export for high-end post-production facilities (Pro Tools / Avid Media Composer).
 - Reference-only metadata composition pointing to broadcast WAV (BWF) media files.
 
-4.5 UI & BATCH EXPORT INTEGRATION
----------------------------------
+4.5 RATIONAL TIMECODE & AUDIO SAMPLE RATE MATH [NOT STARTED]
+--------------------------------------------------------------
+- Rational time base conversions to ensure sub-millisecond sync across DAW and NLE workflows.
+- Sample rate preservation and accurate cut calculations for broadcast timelines.
+
+4.6 UI & BATCH EXPORT INTEGRATION [NOT STARTED]
+------------------------------------------------
 - Expand Export Menu in `RadioTVSegmenter.py`:
   * Export -> DAW Project (Reaper .rpp, Samplitude .edl)
   * Export -> Video NLE Timeline (Premiere/Resolve XML, Final Cut FCPXML)
+  * Export -> Transcode / Convert Media Clips (Format & Codec Selector)
 - Framerate selection popup dialog when exporting video timeline files.
 
 ================================================================================
-5. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL)
+5. VERSION 4.0: TEXT-DRIVEN AUDIO EDITING & PRECISION ALIGNMENT (PHASE 3 - OPTIONAL) [NOT STARTED]
 ================================================================================
 
-5.1 "TEXT-AS-TIMELINE" ROUGH-CUT EDITING ENGINE
------------------------------------------------
+5.1 "TEXT-AS-TIMELINE" ROUGH-CUT EDITING ENGINE [NOT STARTED]
+--------------------------------------------------------------
 Allows journalists to edit audio/video directly by striking through or deleting words
 in the transcript UI.
 
@@ -274,23 +313,23 @@ Implementation Details:
 - Word bar / timeline sync: Deleting text instantly recalculates segment boundaries
   and updates the duration counter in real time.
 
-5.2 SEAMLESS NON-DESTRUCTIVE PLAYBACK PREVIEW
----------------------------------------------
+5.2 SEAMLESS NON-DESTRUCTIVE PLAYBACK PREVIEW [NOT STARTED]
+------------------------------------------------------------
 - Custom audio playback handler in PySide6 / QMediaPlayer / sounddevice:
   * Plays only inside `keep_ranges`.
   * When playback cursor reaches a cut point, instantly seeks to the start of the next
     keep range with a 5ms linear volume crossfade to avoid popping artifacts.
 
-5.3 CTC WORD BOUNDARY REFINEMENT & FORCED ALIGNMENT
----------------------------------------------------
+5.3 CTC WORD BOUNDARY REFINEMENT & FORCED ALIGNMENT [NOT STARTED]
+------------------------------------------------------------------
 - Whisper's token timestamps can have 50-150ms acoustic jitter.
 - Optional secondary alignment pass using a lightweight Wav2Vec2 / MMS / CTC model:
   * Uses acoustic phone probabilities to snap word start/end times strictly to energy
     onsets and vowel/consonant transitions.
   * Result: Subtitle files (SRT/VTT) and audio slices are frame-accurate to 10ms.
 
-5.4 MEMORY-BOUNDED DIARIZATION & CHUNKED STREAMING
---------------------------------------------------
+5.4 MEMORY-BOUNDED DIARIZATION & CHUNKED STREAMING [NOT STARTED]
+-----------------------------------------------------------------
 - For long broadcast files (e.g. 2-6 hour council meetings or continuous broadcasts):
   * Segment audio into overlapping windows (`MAX_SEGMENT_S = 120s`).
   * Process Pyannote / speaker embeddings in bounded RAM/VRAM chunks.

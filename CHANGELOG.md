@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.9.5
+- **WordPress Export Media Notice Placement**:
+  - Refined custom notice placement in `wordpress_export.py` so that top-positioned header notices appear directly beneath embedded audio (`<!-- wp:audio -->`) or video (`<!-- wp:video -->`) players, ensuring media player controls stay prominently at the top of the post.
+- **Updater Engine Semantic Comparison Fix**:
+  - Resolved an issue in `updater.py` where `is_version_older` was not defined when `_on_releases_loaded` was triggered by background release queries.
+  - Implemented `is_version_older(remote_version_str, current_version_str)` for accurate semantic version tuple evaluation.
+  - Restored full interactive visibility of the historical release selector dropdown (`QComboBox`) in the "Check for Updates" dialog.
+- **Full Project Version Alignment**:
+  - Synchronized `v2.9.5` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`, `transcript_story.py`, and plugin manifests (`wordpress`, `youtube`, `translation`).
+  - Added the incremental point release policy to project instructions (`AGENTS.md` and `GEMINI.md`).
+
 ## v2.9.4
 - **Version Rollback & Historical Release Selector (Updater Engine)**:
   - Upgraded the "Check for Updates" dialog (`updater.py`) with an interactive historical release selector dropdown (`QComboBox`).

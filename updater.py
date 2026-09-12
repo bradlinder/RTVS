@@ -56,7 +56,7 @@ try:
     )
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "2.9.4"
+    PROJECT_VERSION = "2.9.5"
     DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
     INTERNAL_APP_ID = "RadioTVStorySegmenter"
@@ -160,6 +160,18 @@ def is_version_newer(remote_version_str: str, current_version_str: str = PROJECT
         if remote_nums != curr_nums:
             return remote_nums > curr_nums
         return remote_weight > curr_weight
+    except Exception:
+        return False
+
+
+def is_version_older(remote_version_str: str, current_version_str: str = PROJECT_VERSION) -> bool:
+    """Return True if remote_version_str is strictly older than current_version_str."""
+    try:
+        remote_nums, remote_weight = parse_version_tuple(remote_version_str)
+        curr_nums, curr_weight = parse_version_tuple(current_version_str)
+        if remote_nums != curr_nums:
+            return remote_nums < curr_nums
+        return remote_weight < curr_weight
     except Exception:
         return False
 

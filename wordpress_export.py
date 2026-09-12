@@ -780,9 +780,9 @@ class WordPressExportMixin:
         elif es_blocks:
             append_blocks(es_blocks)
 
-        full_content = "\n".join(content_parts)
-
         # 3b. Optional Custom Header / Footer Text
+        # If "top" is selected, place the custom notice directly below the media file
+        # (or at the top of the post if there is no media file).
         settings = QSettings(INTERNAL_APP_ID, INTERNAL_APP_ID)
         custom_text = str(settings.value("wp_custom_text", "") or "").strip()
         custom_pos = str(settings.value("wp_custom_text_pos", "top") or "top").lower()
@@ -812,9 +812,13 @@ class WordPressExportMixin:
                 )
 
             if custom_pos == "top":
-                full_content = f"{custom_html}\n\n{full_content}"
+                # Insert immediately after media block (index 1) if media_url was added, else at index 0
+                insert_idx = 1 if media_url and len(content_parts) > 0 else 0
+                content_parts.insert(insert_idx, custom_html)
             else:
-                full_content = f"{full_content}\n\n{custom_html}"
+                content_parts.append(custom_html)
+
+        full_content = "\n".join(content_parts)
 
         # 4. Create Post
         report_progress(4, "Creating WordPress draft…")

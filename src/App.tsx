@@ -19,6 +19,17 @@ import {
 // Complete changelog source of truth matching CHANGELOG.md
 const CHANGELOG_MARKDOWN = `# Changelog
 
+## v2.9.5
+- **WordPress Export Media Notice Placement**:
+  - Refined custom notice placement in wordpress_export.py so that top-positioned header notices appear directly beneath embedded audio (<!-- wp:audio -->) or video (<!-- wp:video -->) players, ensuring media player controls stay prominently at the top of the post.
+- **Updater Engine Semantic Comparison Fix**:
+  - Resolved an issue in updater.py where is_version_older was not defined when _on_releases_loaded was triggered by background release queries.
+  - Implemented is_version_older(remote_version_str, current_version_str) for accurate semantic version tuple evaluation.
+  - Restored full interactive visibility of the historical release selector dropdown (QComboBox) in the "Check for Updates" dialog.
+- **Full Project Version Alignment**:
+  - Synchronized v2.9.5 across prs_shared.py, updater.py, build_installer.py, RadioTVStorySegmenter.iss, package.json, metadata.json, index.html, transcript_story.py, and plugin manifests (wordpress, youtube, translation).
+  - Added the incremental point release policy to project instructions (AGENTS.md and GEMINI.md).
+
 ## v2.9.4
 - **Version Rollback & Historical Release Selector (Updater Engine)**:
   - Upgraded the "Check for Updates" dialog (updater.py) with an interactive historical release selector dropdown (QComboBox).
@@ -124,7 +135,7 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVersion, setSelectedVersion] = useState('all');
   const [copiedVersion, setCopiedVersion] = useState<string | null>(null);
-  const [expandedVersions, setExpandedVersions] = useState<Record<string, boolean>>({ 'v2.9.4': true, 'v2.9.3': true });
+  const [expandedVersions, setExpandedVersions] = useState<Record<string, boolean>>({ 'v2.9.5': true, 'v2.9.4': true });
 
 
   const releases: ReleaseSection[] = useMemo(() => {
@@ -186,7 +197,7 @@ export function App() {
               <div className="flex items-center gap-2">
                 <span className="font-bold text-base sm:text-lg tracking-tight text-white">Radio & TV Segmenter</span>
                 <span className="px-2.5 py-0.5 text-xs font-semibold bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 rounded-full flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" /> v2.9.4 Latest
+                  <Sparkles className="w-3 h-3" /> v2.9.5 Latest
                 </span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">Full Interactive Project Release Changelog</p>
@@ -353,7 +364,7 @@ export function App() {
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-slate-900/40 py-6 mt-12 text-center text-xs text-slate-500">
-        <p>Radio & TV Segmenter v2.9.4 — Professional Broadcast Story Segmentation & Modular Publishing Suite</p>
+        <p>Radio & TV Segmenter v2.9.5 — Professional Broadcast Story Segmentation & Modular Publishing Suite</p>
       </footer>
 
     </div>
