@@ -84,6 +84,16 @@ class ThemeTokens:
     progress_bar_chunk: str = "#007acc"
     progress_bar_bg: str = "#181b20"
 
+    @property
+    def card_bg(self) -> str:
+        """Alias for bg_card for backwards compatibility."""
+        return self.bg_card
+
+    @property
+    def btn_hover_bg(self) -> str:
+        """Alias for bg_surface / hover background."""
+        return self.bg_surface
+
     def color(self, hex_or_name: str, alpha: int = 255) -> QColor:
         """Return a QColor instance with an optional alpha channel (0-255)."""
         c = QColor(hex_or_name)

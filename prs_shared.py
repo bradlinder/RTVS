@@ -897,105 +897,114 @@ class StoryCardDelegate(QStyledItemDelegate):
         super().__init__(parent)
 
     def sizeHint(self, option, index):
-        return QSize(option.rect.width(), 46)
+        w = option.rect.width() if (option and option.rect and option.rect.width() > 0) else 240
+        return QSize(max(120, w), 46)
 
     def paint(self, painter, option, index):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        rect = option.rect
+        try:
+            rect = option.rect
+            list_widget = option.widget
+            win = list_widget.window() if list_widget else None
+            tokens = getattr(win, "tokens", ThemeTokens())
+            palette = getattr(tokens, "story_palette", ("#2563eb", "#d97706", "#059669", "#7c3aed", "#e11d48", "#0d9488", "#4f46e5", "#db2777"))
 
-        list_widget = option.widget
-        win = list_widget.window() if list_widget else None
-        tokens = getattr(win, "tokens", ThemeTokens())
-        palette = getattr(tokens, "story_palette", ("#2563eb", "#d97706", "#059669", "#7c3aed", "#e11d48", "#0d9488", "#4f46e5", "#db2777"))
+            row = index.row()
+            item_color = QColor(palette[row % len(palette)])
 
-        row = index.row()
-        item_color = QColor(palette[row % len(palette)])
+            is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
+            is_hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
 
-        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
-        is_hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+            card_rect = QRectF(rect.x() + 3, rect.y() + 2, rect.width() - 6, rect.height() - 4)
 
-        card_rect = QRectF(rect.x() + 3, rect.y() + 2, rect.width() - 6, rect.height() - 4)
-
-        # Card Background & Outline
-        if is_selected:
-            bg = tokens.color(tokens.selection_fill)
-            bg.setAlpha(90)
-            border_pen = QPen(tokens.color(tokens.selection_border), 1.5)
-        elif is_hovered:
-            bg = tokens.color(tokens.btn_hover_bg)
-            border_pen = QPen(tokens.color(tokens.border_subtle), 1.0)
-        else:
-            bg = tokens.color(tokens.card_bg)
-            border_pen = QPen(tokens.color(tokens.border_subtle), 1.0)
-
-        painter.fillRect(card_rect, bg)
-        painter.setPen(border_pen)
-        painter.drawRoundedRect(card_rect, 4.0, 4.0)
-
-        # 4px Left Accent Bar in assigned story color
-        bar_rect = QRectF(card_rect.x(), card_rect.y(), 4, card_rect.height())
-        painter.fillRect(bar_rect, item_color)
-
-        # Story Data
-        story_data = index.data(Qt.ItemDataRole.UserRole)
-        is_music = getattr(win, "story_detection_mode", "voice") == "music"
-        is_es = getattr(win, "language", "en") == "es"
-        badge_prefix = ("Canción" if is_es else "Song") if is_music else ("Historia" if is_es else "Story")
-
-        if isinstance(story_data, dict):
-            title = story_data.get("title", f"{badge_prefix} {row + 1}")
-            start = float(story_data.get("start", 0.0))
-            end = float(story_data.get("end", 0.0))
-            dur = max(0.0, end - start)
-            time_str = f"{format_time(start, include_millis=False)} – {format_time(end, include_millis=False)}  ({format_time(dur, include_millis=False)})"
-        else:
-            raw_text = index.data(Qt.ItemDataRole.DisplayRole) or ""
-            # Parse legacy string format "1. 00:00:00 – 00:02:15  Title"
-            parts = raw_text.split("  ", 1)
-            if len(parts) == 2:
-                time_str = parts[0].split(". ", 1)[-1] if ". " in parts[0] else parts[0]
-                title = parts[1]
+            # Card Background & Outline
+            if is_selected:
+                bg = tokens.color(getattr(tokens, "selection_fill", "#38bdf8"))
+                bg.setAlpha(90)
+                border_pen = QPen(tokens.color(getattr(tokens, "selection_border", "#38bdf8")), 1.5)
+            elif is_hovered:
+                hover_hex = getattr(tokens, "bg_surface", getattr(tokens, "btn_hover_bg", "#181b20"))
+                bg = tokens.color(hover_hex)
+                border_pen = QPen(tokens.color(getattr(tokens, "border_subtle", "#282c35")), 1.0)
             else:
-                time_str = ""
-                title = raw_text
+                card_hex = getattr(tokens, "bg_card", getattr(tokens, "card_bg", "#1e222a"))
+                bg = tokens.color(card_hex)
+                border_pen = QPen(tokens.color(getattr(tokens, "border_subtle", "#282c35")), 1.0)
 
-        # Numbered Pill Badge (Story 1, Story 2...)
-        badge_text = f"{badge_prefix} {row + 1}"
-        badge_font = QFont(option.font)
-        badge_font.setPointSize(8)
-        badge_font.setBold(True)
-        painter.setFont(badge_font)
+            painter.fillRect(card_rect, bg)
+            painter.setPen(border_pen)
+            painter.drawRoundedRect(card_rect, 4.0, 4.0)
 
-        badge_w = max(48, painter.fontMetrics().horizontalAdvance(badge_text) + 12)
-        badge_rect = QRectF(card_rect.x() + 9, card_rect.y() + 5, badge_w, 17)
-        pill_bg = QColor(item_color)
-        pill_bg.setAlpha(220)
-        painter.fillRect(badge_rect, pill_bg)
-        painter.setPen(QColor("#ffffff"))
-        painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, badge_text)
+            # 4px Left Accent Bar in assigned story color
+            bar_rect = QRectF(card_rect.x(), card_rect.y(), 4, card_rect.height())
+            painter.fillRect(bar_rect, item_color)
 
-        # Story Headline / Title
-        title_font = QFont(option.font)
-        title_font.setPointSize(9)
-        title_font.setBold(True)
-        painter.setFont(title_font)
-        painter.setPen(tokens.color(tokens.text_primary))
+            # Story Data
+            story_data = index.data(Qt.ItemDataRole.UserRole)
+            is_music = getattr(win, "story_detection_mode", "voice") == "music"
+            is_es = getattr(win, "language", "en") == "es"
+            badge_prefix = ("Canción" if is_es else "Song") if is_music else ("Historia" if is_es else "Story")
 
-        title_rect = QRectF(card_rect.x() + 15 + badge_w, card_rect.y() + 5, card_rect.width() - (22 + badge_w), 17)
-        elided_title = painter.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, int(title_rect.width()))
-        painter.drawText(title_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided_title)
+            if isinstance(story_data, dict):
+                title = story_data.get("title", f"{badge_prefix} {row + 1}")
+                start = float(story_data.get("start", 0.0))
+                end = float(story_data.get("end", 0.0))
+                dur = max(0.0, end - start)
+                time_str = f"{format_time(start, include_millis=False)} – {format_time(end, include_millis=False)}  ({format_time(dur, include_millis=False)})"
+            else:
+                raw_text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+                # Parse legacy string format "1. 00:00:00 – 00:02:15  Title"
+                parts = raw_text.split("  ", 1)
+                if len(parts) == 2:
+                    time_str = parts[0].split(". ", 1)[-1] if ". " in parts[0] else parts[0]
+                    title = parts[1]
+                else:
+                    time_str = ""
+                    title = raw_text
 
-        # Time range metadata
-        if time_str:
-            time_font = QFont(option.font)
-            time_font.setPointSize(8)
-            painter.setFont(time_font)
-            painter.setPen(tokens.color(tokens.text_secondary))
-            time_rect = QRectF(card_rect.x() + 9, card_rect.y() + 24, card_rect.width() - 18, 14)
-            painter.drawText(time_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, time_str)
+            # Numbered Pill Badge (Story 1, Story 2...)
+            badge_text = f"{badge_prefix} {row + 1}"
+            badge_font = QFont(option.font)
+            badge_font.setPointSize(8)
+            badge_font.setBold(True)
+            painter.setFont(badge_font)
 
-        painter.restore()
+            badge_w = max(48, painter.fontMetrics().horizontalAdvance(badge_text) + 12)
+            badge_rect = QRectF(card_rect.x() + 9, card_rect.y() + 5, badge_w, 17)
+            pill_bg = QColor(item_color)
+            pill_bg.setAlpha(220)
+            painter.fillRect(badge_rect, pill_bg)
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, badge_text)
+
+            # Story Headline / Title
+            title_font = QFont(option.font)
+            title_font.setPointSize(9)
+            title_font.setBold(True)
+            painter.setFont(title_font)
+            painter.setPen(tokens.color(getattr(tokens, "text_primary", "#f0f3f6")))
+
+            title_rect = QRectF(card_rect.x() + 15 + badge_w, card_rect.y() + 5, card_rect.width() - (22 + badge_w), 17)
+            elided_title = painter.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, int(title_rect.width()))
+            painter.drawText(title_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided_title)
+
+            # Time range metadata
+            if time_str:
+                time_font = QFont(option.font)
+                time_font.setPointSize(8)
+                painter.setFont(time_font)
+                painter.setPen(tokens.color(getattr(tokens, "text_secondary", "#8b949e")))
+                time_rect = QRectF(card_rect.x() + 9, card_rect.y() + 24, card_rect.width() - 18, 14)
+                painter.drawText(time_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, time_str)
+        except Exception:
+            # Fallback safe card painting
+            painter.fillRect(option.rect, QColor("#1e222a"))
+            painter.setPen(QColor("#ffffff"))
+            raw_text = index.data(Qt.ItemDataRole.DisplayRole) or f"Story {index.row() + 1}"
+            painter.drawText(option.rect.adjusted(8, 0, -8, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, str(raw_text))
+        finally:
+            painter.restore()
 
 
 class StoryListWidget(QListWidget):
@@ -1117,11 +1126,11 @@ class TranscriptSelectionBubble(QFrame):
         self.setObjectName("transcript_selection_bubble")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setFixedHeight(32)
+        self.setFixedHeight(34)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(3)
+        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setSpacing(4)
 
         self.play_btn = QToolButton(self)
         self.play_btn.setText("▶ Play")
@@ -1158,9 +1167,10 @@ class TranscriptSelectionBubble(QFrame):
                 color: #f1f5f9;
                 border: none;
                 border-radius: 4px;
-                padding: 3px 7px;
+                padding: 4px 9px;
                 font-size: 11px;
                 font-weight: bold;
+                min-width: 52px;
             }
             QToolButton:hover {
                 background-color: #334155;
@@ -1249,6 +1259,10 @@ class InteractiveTranscriptEdit(QTextEdit):
 
     def paintEvent(self, event):
         super().paintEvent(event)
+        win = self.window()
+        has_media = bool(getattr(win, "audio_file", None) or getattr(self, "audio_file", None))
+        if has_media:
+            return
         if self.document().isEmpty() or not self.toPlainText().strip():
             painter = QPainter(self.viewport())
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -1502,10 +1516,12 @@ class InteractiveTranscriptEdit(QTextEdit):
 
         if hasattr(self, "selection_bubble") and not self.is_editing_mode:
             c_rect = self.cursorRect(cursor)
-            b_w = 260
-            b_h = 32
+            bubble_hint = self.selection_bubble.sizeHint()
+            b_w = max(336, bubble_hint.width() + 16)
+            b_h = max(34, bubble_hint.height())
             bx = max(8, min(self.viewport().width() - b_w - 8, c_rect.center().x() - b_w // 2))
-            by = max(4, c_rect.top() - b_h - 4)
+            by = max(4, c_rect.top() - b_h - 6)
+            self.selection_bubble.setFixedSize(b_w, b_h)
             self.selection_bubble.setGeometry(bx, by, b_w, b_h)
             self.selection_bubble.show()
             self.selection_bubble.raise_()

@@ -937,8 +937,8 @@ class PlaybackPreferencesMixin:
                 lw["save_with_media_chk"].setChecked(False)
             if "bundle_folder_chk" in lw and lw["bundle_folder_chk"]:
                 lw["bundle_folder_chk"].setChecked(True)
-            if "copy_media_chk" in lw and lw["copy_media_chk"]:
-                lw["copy_media_chk"].setChecked(False)
+            if "ingest_mode_combo" in lw and lw["ingest_mode_combo"]:
+                lw["ingest_mode_combo"].setCurrentIndex(0)
 
         # 3. General Auto-save
         if "general_autosave" in selected_set:
@@ -1964,7 +1964,7 @@ class PlaybackPreferencesMixin:
             "proj_dir_edit": proj_dir_edit,
             "save_with_media_chk": save_with_media_chk,
             "bundle_folder_chk": bundle_folder_chk,
-            "copy_media_chk": copy_media_chk,
+            "ingest_mode_combo": ingest_mode_combo,
             "autosave_spin": autosave_spin,
             "audio_dev_combo": audio_dev_combo,
             "vol_slider": vol_slider,

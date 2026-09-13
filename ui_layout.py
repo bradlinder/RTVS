@@ -468,6 +468,11 @@ class UiLayoutMixin:
         self.save_as_action.triggered.connect(self.save_project_as)
         file_menu.addAction(self.save_as_action)
 
+        self.export_zip_action = QAction("Export &Project Archive (.zip)...", self)
+        self.export_zip_action.setShortcut(platform_seq("Ctrl+Shift+Z"))
+        self.export_zip_action.triggered.connect(self.export_project_archive)
+        file_menu.addAction(self.export_zip_action)
+
         file_menu.addSeparator()
 
         # 4. Export & Batch Processing
@@ -910,7 +915,7 @@ class UiLayoutMixin:
             self,
             "Open Project",
             self._dialog_directory(),
-            "RadioTV Story Segmenter Projects (*.rtvs);;Legacy Projects (*.json);;All Files (*.*)",
+            "RadioTV Story Segmenter Projects (*.rtvs *.zip *.json);;Project Archives (*.zip);;Legacy Projects (*.json);;All Files (*.*)",
         )
         if file_path:
             try:

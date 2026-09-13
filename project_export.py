@@ -6,6 +6,7 @@ maintaining the established MainWindow-facing API while responsibilities are iso
 
 from prs_shared import *
 import webbrowser
+import zipfile
 from wordpress_export import generate_wp_excerpt, WordPressSettingsDialog, _get_wp_password
 
 
@@ -2509,6 +2510,78 @@ class ProjectExportMixin:
             return True
         return False
 
+    def export_project_archive(self, destination_zip=None) -> bool:
+        """Export current project state, transcripts, and media into a self-contained portable .zip archive."""
+        if not self.audio_file and not self.transcript and not getattr(self, "stories", None):
+            QMessageBox.information(
+                self,
+                "Export Project Archive",
+                "No project data or media is currently loaded to export."
+            )
+            return False
+
+        base_name = safe_filename(
+            Path(self.audio_file).stem if self.audio_file else "project"
+        )
+        target_base_dir = Path(self.get_default_save_directory())
+
+        if not destination_zip:
+            default_path = str(target_base_dir / f"{base_name}_archive.zip")
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Project Archive (.zip)",
+                default_path,
+                "Zip Archives (*.zip);;All Files (*.*)"
+            )
+            if not file_path:
+                return False
+            destination_zip = Path(file_path)
+        else:
+            destination_zip = Path(destination_zip)
+
+        destination_zip.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            data = self.project_data()
+            if self.audio_file and Path(self.audio_file).exists():
+                media_path = Path(self.audio_file).resolve()
+                data["audio_reference"] = f"Media/{media_path.name}"
+                data["audio_file_name"] = media_path.name
+                data["audio_duration"] = float(getattr(self, "audio_duration", 0.0) or 0.0)
+
+            with zipfile.ZipFile(destination_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                # 1. Project file inside zip
+                proj_json_bytes = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+                zf.writestr(f"{base_name}.rtvs", proj_json_bytes)
+
+                # 2. Source Media file
+                if self.audio_file and Path(self.audio_file).exists():
+                    media_path = Path(self.audio_file).resolve()
+                    zf.write(media_path, arcname=f"Media/{media_path.name}")
+
+                # 3. Waveform Peak Cache if available
+                if self.audio_file and getattr(self.timeline, "waveform_peaks", None):
+                    peaks = self.timeline.waveform_peaks
+                    peak_bytes = json.dumps({"peaks": [float(p) for p in peaks]}).encode("utf-8")
+                    zf.writestr(".cache/peaks.json", peak_bytes)
+
+            self.log_activity(f"[PROJECT] Exported self-contained project archive to {destination_zip}")
+            show_export_completion_dialog(
+                self,
+                title="Project Archive Exported",
+                message=f"Successfully exported self-contained project archive:\n\n{destination_zip.name}",
+                export_path=str(destination_zip)
+            )
+            return True
+        except Exception as exc:
+            self.log_activity(f"[ERROR] Failed to export project archive: {exc}")
+            QMessageBox.critical(
+                self,
+                "Archive Export Failed",
+                f"Could not export project archive:\n{exc}"
+            )
+            return False
+
     def ensure_project_for_processing_pipeline(self) -> bool:
         """
         Ensures a project file is established on disk before running multi-stage
@@ -2755,6 +2828,23 @@ class ProjectExportMixin:
 
     def load_project_file(self, filename, prompt=True, preserve_media=False):
         project_path = Path(filename).resolve()
+        # Handle self-contained .zip project archives
+        if project_path.suffix.lower() == ".zip":
+            try:
+                extract_dir = project_path.parent / project_path.stem
+                extract_dir.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(project_path, "r") as zf:
+                    zf.extractall(extract_dir)
+                candidate_rtvs = list(extract_dir.glob("*.rtvs")) or list(extract_dir.glob("*.json"))
+                if candidate_rtvs:
+                    self.log_activity(f"[PROJECT] Extracted archive {project_path.name} to {extract_dir.name}", mark_dirty=False)
+                    return self.load_project_file(str(candidate_rtvs[0]), prompt=prompt, preserve_media=preserve_media)
+            except Exception as z_exc:
+                self.log_activity(f"[ERROR] Could not extract zip archive {project_path.name}: {z_exc}", mark_dirty=False)
+                if not preserve_media:
+                    QMessageBox.critical(self, "Archive Error", f"Failed to extract project archive:\n{z_exc}")
+                return False
+
         try:
             data = read_rtvs_project_file(project_path)
         except Exception as exc:
