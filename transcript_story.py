@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter v3.0.0-beta — transcript story responsibilities.
+"""Radio & TV Segmenter v3.0.0-beta.3 — transcript story responsibilities.
 
 
 Methods intentionally retain the MainWindow-facing API so behavior remains
@@ -161,8 +161,22 @@ class TranscriptStoryMixin:
                 if self.show_timestamps else ""
             )
 
+            notes_html = ""
+            seg_indices = list(dict.fromkeys(item["seg_idx"] for item in p_words if "seg_idx" in item))
+            segments_list = self.transcript.get("segments", []) if self.transcript else []
+            for idx in seg_indices:
+                if 0 <= idx < len(segments_list):
+                    s_note = segments_list[idx].get("notes", "").strip()
+                    if s_note:
+                        esc_note = html.escape(s_note).replace("\n", "<br/>")
+                        notes_html += (
+                            f'<div style="margin-top: 4px; margin-bottom: 6px; padding: 4px 8px; '
+                            f'background-color: rgba(255, 193, 7, 0.15); border-left: 3px solid #ffc107; '
+                            f'color: #e6b800; font-size: 0.9em; border-radius: 4px;">'
+                            f'<b>Note:</b> {esc_note}</div>'
+                        )
+
             if display_mode in ("split", "bilingual") and es_segments:
-                seg_indices = list(dict.fromkeys(item["seg_idx"] for item in p_words if "seg_idx" in item))
                 es_text_parts = [es_segments[idx].get("text", "") for idx in seg_indices if 0 <= idx < len(es_segments)]
                 es_text = " ".join(t.strip() for t in es_text_parts if t.strip())
                 if es_text:
@@ -173,6 +187,7 @@ class TranscriptStoryMixin:
                         f'<span style="color:{word_color};">{body_content}</span><br/>'
                         f'<span style="color:{spanish_tag_color}; font-weight:bold; font-size:0.86em;">ES: </span>'
                         f'<span style="color:{spanish_color};"><i>{esc_es_text}</i></span>'
+                        f'{notes_html}'
                         f'</p>'
                     )
 
@@ -180,6 +195,7 @@ class TranscriptStoryMixin:
                 f'<p style="margin-bottom: 14px; color: {word_color};">'
                 f'{timestamp_html}{speaker_html}'
                 f'<span style="color:{word_color};">{body_content}</span>'
+                f'{notes_html}'
                 f'</p>'
             )
 
@@ -373,9 +389,48 @@ class TranscriptStoryMixin:
             self.last_transcript_cursor_time = seconds
             self.seek_to(seconds)
         elif text.startswith("speaker:"):
-            # Do not open speaker-editing UI from a normal left-click.
-            # Right-clicking the speaker anchor exposes Change/Remove actions.
+            parts = text.split(":")
+            if len(parts) >= 2 and parts[1].isdigit():
+                seg_idx = int(parts[1])
+                segments = self.transcript.get("segments", []) if self.transcript else []
+                if 0 <= seg_idx < len(segments):
+                    seg = segments[seg_idx]
+                    start_time = float(seg.get("start", 0.0))
+                    self.last_position_source = "transcript"
+                    self.last_transcript_cursor_time = start_time
+                    self.seek_to(start_time)
+
+    def edit_segment_note_dialog(self, seg_idx):
+        if not self.transcript or "segments" not in self.transcript:
+            QMessageBox.information(self, "No Transcript", "No transcript is currently loaded.")
             return
+        segments = self.transcript["segments"]
+        if not (0 <= seg_idx < len(segments)):
+            return
+        seg = segments[seg_idx]
+        current_note = seg.get("notes", "")
+        text, ok = QInputDialog.getMultiLineText(
+            self,
+            "Edit Segment Note",
+            f"Notes for segment {seg_idx + 1} ({format_time(seg.get('start', 0.0))}):",
+            current_note,
+        )
+        if ok:
+            seg["notes"] = text.strip()
+            self.mark_project_dirty()
+            self.render_transcript()
+
+    def open_transcript_notes_dialog(self):
+        curr_notes = getattr(self, "transcript_notes", "")
+        text, ok = QInputDialog.getMultiLineText(
+            self,
+            "Transcript & Project Notes",
+            "Project & Episode Notes (saved with project and included in DOCX export):",
+            curr_notes,
+        )
+        if ok:
+            self.transcript_notes = text.strip()
+            self.mark_project_dirty()
 
     def handle_insert_speaker_request(self, seg_idx, split_time, speaker_name):
         """Dispatched from the right-click 'Add Speaker Label Here' context menu."""

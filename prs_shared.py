@@ -71,6 +71,7 @@ from PySide6.QtCore import (
     QSettings,
     QSize,
 )
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from PySide6.QtGui import (
     QColor,
@@ -308,7 +309,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "3.0.0-beta"
+PROJECT_VERSION = "3.0.0-beta.3"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 
@@ -1573,7 +1574,7 @@ class InteractiveTranscriptEdit(QTextEdit):
                 probe.setPosition(max(0, hit_cursor.position() - 1))
                 href = probe.charFormat().anchorHref()
 
-            if href and (href.startswith("word:") or href.startswith("time:")):
+            if href and (href.startswith("word:") or href.startswith("time:") or href.startswith("speaker:")):
                 self._pending_click_href = href
 
             if self.selection_mode == "replace" and self.saved_selections:
@@ -1651,14 +1652,14 @@ class InteractiveTranscriptEdit(QTextEdit):
                 if self.selection_mode == "replace":
                     self.clear_all_selections()
 
-                if pending_href and (pending_href.startswith("word:") or pending_href.startswith("time:")):
+                if pending_href and (pending_href.startswith("word:") or pending_href.startswith("time:") or pending_href.startswith("speaker:")):
                     self.linkClicked.emit(QUrl(pending_href))
                     event.accept()
                     return
                 else:
                     hit_cursor = self.cursorForPosition(pos)
                     href = hit_cursor.charFormat().anchorHref()
-                    if href and (href.startswith("word:") or href.startswith("time:")):
+                    if href and (href.startswith("word:") or href.startswith("time:") or href.startswith("speaker:")):
                         self.linkClicked.emit(QUrl(href))
                         event.accept()
                         return
@@ -1859,6 +1860,17 @@ class InteractiveTranscriptEdit(QTextEdit):
 
         super().keyPressEvent(event)
 
+        if not self.is_editing_mode and event.key() in (
+            Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
+            Qt.Key.Key_Home, Qt.Key.Key_End, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown
+        ):
+            ts = self.get_timestamp_at_cursor(self.textCursor())
+            if ts is not None and ts >= 0:
+                main_win = self.window()
+                if hasattr(main_win, "seek_to"):
+                    main_win.last_position_source = "transcript"
+                    main_win.seek_to(ts)
+
     def show_context_menu(self, position):
         """Context menu for both viewing and editing modes.  Speaker labels
         are interactive targets, while right-clicking anywhere else offers a
@@ -1977,6 +1989,18 @@ class InteractiveTranscriptEdit(QTextEdit):
             add_vocab.triggered.connect(_add_vocab_from_selection)
             menu.addAction(add_vocab)
 
+            edit_note_act = QAction("📝 Edit Segment Note...", self)
+            target_seg = self.get_segment_index_at_cursor(hit_cursor)
+            if target_seg is None:
+                target_seg = hit_cursor.blockNumber()
+            edit_note_act.triggered.connect(lambda _, s=target_seg: getattr(main_win, "edit_segment_note_dialog", lambda x: None)(s))
+            menu.addAction(edit_note_act)
+
+            all_notes_act = QAction("📋 Transcript & Project Notes...", self)
+            all_notes_act.triggered.connect(lambda: getattr(main_win, "open_transcript_notes_dialog", lambda: None)())
+            menu.addAction(all_notes_act)
+
+            menu.addSeparator()
             edit_action = QAction("Edit Transcript", self)
             edit_action.triggered.connect(lambda: self.set_editing_mode(True))
             menu.addAction(edit_action)
@@ -2553,39 +2577,59 @@ class StoryAutoDetectWorker(QObject):
 PEAKS_MAGIC = b"RTVSPEAK"
 PEAKS_VERSION = 1
 
-def get_waveform_peak_cache_path(audio_file):
+def get_waveform_peak_cache_path(audio_file, project_file=None):
     """
-    Return local or appdata path for waveform peak binary cache file.
-    Prefers project-local hidden cache <Project>/.cache/peaks/<media>.peaks,
-    falling back to appdata cache.
+    Return local project or appdata path for waveform peak binary cache file.
+    Prefers project-local hidden cache <Project>/.cache/peaks/<media_stem>.peaks,
+    falling back to user appdata cache. Never creates .cache inside standalone media folders.
     """
     if not audio_file:
         return None
     try:
         audio_p = Path(audio_file).resolve()
-        # Check if parent is 'media' inside a project bundle
-        if audio_p.parent.name.lower() in ("media", "audio"):
-            proj_dir = audio_p.parent.parent
-        else:
-            proj_dir = audio_p.parent
+        
+        # 1. If explicit project_file provided, store in project folder's .cache/peaks/
+        if project_file:
+            proj_p = Path(project_file).resolve()
+            proj_dir = proj_p.parent if (proj_p.is_file() or proj_p.suffix.lower() in ('.rtvs', '.json')) else proj_p
+            if proj_dir.exists() and os.access(str(proj_dir), os.W_OK):
+                cache_peaks_dir = proj_dir / ".cache" / "peaks"
+                cache_peaks_dir.mkdir(parents=True, exist_ok=True)
+                if sys.platform == "win32":
+                    try:
+                        import ctypes
+                        ctypes.windll.kernel32.SetFileAttributesW(str(proj_dir / ".cache"), 0x02)
+                    except Exception:
+                        pass
+                return cache_peaks_dir / f"{audio_p.stem}.peaks"
 
-        if proj_dir.exists() and os.access(str(proj_dir), os.W_OK):
-            cache_peaks_dir = proj_dir / ".cache" / "peaks"
+        # 2. Check if audio_file is located inside an existing project folder bundle
+        candidate_proj = None
+        if audio_p.parent.name.lower() in ("media", "audio"):
+            if list(audio_p.parent.parent.glob("*.rtvs")) or (audio_p.parent.parent / ".cache").exists():
+                candidate_proj = audio_p.parent.parent
+        elif list(audio_p.parent.glob("*.rtvs")) or (audio_p.parent / ".cache").exists():
+            candidate_proj = audio_p.parent
+
+        if candidate_proj and candidate_proj.exists() and os.access(str(candidate_proj), os.W_OK):
+            cache_peaks_dir = candidate_proj / ".cache" / "peaks"
             cache_peaks_dir.mkdir(parents=True, exist_ok=True)
             if sys.platform == "win32":
                 try:
                     import ctypes
-                    ctypes.windll.kernel32.SetFileAttributesW(str(proj_dir / ".cache"), 0x02)
+                    ctypes.windll.kernel32.SetFileAttributesW(str(candidate_proj / ".cache"), 0x02)
                 except Exception:
                     pass
             return cache_peaks_dir / f"{audio_p.stem}.peaks"
     except Exception:
         pass
+
+    # 3. Safe fallback: global AppData cache (never write into arbitrary media folders)
     try:
         cache_dir = get_app_data_dir() / "cache" / "peaks"
         cache_dir.mkdir(parents=True, exist_ok=True)
         key = hashlib.sha256(str(audio_file).encode("utf-8")).hexdigest()[:16]
-        return cache_dir / f"{key}_{Path(audio_file).name}.peaks"
+        return cache_dir / f"{key}_{Path(audio_file).stem}.peaks"
     except Exception:
         return None
 
@@ -2631,20 +2675,27 @@ def build_waveform_pyramid(peaks):
     return levels
 
 
-def read_waveform_peak_cache(audio_file, points_per_second=WAVEFORM_POINTS_PER_SECOND):
+def read_waveform_peak_cache(audio_file, points_per_second=WAVEFORM_POINTS_PER_SECOND, project_file=None):
     """
     Read cached waveform peak envelope from binary cache.
     Returns list of float peaks or None if cache is missing or stale.
     Supports transparent migration from legacy adjacent .peaks files.
     """
-    cache_path = get_waveform_peak_cache_path(audio_file)
+    cache_path = get_waveform_peak_cache_path(audio_file, project_file=project_file)
     audio_p = Path(audio_file) if audio_file else None
     
-    # Check if primary cache path exists, otherwise look for legacy adjacent file
+    # Check if primary cache path exists, otherwise look for legacy adjacent file or appdata fallback
     candidate_paths = []
     if cache_path:
         candidate_paths.append((cache_path, False))
     if audio_p:
+        # Fallback to appdata cache
+        try:
+            appdata_p = get_app_data_dir() / "cache" / "peaks" / f"{hashlib.sha256(str(audio_file).encode('utf-8')).hexdigest()[:16]}_{audio_p.stem}.peaks"
+            if appdata_p != cache_path:
+                candidate_paths.append((appdata_p, False))
+        except Exception:
+            pass
         legacy_path = audio_p.with_name(audio_p.name + ".peaks")
         if legacy_path != cache_path:
             candidate_paths.append((legacy_path, True))
@@ -2673,20 +2724,20 @@ def read_waveform_peak_cache(audio_file, points_per_second=WAVEFORM_POINTS_PER_S
                 envelope = WaveformEnvelope(peaks, levels=levels)
                 # If read from legacy path, migrate to project .cache/peaks/ atomically
                 if is_legacy and cache_path and not cache_path.exists():
-                    write_waveform_peak_cache(audio_file, peaks, points_per_second=pps)
+                    write_waveform_peak_cache(audio_file, peaks, points_per_second=pps, project_file=project_file)
                 return envelope
         except Exception:
             continue
     return None
 
-def write_waveform_peak_cache(audio_file, peaks, points_per_second=WAVEFORM_POINTS_PER_SECOND):
+def write_waveform_peak_cache(audio_file, peaks, points_per_second=WAVEFORM_POINTS_PER_SECOND, project_file=None):
     """
     Write waveform peak envelope to binary cache with atomic rename.
     """
     if not audio_file or not peaks:
         return
     try:
-        cache_path = get_waveform_peak_cache_path(audio_file)
+        cache_path = get_waveform_peak_cache_path(audio_file, project_file=project_file)
         if not cache_path:
             return
         cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2703,11 +2754,11 @@ def write_waveform_peak_cache(audio_file, peaks, points_per_second=WAVEFORM_POIN
         pass
 
 
-def invalidate_waveform_peak_cache(audio_file):
+def invalidate_waveform_peak_cache(audio_file, project_file=None):
     """Delete any cached waveform peak binary file for audio_file, including legacy paths."""
     deleted = False
     try:
-        cache_path = get_waveform_peak_cache_path(audio_file)
+        cache_path = get_waveform_peak_cache_path(audio_file, project_file=project_file)
         if cache_path and cache_path.exists():
             cache_path.unlink(missing_ok=True)
             deleted = True
@@ -2717,6 +2768,10 @@ def invalidate_waveform_peak_cache(audio_file):
             if legacy_p.exists():
                 legacy_p.unlink(missing_ok=True)
                 deleted = True
+            appdata_p = get_app_data_dir() / "cache" / "peaks" / f"{hashlib.sha256(str(audio_file).encode('utf-8')).hexdigest()[:16]}_{audio_p.stem}.peaks"
+            if appdata_p.exists():
+                appdata_p.unlink(missing_ok=True)
+                deleted = True
     except Exception:
         pass
     return deleted
@@ -2725,9 +2780,13 @@ def invalidate_waveform_peak_cache(audio_file):
 class WaveformWorker(QObject):
     finished = Signal(list, bool)
 
-    def __init__(self, audio_file, points_per_second=WAVEFORM_POINTS_PER_SECOND):
+    def __init__(self, audio_file, points_per_second=WAVEFORM_POINTS_PER_SECOND, project_file=None):
         super().__init__()
         self.audio_file = str(audio_file)
+        self.points_per_second = points_per_second
+        self.project_file = project_file
+        self._cancel_event = threading.Event()
+        self._process = None
         self.points_per_second = points_per_second
         self._cancel_event = threading.Event()
         self._process = None
@@ -2851,7 +2910,7 @@ class WaveformWorker(QObject):
 
             if peaks:
                 try:
-                    write_waveform_peak_cache(self.audio_file, peaks, effective_pps)
+                    write_waveform_peak_cache(self.audio_file, peaks, effective_pps, project_file=self.project_file)
                 except Exception:
                     pass
 
@@ -2982,8 +3041,8 @@ def write_rtvs_project_file(file_path, data: dict):
 # Video Thumbnail Caching & Background Extraction
 # ============================================================
 
-def get_video_thumbnail_cache_dir(media_file: str | Path | None) -> Path | None:
-    """Return the deterministic thumbnail cache directory for a media file."""
+def get_video_thumbnail_cache_dir(media_file: str | Path | None, project_file: str | Path | None = None) -> Path | None:
+    """Return the deterministic thumbnail cache directory for a media file, associating with project if available."""
     if not media_file:
         return None
     try:
@@ -2991,7 +3050,29 @@ def get_video_thumbnail_cache_dir(media_file: str | Path | None) -> Path | None:
         stat = p.stat()
         key_raw = f"{p.name}_{stat.st_size}_{int(stat.st_mtime)}"
         h = hashlib.sha256(key_raw.encode("utf-8")).hexdigest()[:24]
-        base = Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails"
+        
+        # 1. Project-level thumbnail directory
+        if project_file:
+            proj_p = Path(project_file).resolve()
+            proj_dir = proj_p.parent if (proj_p.is_file() or proj_p.suffix.lower() in ('.rtvs', '.json')) else proj_p
+            if proj_dir.exists() and os.access(str(proj_dir), os.W_OK):
+                base = proj_dir / ".cache" / "thumbnails"
+                return base / h
+
+        # 2. Check if media resides in project bundle
+        candidate_proj = None
+        if p.parent.name.lower() in ("media", "audio"):
+            if list(p.parent.parent.glob("*.rtvs")) or (p.parent.parent / ".cache").exists():
+                candidate_proj = p.parent.parent
+        elif list(p.parent.glob("*.rtvs")) or (p.parent / ".cache").exists():
+            candidate_proj = p.parent
+
+        if candidate_proj and candidate_proj.exists() and os.access(str(candidate_proj), os.W_OK):
+            base = candidate_proj / ".cache" / "thumbnails"
+            return base / h
+
+        # 3. Global AppData / Temp directory fallback
+        base = get_app_data_dir() / "cache" / "thumbnails"
         return base / h
     except Exception:
         try:
@@ -3002,7 +3083,7 @@ def get_video_thumbnail_cache_dir(media_file: str | Path | None) -> Path | None:
             return None
 
 
-def read_video_thumbnail_cache(media_file: str | Path | None, duration: float) -> list | None:
+def read_video_thumbnail_cache(media_file: str | Path | None, duration: float, project_file: str | Path | None = None) -> list | None:
     """Read pre-extracted video thumbnail items [(timestamp, image_path), ...] from disk cache.
     
     Returns list of items if the cache exists, contains valid thumbnail images, and is
@@ -3011,9 +3092,14 @@ def read_video_thumbnail_cache(media_file: str | Path | None, duration: float) -
     if not media_file or duration <= 0:
         return None
     try:
-        cache_dir = get_video_thumbnail_cache_dir(media_file)
+        cache_dir = get_video_thumbnail_cache_dir(media_file, project_file=project_file)
         if not cache_dir or not cache_dir.exists() or not cache_dir.is_dir():
-            return None
+            # Try global fallback
+            alt_dir = Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails" / hashlib.sha256(str(Path(media_file)).encode("utf-8")).hexdigest()[:24]
+            if alt_dir.exists() and alt_dir.is_dir():
+                cache_dir = alt_dir
+            else:
+                return None
 
         media_p = Path(media_file)
         if media_p.exists():
@@ -3042,16 +3128,30 @@ def read_video_thumbnail_cache(media_file: str | Path | None, duration: float) -
         return None
 
 
-def invalidate_video_thumbnail_cache(media_file: str | Path | None) -> bool:
+def invalidate_video_thumbnail_cache(media_file: str | Path | None, project_file: str | Path | None = None) -> bool:
     """Delete the thumbnail cache directory for a given media file."""
+    deleted = False
     try:
-        cache_dir = get_video_thumbnail_cache_dir(media_file)
+        cache_dir = get_video_thumbnail_cache_dir(media_file, project_file=project_file)
         if cache_dir and cache_dir.exists():
             shutil.rmtree(cache_dir, ignore_errors=True)
-            return True
+            deleted = True
+        # Also clean up tempdir thumbnail cache
+        if media_file:
+            try:
+                p = Path(media_file).resolve()
+                stat = p.stat()
+                key_raw = f"{p.name}_{stat.st_size}_{int(stat.st_mtime)}"
+                h = hashlib.sha256(key_raw.encode("utf-8")).hexdigest()[:24]
+                t_dir = Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails" / h
+                if t_dir.exists():
+                    shutil.rmtree(t_dir, ignore_errors=True)
+                    deleted = True
+            except Exception:
+                pass
     except Exception:
         pass
-    return False
+    return deleted
 
 
 class VideoThumbnailWorker(QObject):
@@ -4833,8 +4933,8 @@ def format_byte_size(size_bytes: int) -> str:
     return f"{num:.1f} PB"
 
 
-def get_cache_disk_usage() -> dict:
-    """Scan and compute disk usage for all temporary cache stores.
+def get_cache_disk_usage(project_dirs=None) -> dict:
+    """Scan and compute disk usage for all temporary cache stores across appdata, temp dirs, and project folders.
     
     Returns a dict with statistics for:
       - 'thumbnails': {'label': 'Video Thumbnails & Filmstrips', 'path': Path, 'count': int, 'bytes': int}
@@ -4844,37 +4944,107 @@ def get_cache_disk_usage() -> dict:
       - 'total_files': int
     """
     stats = {}
+    search_dirs = []
+
+    # Auto-populate search dirs from QSettings if not provided
+    p_candidates = list(project_dirs or [])
+    try:
+        settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
+        for key in ("default_project_directory", "last_saved_project_path", "last_open_directory"):
+            val = settings.value(key)
+            if val:
+                p_candidates.append(val)
+        recents = settings.value("recent_projects")
+        if recents:
+            if isinstance(recents, str):
+                try:
+                    recents = json.loads(recents)
+                except Exception:
+                    recents = [recents]
+            if isinstance(recents, (list, tuple)):
+                p_candidates.extend(recents)
+    except Exception:
+        pass
+
+    for p in p_candidates:
+        if p:
+            try:
+                pd = Path(p).resolve()
+                if pd.is_file():
+                    pd = pd.parent
+                if pd.exists() and pd not in search_dirs:
+                    search_dirs.append(pd)
+            except Exception:
+                pass
 
     # 1. Video Thumbnails
-    thumb_dir = Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails"
     thumb_bytes = 0
     thumb_files = 0
-    if thumb_dir.exists() and thumb_dir.is_dir():
-        try:
-            for p in thumb_dir.rglob("*"):
-                if p.is_file():
-                    thumb_files += 1
-                    try:
-                        thumb_bytes += p.stat().st_size
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+    thumb_locations = [
+        Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails",
+        get_app_data_dir() / "cache" / "thumbnails",
+        get_app_data_dir() / "cache",
+    ]
+    for pd in search_dirs:
+        t_cand = pd / ".cache" / "thumbnails"
+        if t_cand not in thumb_locations:
+            thumb_locations.append(t_cand)
+
+    seen_thumb_files = set()
+    for thumb_dir in thumb_locations:
+        if thumb_dir.exists() and thumb_dir.is_dir():
+            try:
+                for p in thumb_dir.rglob("*"):
+                    if p.is_file() and str(p.resolve()) not in seen_thumb_files:
+                        seen_thumb_files.add(str(p.resolve()))
+                        thumb_files += 1
+                        try:
+                            thumb_bytes += p.stat().st_size
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
     stats["thumbnails"] = {
         "label": "Video Thumbnails & Filmstrips",
-        "path": thumb_dir,
+        "path": thumb_locations[0],
         "count": thumb_files,
         "bytes": thumb_bytes,
     }
 
-    # 2. Waveform Peaks Cache in AppData
-    peaks_dir = get_app_data_dir() / "cache" / "peaks"
+    # 2. Waveform Peaks Cache (AppData + Project .cache/peaks/ + legacy adjacent .peaks)
     peaks_bytes = 0
     peaks_files = 0
-    if peaks_dir.exists() and peaks_dir.is_dir():
+    peak_locations = [
+        get_app_data_dir() / "cache" / "peaks",
+        get_app_data_dir() / "cache",
+    ]
+    for pd in search_dirs:
+        p_cand = pd / ".cache" / "peaks"
+        if p_cand not in peak_locations:
+            peak_locations.append(p_cand)
+
+    seen_peak_files = set()
+    for peaks_dir in peak_locations:
+        if peaks_dir.exists() and peaks_dir.is_dir():
+            try:
+                for p in peaks_dir.rglob("*.peaks"):
+                    if p.is_file() and str(p.resolve()) not in seen_peak_files:
+                        seen_peak_files.add(str(p.resolve()))
+                        peaks_files += 1
+                        try:
+                            peaks_bytes += p.stat().st_size
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+    # Scan any legacy adjacent .peaks files in active project folders
+    for pd in search_dirs:
         try:
-            for p in peaks_dir.rglob("*.peaks"):
-                if p.is_file():
+            for p in pd.glob("*.peaks"):
+                if p.is_file() and str(p.resolve()) not in seen_peak_files:
+                    seen_peak_files.add(str(p.resolve()))
                     peaks_files += 1
                     try:
                         peaks_bytes += p.stat().st_size
@@ -4882,31 +5052,37 @@ def get_cache_disk_usage() -> dict:
                         pass
         except Exception:
             pass
+
     stats["waveforms"] = {
         "label": "Audio Waveform Peaks",
-        "path": peaks_dir,
+        "path": peak_locations[0],
         "count": peaks_files,
         "bytes": peaks_bytes,
     }
 
-    # 3. Temporary Audio Extracts
-    audio_dir = Path(tempfile.gettempdir()) / "prs_audio_extracts"
+    # 3. Temporary Audio Extracts & Scratch Workfiles
     audio_bytes = 0
     audio_files = 0
-    if audio_dir.exists() and audio_dir.is_dir():
-        try:
-            for p in audio_dir.rglob("*"):
-                if p.is_file():
-                    audio_files += 1
-                    try:
-                        audio_bytes += p.stat().st_size
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+    audio_locations = [
+        Path(tempfile.gettempdir()) / "prs_audio_extracts",
+        get_app_data_dir() / "cache" / "audio",
+        get_app_data_dir() / "cache" / "temp",
+    ]
+    for audio_dir in audio_locations:
+        if audio_dir.exists() and audio_dir.is_dir():
+            try:
+                for p in audio_dir.rglob("*"):
+                    if p.is_file():
+                        audio_files += 1
+                        try:
+                            audio_bytes += p.stat().st_size
+                        except Exception:
+                            pass
+            except Exception:
+                pass
     temp_dir = Path(tempfile.gettempdir())
     try:
-        for pat in ("prs_tmp_*.wav", "rtvs_tmp_*.wav", "prs_extract_*.wav"):
+        for pat in ("prs_tmp_*.wav", "rtvs_tmp_*.wav", "prs_extract_*.wav", "rtvs_diarization_*.wav", "rtvs_translate_*", "rtvs_wp_*"):
             for p in temp_dir.glob(pat):
                 if p.is_file():
                     audio_files += 1
@@ -4919,7 +5095,7 @@ def get_cache_disk_usage() -> dict:
 
     stats["audio_extracts"] = {
         "label": "Temporary Audio Workfiles",
-        "path": audio_dir,
+        "path": audio_locations[0],
         "count": audio_files,
         "bytes": audio_bytes,
     }
@@ -4929,7 +5105,7 @@ def get_cache_disk_usage() -> dict:
     return stats
 
 
-def purge_caches(clear_thumbnails=True, clear_waveforms=True, clear_audio_extracts=True) -> tuple[int, int]:
+def purge_caches(clear_thumbnails=True, clear_waveforms=True, clear_audio_extracts=True, project_dirs=None) -> tuple[int, int]:
     """Purge requested cache stores safely from disk.
     
     Returns:
@@ -4937,29 +5113,73 @@ def purge_caches(clear_thumbnails=True, clear_waveforms=True, clear_audio_extrac
     """
     freed_bytes = 0
     freed_files = 0
+    search_dirs = []
+    if project_dirs:
+        for p in project_dirs:
+            if p:
+                try:
+                    pd = Path(p).resolve()
+                    if pd.is_file():
+                        pd = pd.parent
+                    if pd.exists() and pd not in search_dirs:
+                        search_dirs.append(pd)
+                except Exception:
+                    pass
 
     if clear_thumbnails:
-        thumb_dir = Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails"
-        if thumb_dir.exists():
-            try:
-                for p in list(thumb_dir.rglob("*")):
-                    if p.is_file():
-                        try:
-                            sz = p.stat().st_size
-                            p.unlink(missing_ok=True)
-                            freed_bytes += sz
-                            freed_files += 1
-                        except Exception:
-                            pass
-                shutil.rmtree(thumb_dir, ignore_errors=True)
-            except Exception:
-                pass
+        thumb_locations = [
+            Path(tempfile.gettempdir()) / "radio_tv_story_segmenter_thumbnails",
+            get_app_data_dir() / "cache" / "thumbnails",
+        ]
+        for pd in search_dirs:
+            t_cand = pd / ".cache" / "thumbnails"
+            if t_cand not in thumb_locations:
+                thumb_locations.append(t_cand)
+
+        for thumb_dir in thumb_locations:
+            if thumb_dir.exists():
+                try:
+                    for p in list(thumb_dir.rglob("*")):
+                        if p.is_file():
+                            try:
+                                sz = p.stat().st_size
+                                p.unlink(missing_ok=True)
+                                freed_bytes += sz
+                                freed_files += 1
+                            except Exception:
+                                pass
+                    shutil.rmtree(thumb_dir, ignore_errors=True)
+                except Exception:
+                    pass
 
     if clear_waveforms:
-        peaks_dir = get_app_data_dir() / "cache" / "peaks"
-        if peaks_dir.exists():
+        peak_locations = [
+            get_app_data_dir() / "cache" / "peaks",
+        ]
+        for pd in search_dirs:
+            p_cand = pd / ".cache" / "peaks"
+            if p_cand not in peak_locations:
+                peak_locations.append(p_cand)
+
+        for peaks_dir in peak_locations:
+            if peaks_dir.exists():
+                try:
+                    for p in list(peaks_dir.glob("*.peaks")):
+                        if p.is_file():
+                            try:
+                                sz = p.stat().st_size
+                                p.unlink(missing_ok=True)
+                                freed_bytes += sz
+                                freed_files += 1
+                            except Exception:
+                                pass
+                    shutil.rmtree(peaks_dir, ignore_errors=True)
+                except Exception:
+                    pass
+
+        for pd in search_dirs:
             try:
-                for p in list(peaks_dir.rglob("*.peaks")):
+                for p in list(pd.glob("*.peaks")):
                     if p.is_file():
                         try:
                             sz = p.stat().st_size
@@ -4968,29 +5188,33 @@ def purge_caches(clear_thumbnails=True, clear_waveforms=True, clear_audio_extrac
                             freed_files += 1
                         except Exception:
                             pass
-                shutil.rmtree(peaks_dir, ignore_errors=True)
             except Exception:
                 pass
 
     if clear_audio_extracts:
-        audio_dir = Path(tempfile.gettempdir()) / "prs_audio_extracts"
-        if audio_dir.exists():
-            try:
-                for p in list(audio_dir.rglob("*")):
-                    if p.is_file():
-                        try:
-                            sz = p.stat().st_size
-                            p.unlink(missing_ok=True)
-                            freed_bytes += sz
-                            freed_files += 1
-                        except Exception:
-                            pass
-                shutil.rmtree(audio_dir, ignore_errors=True)
-            except Exception:
-                pass
+        audio_locations = [
+            Path(tempfile.gettempdir()) / "prs_audio_extracts",
+            get_app_data_dir() / "cache" / "audio",
+            get_app_data_dir() / "cache" / "temp",
+        ]
+        for audio_dir in audio_locations:
+            if audio_dir.exists():
+                try:
+                    for p in list(audio_dir.rglob("*")):
+                        if p.is_file():
+                            try:
+                                sz = p.stat().st_size
+                                p.unlink(missing_ok=True)
+                                freed_bytes += sz
+                                freed_files += 1
+                            except Exception:
+                                pass
+                    shutil.rmtree(audio_dir, ignore_errors=True)
+                except Exception:
+                    pass
         temp_dir = Path(tempfile.gettempdir())
         try:
-            for pat in ("prs_tmp_*.wav", "rtvs_tmp_*.wav", "prs_extract_*.wav"):
+            for pat in ("prs_tmp_*.wav", "rtvs_tmp_*.wav", "prs_extract_*.wav", "rtvs_diarization_*.wav", "rtvs_translate_*", "rtvs_wp_*"):
                 for p in list(temp_dir.glob(pat)):
                     if p.is_file():
                         try:
@@ -5009,10 +5233,11 @@ def purge_caches(clear_thumbnails=True, clear_waveforms=True, clear_audio_extrac
 class ClearCacheDialog(QDialog):
     """Dialog for inspecting disk cache sizes and clearing temporary data."""
 
-    def __init__(self, parent=None, language="en"):
+    def __init__(self, parent=None, language="en", project_dirs=None):
         super().__init__(parent)
         self.language = language
         self.is_es = (language == "es")
+        self.project_dirs = project_dirs or []
         self.setWindowTitle("Limpiar caché temporal" if self.is_es else "Clear Temporary Cache")
         self.setMinimumWidth(500)
         self.setModal(True)
@@ -5113,7 +5338,7 @@ class ClearCacheDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def refresh_stats(self):
-        stats = get_cache_disk_usage()
+        stats = get_cache_disk_usage(project_dirs=self.project_dirs)
         t_stat = stats["thumbnails"]
         w_stat = stats["waveforms"]
         a_stat = stats["audio_extracts"]
@@ -5162,6 +5387,7 @@ class ClearCacheDialog(QDialog):
             clear_thumbnails=clear_thumbs,
             clear_waveforms=clear_waves,
             clear_audio_extracts=clear_audio,
+            project_dirs=self.project_dirs,
         )
         self.refresh_stats()
         freed_str = format_byte_size(bytes_freed)

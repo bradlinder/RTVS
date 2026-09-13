@@ -2298,6 +2298,7 @@ class ProjectExportMixin:
             "audio_file_abs": str(Path(self.audio_file).resolve()) if self.audio_file else None,
             "duration": self.duration,
             "transcript": self.transcript,
+            "transcript_notes": getattr(self, "transcript_notes", ""),
             "diarization": self.diarization,
             "speaker_names": self.speaker_names,
             "segment_speaker_overrides": self.segment_speaker_overrides,
@@ -2333,8 +2334,24 @@ class ProjectExportMixin:
         destination.parent.mkdir(parents=True, exist_ok=True)
         self.project_file = destination
 
-        # Optional: Copy source media file into project folder
-        copy_media = str(self.settings_store.value("copy_media_to_project_folder", "false")).lower() in {"1", "true", "yes"}
+        # Determine media ingest mode (ask vs copy vs reference)
+        media_mode = str(self.settings_store.value("media_ingest_mode", "reference")).strip().lower()
+        copy_media = str(self.settings_store.value("copy_media_to_project_folder", "false")).lower() in {"1", "true", "yes"} or media_mode == "copy"
+
+        if media_mode == "ask" and self.audio_file and Path(self.audio_file).exists():
+            src_media = Path(self.audio_file).resolve()
+            if src_media.parent != destination.parent and src_media.parent != (destination.parent / "Media"):
+                res = QMessageBox.question(
+                    self,
+                    "Copy Media to Project Folder?",
+                    f"Would you like to copy the media file ('{src_media.name}') into the project bundle folder for portability?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if res == QMessageBox.StandardButton.Cancel:
+                    return False
+                copy_media = (res == QMessageBox.StandardButton.Yes)
+
         if copy_media and self.audio_file and Path(self.audio_file).exists():
             src_media = Path(self.audio_file).resolve()
             media_subfolder = destination.parent / "Media"
@@ -2352,10 +2369,10 @@ class ProjectExportMixin:
                 except Exception as exc:
                     self.log_activity(f"[WARNING] Could not copy media to project folder: {exc}", mark_dirty=False)
 
-        # Ensure dedicated waveform peak cache is saved alongside project
+        # Ensure dedicated waveform peak cache is saved alongside project inside .cache/peaks/
         if self.audio_file and getattr(self.timeline, "waveform_peaks", None):
             try:
-                write_waveform_peak_cache(self.audio_file, self.timeline.waveform_peaks)
+                write_waveform_peak_cache(self.audio_file, self.timeline.waveform_peaks, project_file=destination)
             except Exception:
                 pass
 
@@ -2914,7 +2931,7 @@ class ProjectExportMixin:
             self.timeline.set_waveform_peaks([])
 
             # Restore pre-calculated waveform peaks from disk cache or legacy project file
-            cached_peaks = read_waveform_peak_cache(audio_path)
+            cached_peaks = read_waveform_peak_cache(audio_path, project_file=project_path)
             if not cached_peaks:
                 cached_peaks = data.get("waveform_peaks")
             if cached_peaks:
@@ -2935,6 +2952,7 @@ class ProjectExportMixin:
             if self.current_media_is_video:
                 QTimer.singleShot(0, self.start_video_thumbnail_generation)
         self.transcript = data.get("transcript")
+        self.transcript_notes = str(data.get("transcript_notes", ""))
         self.diarization = data.get("diarization")
         self.speaker_names = {str(k): str(v) for k, v in data.get("speaker_names", {}).items() if str(v).strip()}
         self.segment_speaker_overrides = {int(k): str(v) for k, v in data.get("segment_speaker_overrides", {}).items()}

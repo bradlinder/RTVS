@@ -1332,6 +1332,17 @@ class PlaybackPreferencesMixin:
             ingest_mode_combo.setCurrentIndex(0)
         gen_form.addRow("Media Ingest Mode:", ingest_mode_combo)
 
+        single_instance_combo = QComboBox()
+        single_instance_combo.addItem("Open files in existing app instance (Single Instance)", "single")
+        single_instance_combo.addItem("Allow multiple independent app instances", "multi")
+        curr_single_inst = str(self.settings_store.value("single_instance_mode", "single")).strip().lower()
+        idx_si = single_instance_combo.findData(curr_single_inst)
+        if idx_si >= 0:
+            single_instance_combo.setCurrentIndex(idx_si)
+        else:
+            single_instance_combo.setCurrentIndex(0)
+        gen_form.addRow("Instance Handling Mode:", single_instance_combo)
+
         autosave_spin = QSpinBox()
         autosave_spin.setRange(0, 120)
         autosave_spin.setValue(self.auto_save_minutes)
@@ -2056,6 +2067,7 @@ class PlaybackPreferencesMixin:
             chosen_ingest_mode = ingest_mode_combo.currentData()
             self.settings_store.setValue("media_ingest_mode", chosen_ingest_mode)
             self.settings_store.setValue("copy_media_to_project_folder", "true" if chosen_ingest_mode == "copy" else "false")
+            self.settings_store.setValue("single_instance_mode", single_instance_combo.currentData())
 
             self.auto_save_minutes = autosave_spin.value()
             self.settings_store.setValue("auto_save_minutes", self.auto_save_minutes)

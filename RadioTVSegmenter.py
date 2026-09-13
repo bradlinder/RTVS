@@ -270,6 +270,33 @@ class MainWindow(
         QTimer.singleShot(0, lambda: self.check_translation_models_async())
         QTimer.singleShot(3000, lambda: self.trigger_silent_update_check())
 
+    def handle_external_open_request(self, file_path: str):
+        """Called when another instance attempts to open a project file in single-instance mode."""
+        self.raise_()
+        self.activateWindow()
+        p = Path(file_path).resolve()
+        if self.project_file and self.project_file.resolve() == p:
+            return  # Same project already open
+
+        curr_name = self.project_file.name if self.project_file else "Current Project"
+        res = QMessageBox.question(
+            self,
+            "Open Requested Project",
+            f"A request was received to open project file:\n'{p.name}'\n\nWould you like to save '{curr_name}' before opening?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+        if res == QMessageBox.StandardButton.Cancel:
+            return
+        if res == QMessageBox.StandardButton.Yes:
+            if not self.save_project():
+                return
+
+        if p.suffix.lower() in {".rtvs", ".json", ".zip"}:
+            self.load_project_file(str(p))
+        else:
+            self.open_media_file(str(p))
+
 def main():
     if sys.platform == "win32":
         try:
@@ -278,6 +305,25 @@ def main():
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
         except Exception:
             pass
+
+    server_name = "RadioTVStorySegmenter_IPC_Server"
+    settings = QSettings(INTERNAL_APP_ID, INTERNAL_APP_ID)
+    single_instance_mode = str(settings.value("single_instance_mode", "single")).strip().lower()
+
+    if single_instance_mode == "single":
+        socket = QLocalSocket()
+        socket.connectToServer(server_name)
+        if socket.waitForConnected(500):
+            file_to_open = ""
+            for arg in sys.argv[1:]:
+                if not arg.startswith("-") and Path(arg).exists():
+                    file_to_open = str(Path(arg).resolve())
+                    break
+            msg = file_to_open if file_to_open else "ACTIVATE"
+            socket.write(msg.encode("utf-8"))
+            socket.flush()
+            socket.disconnectFromServer()
+            return 0
 
     app = QApplication(sys.argv)
     app.setApplicationName(f"{APP_DISPLAY_NAME} v{PROJECT_VERSION}")
@@ -303,8 +349,26 @@ def main():
     window = MainWindow()
     if not icon.isNull():
         window.setWindowIcon(icon)
-    window.show()
 
+    ipc_server = QLocalServer()
+    QLocalServer.removeServer(server_name)
+    if ipc_server.listen(server_name):
+        def _handle_ipc_connection():
+            client_socket = ipc_server.nextPendingConnection()
+            if not client_socket:
+                return
+            if client_socket.waitForReadyRead(1000):
+                data = client_socket.readAll().data().decode("utf-8", errors="ignore").strip()
+                if data and data != "ACTIVATE" and Path(data).exists():
+                    window.handle_external_open_request(data)
+                else:
+                    window.raise_()
+                    window.activateWindow()
+            client_socket.disconnectFromServer()
+
+        ipc_server.newConnection.connect(_handle_ipc_connection)
+
+    window.show()
     sys.exit(app.exec())
 
 

@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.0.0-beta.3
+- **Single-Instance Application Enforcement & Preference**:
+  - Added preference setting in `playback_preferences.py` ("Instance Handling Mode") allowing users to choose between single-instance mode and multi-instance mode.
+  - Implemented cross-instance IPC via `QLocalServer` and `QLocalSocket` in `RadioTVSegmenter.py`. When double-clicking an `.rtvs` file while the app is already running in single-instance mode, the file path is forwarded to the existing process.
+  - If another project is open with unsaved changes, the app prompts the user to save before loading the requested project or dismiss the request.
+- **Media Ingest Prompt Mode**:
+  - Fixed prompt behavior when Media Ingest Mode is set to `"Prompt every time when saving project"` (`media_ingest_mode: ask`).
+  - Triggers an interactive `QMessageBox` during `save_project` asking if the source media file should be copied into the project bundle `Media/` subfolder.
+- **Project-Local Peak Cache Storage**:
+  - Pre-calculated waveform `.peaks` cache files are now stored inside the project folder's hidden `.cache/peaks/` subfolder (or alongside the `.rtvs` file) rather than polluting the source media directory.
+- **Transcript Keyboard Navigation**:
+  - Enabled Home, End, PageUp, PageDown, and Arrow key navigation in `InteractiveTranscriptEdit` during viewing mode to move through transcript text smoothly.
+- **Clickable Speaker & Timestamp Links**:
+  - Enabled clicking on speaker labels (`speaker:`) and timestamps in the transcript to instantly seek timeline, audio, and video preview to that exact moment.
+- **Transcript Notes & Segment Notes System**:
+  - Added context menu actions ("Edit Segment Note..." and "Transcript & Project Notes...") to `InteractiveTranscriptEdit`.
+  - In-line segment notes are rendered with yellow callout badges in the transcript viewer and saved directly in `.rtvs` project files.
+  - Full project/episode notes and segment notes are automatically styled and included in DOCX exports.
+- **Cache Usage & Purge Discovery**:
+  - Fixed cache scanner in `get_cache_disk_usage` and `purge_caches` by automatically discovering project paths via `QSettings` (`default_project_directory`, `last_saved_project_path`, `recent_projects`), accurately calculating total `.peaks` files and bytes.
+- **UI Contrast & Layout Fixes**:
+  - Enhanced contrast for story list items in dark mode.
+  - Consolidated Quick Actions bubble layout preventing label truncation.
+
 ## v3.0.0-beta
 - **Debian / Ubuntu (.deb) Control Version Compliance**:
   - Fixed an issue where Debian control files generated with `V3.0.0-beta` or uppercase/prefixed version strings failed `dpkg-deb` validation (`'Version' field value: version number does not start with digit`).
