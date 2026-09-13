@@ -10,10 +10,12 @@
   - Standalone single-purpose demo widgets or test audio uploaders
 - **Why this exists**:
   The actual application is a native Python/PySide6 (Qt) desktop software suite. The Node/Vite web container in AI Studio exists exclusively to serve the live interactive changelog, release documentation, and version inspector on port 3000.
-- **Recovery / Error Response**:
-  If the web preview breaks, fails linting, or reports build errors, the agent MUST fix the build configuration/types within `/src/App.tsx` to restore the changelog viewer. The agent MUST NOT "re-imagine" or regenerate a new UI from scratch.
+- **Recovery / Error Response & Zero-Token Restoration**:
+  If the web preview breaks, fails linting, reports build errors, or if preview files are missing after a git update/pull (since web preview files are ignored in `.gitignore` to keep the desktop repository focused on the Python app):
+  - **NEVER** rewrite, scaffold over, or regenerate the UI from scratch (which wastes tokens and risks hallucination).
+  - Run `python preview_manager.py` (or `python preview_manager.py --restore`) to immediately restore all preview files in < 0.1s.
 - **Changelog Synchronization**:
-  Whenever `CHANGELOG.md` or version information is updated in the desktop application codebase, ensure the changes are reflected in the changelog viewer in `/src/App.tsx`.
+  `/src/App.tsx` imports `CHANGELOG.md` directly (`import CHANGELOG_MARKDOWN from '../CHANGELOG.md?raw'`). Whenever `CHANGELOG.md` is updated, the changes are automatically reflected in the web preview without needing to duplicate markdown strings in React code. Use `python preview_manager.py --sync` to align version numbers across preview files.
 
 ## 2. Standardized Version Bump Checklist
 - **Incremental Point Release Policy**:
@@ -51,3 +53,15 @@ Always adhere strictly to the invariants defined in `ARCHITECTURE.md`:
 - Core modules must NEVER import from `plugins/`.
 - Heavy translation runtimes must remain isolated inside `plugins/translation/`.
 - Speaker diarization uses `wespeakerruntime` as the primary ONNX embedding engine.
+
+## 5. Release Snapshots & Rollback Directive
+- **Snapshot Manager (`snapshot_manager.py`)**:
+  - The project maintains an automated snapshot and rollback manager in `snapshot_manager.py`.
+  - Snapshots are preserved as standalone archives in `.snapshots/<name>.tar.gz` and cataloged in `.snapshots/manifest.json`.
+  - A local Git repository with tags (e.g. `v2.9.6-stable`, `latest-stable`) and branch `stable` provides dual redundancy.
+- **How to Revert to Stable Release**:
+  - If the user asks to revert to the latest stable release (or a specific stable snapshot):
+    Run `python snapshot_manager.py --restore stable` (or `python snapshot_manager.py --restore v2.9.6-stable`).
+    Then run `python preview_manager.py --sync` and verify with `lint_applet` & `compile_applet`.
+  - To create a new stable snapshot: `python snapshot_manager.py --create <name> --stable`.
+

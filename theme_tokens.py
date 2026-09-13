@@ -59,12 +59,16 @@ class ThemeTokens:
     selection_handle: str = "#38bdf8"
     transcript_selection_fill: str = "#38bdf8"
 
-    # Story Segment Palette & Highlights
+    # Story Segment Palette & Highlights (8-color harmonized accessible palette)
     story_palette: Tuple[str, ...] = (
-        "#315c85",
-        "#386b59",
-        "#795d31",
-        "#674f7c",
+        "#2563eb",  # Cerulean
+        "#d97706",  # Amber
+        "#059669",  # Emerald
+        "#7c3aed",  # Violet
+        "#e11d48",  # Coral/Rose
+        "#0d9488",  # Teal
+        "#4f46e5",  # Indigo
+        "#db2777",  # Berry/Pink
     )
     story_selected_border: str = "#ffffff"
     story_selected_alpha: int = 130
@@ -204,7 +208,7 @@ _LIGHT_TOKEN_OVERRIDES = dict(
     selection_border="#1971c2",
     selection_handle="#1971c2",
     transcript_selection_fill="#1971c2",
-    story_palette=("#4a7fb5", "#4a8f78", "#a67c3d", "#8a6ba3"),
+    story_palette=("#3b82f6", "#f59e0b", "#10b981", "#8b5cf6", "#f43f5e", "#14b8a6", "#6366f1", "#ec4899"),
     story_selected_border="#111111",
     story_selected_alpha=130,
     story_unselected_alpha=60,
@@ -249,7 +253,7 @@ _HIGH_CONTRAST_TOKEN_OVERRIDES = dict(
     selection_border="#ffff00",
     selection_handle="#ffff00",
     transcript_selection_fill="#ffff00",
-    story_palette=("#ff8800", "#ff00ff", "#00ff00", "#3399ff"),
+    story_palette=("#ff8800", "#ff00ff", "#00ff00", "#3399ff", "#ff3366", "#00ffff", "#ffff00", "#ff66cc"),
     story_selected_border="#ffffff",
     story_selected_alpha=190,
     story_unselected_alpha=100,

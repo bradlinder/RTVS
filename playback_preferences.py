@@ -1312,15 +1312,25 @@ class PlaybackPreferencesMixin:
         save_with_media_chk.setChecked(str(self.settings_store.value("save_project_with_media", "false")).lower() in {"1", "true", "yes"})
         gen_form.addRow("", save_with_media_chk)
 
-        bundle_folder_chk = QCheckBox("Create dedicated project folder with subfolders for exports")
-        bundle_folder_chk.setToolTip("Creates [ProjectName]/ containing project.json, with /Transcripts and /Media subfolders.")
+        bundle_folder_chk = QCheckBox("Create dedicated project bundle with subfolders for exports and media")
+        bundle_folder_chk.setToolTip("Creates [ProjectName]/ containing .rtvs project, with media/, exports/audio/, exports/transcripts/, and hidden .cache/ subfolders.")
         bundle_folder_chk.setChecked(str(self.settings_store.value("create_project_subfolders", "true")).lower() in {"1", "true", "yes"})
         gen_form.addRow("", bundle_folder_chk)
 
-        copy_media_chk = QCheckBox("Copy source media file into project folder on save")
-        copy_media_chk.setToolTip("Copies the active audio/video file directly into the project folder so the media file is always kept with the project.")
-        copy_media_chk.setChecked(str(self.settings_store.value("copy_media_to_project_folder", "false")).lower() in {"1", "true", "yes"})
-        gen_form.addRow("", copy_media_chk)
+        ingest_mode_combo = QComboBox()
+        ingest_mode_combo.addItem("Reference in place (Save disk space / default)", "reference")
+        ingest_mode_combo.addItem("Copy source media to project bundle (Portable)", "copy")
+        ingest_mode_combo.addItem("Prompt every time when saving project", "ask")
+        current_ingest_mode = str(self.settings_store.value("media_ingest_mode", "")).strip().lower()
+        if not current_ingest_mode:
+            was_copy = str(self.settings_store.value("copy_media_to_project_folder", "false")).lower() in {"1", "true", "yes"}
+            current_ingest_mode = "copy" if was_copy else "reference"
+        idx = ingest_mode_combo.findData(current_ingest_mode)
+        if idx >= 0:
+            ingest_mode_combo.setCurrentIndex(idx)
+        else:
+            ingest_mode_combo.setCurrentIndex(0)
+        gen_form.addRow("Media Ingest Mode:", ingest_mode_combo)
 
         autosave_spin = QSpinBox()
         autosave_spin.setRange(0, 120)
@@ -2043,7 +2053,9 @@ class PlaybackPreferencesMixin:
             self.settings_store.setValue("default_project_directory", self.default_project_directory)
             self.settings_store.setValue("save_project_with_media", "true" if save_with_media_chk.isChecked() else "false")
             self.settings_store.setValue("create_project_subfolders", "true" if bundle_folder_chk.isChecked() else "false")
-            self.settings_store.setValue("copy_media_to_project_folder", "true" if copy_media_chk.isChecked() else "false")
+            chosen_ingest_mode = ingest_mode_combo.currentData()
+            self.settings_store.setValue("media_ingest_mode", chosen_ingest_mode)
+            self.settings_store.setValue("copy_media_to_project_folder", "true" if chosen_ingest_mode == "copy" else "false")
 
             self.auto_save_minutes = autosave_spin.value()
             self.settings_store.setValue("auto_save_minutes", self.auto_save_minutes)

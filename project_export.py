@@ -69,6 +69,25 @@ def generate_youtube_chapters(stories: list, ensure_zero_start: bool = True) -> 
     return "\n".join(lines) + "\n"
 
 
+def show_export_completion_dialog(parent, title: str, message: str, export_path: str = ""):
+    """Displays export completion with an actionable 'Open Folder' button (Milestone 3.11)."""
+    box = QMessageBox(parent)
+    box.setWindowTitle(title)
+    box.setText(message)
+    box.setIcon(QMessageBox.Icon.Information)
+
+    open_btn = box.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
+    close_btn = box.addButton("Close", QMessageBox.ButtonRole.AcceptRole)
+    box.setDefaultButton(close_btn)
+
+    box.exec()
+    if box.clickedButton() == open_btn and export_path:
+        folder_to_open = Path(export_path)
+        if folder_to_open.is_file():
+            folder_to_open = folder_to_open.parent
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder_to_open)))
+
+
 class YouTubeAssistedUploadGuideDialog(QDialog):
     """Instructional guide and assisted upload dialog for YouTube Studio."""
 
@@ -3239,7 +3258,7 @@ class ProjectExportMixin:
             if success and not self.export_cancelled:
                 self.update_processing_progress(100, "Export complete.")
                 self.log_activity(f"[EXPORT] Exported {len(stories_to_export)} selected {term.lower()}(s) to {directory}")
-                QMessageBox.information(self, "Export Complete", f"Exported {len(stories_to_export)} {term.lower()}(s) to:\n{directory}")
+                show_export_completion_dialog(self, "Export Complete", f"Exported {len(stories_to_export)} {term.lower()}(s) to:\n{directory}", directory)
         except Exception as exc:
             self.log_activity(f"[ERROR] Selected stories export failed: {exc}")
             QMessageBox.critical(self, "Export Error", str(exc))
@@ -3283,7 +3302,7 @@ class ProjectExportMixin:
             if success and not self.export_cancelled:
                 self.update_processing_progress(100, "Export complete.")
                 self.log_activity(f"[EXPORT] Exported all {len(stories_to_export)} {term_plural.lower()} to {directory}")
-                QMessageBox.information(self, "Export Complete", f"Exported all {len(stories_to_export)} {term_plural.lower()} to:\n{directory}")
+                show_export_completion_dialog(self, "Export Complete", f"Exported all {len(stories_to_export)} {term_plural.lower()} to:\n{directory}", directory)
         except Exception as exc:
             self.log_activity(f"[ERROR] All stories export failed: {exc}")
             QMessageBox.critical(self, "Export Error", str(exc))
@@ -3348,7 +3367,7 @@ class ProjectExportMixin:
             if not self.export_cancelled:
                 self.update_processing_progress(100, "Export complete.")
                 self.log_activity(f"[EXPORT] Exported full episode and all {term_plural.lower()} to {directory}")
-                QMessageBox.information(self, "Export Complete", f"Exported full episode and {term_plural.lower()} to:\n{directory}")
+                show_export_completion_dialog(self, "Export Complete", f"Exported full episode and {term_plural.lower()} to:\n{directory}", directory)
         except Exception as exc:
             self.log_activity(f"[ERROR] Full & story export failed: {exc}")
             QMessageBox.critical(self, "Export Error", str(exc))
@@ -3887,7 +3906,7 @@ class ProjectExportMixin:
 
             self.log_activity(f"[EXPORT] Exported full episode to {out}")
             if show_completion and not (progress_dialog and progress_dialog.wasCanceled()):
-                QMessageBox.information(self, "Export Complete", f"Exported to:\n{out}")
+                show_export_completion_dialog(self, "Export Complete", f"Exported to:\n{out}", out)
             return True
         except Exception as exc:
             self.log_activity(f"[ERROR] Full episode export failed: {exc}")
@@ -4413,7 +4432,7 @@ class ProjectExportMixin:
             f.write(content)
         self.log_activity(f"[EXPORT] Exported CUE sheet to {save_path}")
         if not destination_path:
-            QMessageBox.information(self, "Export Complete", f"CUE sheet exported successfully to:\n{save_path}")
+            show_export_completion_dialog(self, "Export Complete", f"CUE sheet exported successfully to:\n{save_path}", save_path)
         return True
 
     def export_tracklist(self, destination_path=None):
@@ -4440,7 +4459,7 @@ class ProjectExportMixin:
             f.write(content)
         self.log_activity(f"[EXPORT] Exported tracklist / chapters to {save_path}")
         if not destination_path:
-            QMessageBox.information(self, "Export Complete", f"Tracklist / Chapters exported successfully to:\n{save_path}")
+            show_export_completion_dialog(self, "Export Complete", f"Tracklist / Chapters exported successfully to:\n{save_path}", save_path)
         return True
 
     def perform_stories_export(
@@ -4461,7 +4480,7 @@ class ProjectExportMixin:
         stories_to_export = list(enumerate(stories))
         success = self._export_story_files(stories_to_export, formats, base, options, directory)
         if show_completion and success:
-            QMessageBox.information(self, "Export Complete", f"Exported {len(stories_to_export)} stories to {directory}")
+            show_export_completion_dialog(self, "Export Complete", f"Exported {len(stories_to_export)} stories to {directory}", directory)
         return success
 
     def _get_transcript_text_slice(self, start: float, end: float | None = None) -> str:

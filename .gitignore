@@ -1,0 +1,67 @@
+# =====================================================================
+# Git Ignore Configuration for Radio & TV Story Segmenter
+# =====================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution, packaging, and frozen binaries
+build/
+dist/
+.snapshots/
+*.egg-info/
+*.spec
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Runtime diagnostics, logs, and local databases
+*.log
+*.sqlite3
+
+# Operating System metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Environment variables & local secrets
+.env*
+!.env.example
+.env.local
+.env.*.local
+
+# =====================================================================
+# AI Studio Web Preview Scaffolding & Dependencies
+# =====================================================================
+# Keeps the GitHub repository strictly focused on the PySide6 desktop suite.
+# Note: To restore, verify, or synchronize the web preview at any time,
+# simply run: python preview_manager.py
+node_modules/
+.vite/
+coverage/
+bun.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+package.json
+tsconfig.json
+vite.config.ts
+tailwind.config.js
+postcss.config.js
+eslint.config.js
+metadata.json
+index.html
+src/
+public/
+noun_electronicmedia_5929933.svg

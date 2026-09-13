@@ -1,5 +1,26 @@
 # Changelog
 
+## v3.0.0-beta
+- **Self-Contained Project Bundles & Ingest Preferences**:
+  - Added project media ingest behavior preferences (Reference in place vs. Copy into project bundle vs. Ask when saving) in `playback_preferences.py` and `project_export.py`.
+  - Added automated disk space preflight verification before media ingestion using `shutil.disk_usage`, prompting confirmation when source media is large (>1 GB) or low disk headroom (<10%) is detected.
+- **Clean Dedicated Directory Hierarchy**:
+  - Upgraded project bundle structure to dedicated subfolders: `<Project>/media/` (original recordings), `<Project>/exports/audio/` (cut audio files), `<Project>/exports/transcripts/` (transcripts and documents), and `<Project>/.cache/` (hidden peak and transient caches).
+  - Maintained complete backward compatibility for legacy projects with multi-tier fallback resolution in `resolve_project_media()`.
+- **Project Maintenance & Mobility Tools**:
+  - Added **File > Consolidate Media into Project...** to easily copy external files into the project directory for portability.
+  - Added **File > Clean Cache / Reclaim Space...** to inspect and prune `.cache/peaks/` and scratch buffers.
+  - Added **File > Export Project Archive (.zip)...** with customizable inclusion of source media, transcripts, and exports while excluding temporary caches.
+  - Added interactive **Locate Missing Media** dialog with auto-discovery and one-click re-linking.
+- **Workflow & UI Polish**:
+  - Added interactive drag-and-drop zero-state onboarding cards to `InteractiveTranscriptEdit` and `StoryListWidget`.
+  - Added "Open Folder" action button on export completion dialogs (`show_export_completion_dialog`) across story exports, full episodes, CUE sheets, and tracklists.
+  - Added floating quick-action selection bubble toolbar (`TranscriptSelectionBubble`) over transcript selections with instant Play, + Story, Exclude, and Quick Export buttons.
+  - Added dual-layer timeline navigation (`TimelineWidget`) with interactive macro overview strip, story segment blocks, and draggable viewfinder rectangle.
+  - Added harmonized color-coded story accents across story cards (`StoryCardDelegate`), timeline spans, and transcript markers.
+- **Full Project Version Alignment**:
+  - Synchronized `v3.0.0-beta` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`, `transcript_story.py`, and plugin manifests (`wordpress`, `youtube`, `translation`).
+
 ## v2.9.6
 - **Windows & Cross-Platform Artifact Naming Normalization**:
   - Resolved an issue in the packaging pipeline where double dots (e.g. `2.9..6`) could be introduced into Windows installer executable names (`RadioTVSegmenter-2.9.6-Windows-Setup.exe`) and Linux tarball archives.
@@ -10,6 +31,11 @@
   - Asset label mismatch notices now evaluate numerical semantic version tuples rather than raw string comparisons to eliminate false-alarm warning banners.
 - **Full Project Version Alignment**:
   - Synchronized `v2.9.6` across `prs_shared.py`, `updater.py`, `build_installer.py`, `RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`, `transcript_story.py`, and plugin manifests (`wordpress`, `youtube`, `translation`).
+- **AI Studio Web Preview Git Hygiene & Zero-Token Scaffolding Restoration**:
+  - Consolidated and restructured `.gitignore` to strictly isolate all Node/Vite web preview files (`package.json`, `tsconfig.json`, `vite.config.ts`, `tailwind.config.js`, `postcss.config.js`, `eslint.config.js`, `metadata.json`, `index.html`, `src/`, `public/`, `node_modules/`, `bun.lock`), keeping the GitHub repository focused exclusively on the Python desktop application.
+  - Removed stale untracked `gitignore` file (without leading dot) to restore canonical gitignore parsing.
+  - Implemented `preview_manager.py` to enable instant zero-token restoration and version synchronization across all web preview files (`python preview_manager.py --restore` / `--sync`).
+  - Decoupled `src/App.tsx` from manual markdown copy-pasting by importing `CHANGELOG.md?raw` directly, ensuring real-time changelog preview updates without code maintenance overhead.
 
 ## v2.9.5
 - **WordPress Export Media Notice Placement**:

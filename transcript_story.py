@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter v2.9.6 — transcript story responsibilities.
+"""Radio & TV Segmenter v3.0.0-beta — transcript story responsibilities.
 
 
 Methods intentionally retain the MainWindow-facing API so behavior remains
@@ -1022,7 +1022,9 @@ class TranscriptStoryMixin:
 
         for index, story in enumerate(self.stories, start=1):
             text = f"{index}. {format_time(story.start)} – {format_time(story.end)}  {story.title}"
-            self.story_list.addItem(text)
+            item = QListWidgetItem(text)
+            item.setData(Qt.ItemDataRole.UserRole, story.to_dict())
+            self.story_list.addItem(item)
 
         for idx in selected_indices:
             if 0 <= idx < self.story_list.count():

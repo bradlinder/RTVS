@@ -143,6 +143,9 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QScrollArea,
     QSizePolicy,
+    QStyledItemDelegate,
+    QStyle,
+    QToolButton,
 )
 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -305,7 +308,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "2.9.6"
+PROJECT_VERSION = "3.0.0-beta"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 
@@ -884,8 +887,116 @@ class ProjectStateCommand(QUndoCommand):
 
 
 # ============================================================
-# Custom ListWidget
 # ============================================================
+# Custom Story Card Delegate & ListWidget (Milestones 3.10 & 3.14)
+# ============================================================
+
+class StoryCardDelegate(QStyledItemDelegate):
+    """Renders story items as clean cards with color-coded accent bars, pill badges, and time metadata."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def sizeHint(self, option, index):
+        return QSize(option.rect.width(), 46)
+
+    def paint(self, painter, option, index):
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = option.rect
+
+        list_widget = option.widget
+        win = list_widget.window() if list_widget else None
+        tokens = getattr(win, "tokens", ThemeTokens())
+        palette = getattr(tokens, "story_palette", ("#2563eb", "#d97706", "#059669", "#7c3aed", "#e11d48", "#0d9488", "#4f46e5", "#db2777"))
+
+        row = index.row()
+        item_color = QColor(palette[row % len(palette)])
+
+        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        is_hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+
+        card_rect = QRectF(rect.x() + 3, rect.y() + 2, rect.width() - 6, rect.height() - 4)
+
+        # Card Background & Outline
+        if is_selected:
+            bg = tokens.color(tokens.selection_fill)
+            bg.setAlpha(90)
+            border_pen = QPen(tokens.color(tokens.selection_border), 1.5)
+        elif is_hovered:
+            bg = tokens.color(tokens.btn_hover_bg)
+            border_pen = QPen(tokens.color(tokens.border_subtle), 1.0)
+        else:
+            bg = tokens.color(tokens.card_bg)
+            border_pen = QPen(tokens.color(tokens.border_subtle), 1.0)
+
+        painter.fillRect(card_rect, bg)
+        painter.setPen(border_pen)
+        painter.drawRoundedRect(card_rect, 4.0, 4.0)
+
+        # 4px Left Accent Bar in assigned story color
+        bar_rect = QRectF(card_rect.x(), card_rect.y(), 4, card_rect.height())
+        painter.fillRect(bar_rect, item_color)
+
+        # Story Data
+        story_data = index.data(Qt.ItemDataRole.UserRole)
+        is_music = getattr(win, "story_detection_mode", "voice") == "music"
+        is_es = getattr(win, "language", "en") == "es"
+        badge_prefix = ("Canción" if is_es else "Song") if is_music else ("Historia" if is_es else "Story")
+
+        if isinstance(story_data, dict):
+            title = story_data.get("title", f"{badge_prefix} {row + 1}")
+            start = float(story_data.get("start", 0.0))
+            end = float(story_data.get("end", 0.0))
+            dur = max(0.0, end - start)
+            time_str = f"{format_time(start, include_millis=False)} – {format_time(end, include_millis=False)}  ({format_time(dur, include_millis=False)})"
+        else:
+            raw_text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+            # Parse legacy string format "1. 00:00:00 – 00:02:15  Title"
+            parts = raw_text.split("  ", 1)
+            if len(parts) == 2:
+                time_str = parts[0].split(". ", 1)[-1] if ". " in parts[0] else parts[0]
+                title = parts[1]
+            else:
+                time_str = ""
+                title = raw_text
+
+        # Numbered Pill Badge (Story 1, Story 2...)
+        badge_text = f"{badge_prefix} {row + 1}"
+        badge_font = QFont(option.font)
+        badge_font.setPointSize(8)
+        badge_font.setBold(True)
+        painter.setFont(badge_font)
+
+        badge_w = max(48, painter.fontMetrics().horizontalAdvance(badge_text) + 12)
+        badge_rect = QRectF(card_rect.x() + 9, card_rect.y() + 5, badge_w, 17)
+        pill_bg = QColor(item_color)
+        pill_bg.setAlpha(220)
+        painter.fillRect(badge_rect, pill_bg)
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, badge_text)
+
+        # Story Headline / Title
+        title_font = QFont(option.font)
+        title_font.setPointSize(9)
+        title_font.setBold(True)
+        painter.setFont(title_font)
+        painter.setPen(tokens.color(tokens.text_primary))
+
+        title_rect = QRectF(card_rect.x() + 15 + badge_w, card_rect.y() + 5, card_rect.width() - (22 + badge_w), 17)
+        elided_title = painter.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, int(title_rect.width()))
+        painter.drawText(title_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided_title)
+
+        # Time range metadata
+        if time_str:
+            time_font = QFont(option.font)
+            time_font.setPointSize(8)
+            painter.setFont(time_font)
+            painter.setPen(tokens.color(tokens.text_secondary))
+            time_rect = QRectF(card_rect.x() + 9, card_rect.y() + 24, card_rect.width() - 18, 14)
+            painter.drawText(time_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, time_str)
+
+        painter.restore()
+
 
 class StoryListWidget(QListWidget):
     deleteRequested = Signal()
@@ -896,6 +1007,21 @@ class StoryListWidget(QListWidget):
         super().__init__(parent)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+        self.setItemDelegate(StoryCardDelegate(self))
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.count() == 0:
+            painter = QPainter(self.viewport())
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            rect = self.viewport().rect()
+            painter.setPen(QColor("#64748b"))
+            font = QFont(self.font())
+            font.setPointSize(9)
+            painter.setFont(font)
+            text = "No stories created yet.\n\nHighlight words in transcript\nand click '+ New Story' (Enter)\nto create an audio cut."
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+            painter.end()
 
     def _show_context_menu(self, pos):
         item = self.itemAt(pos)
@@ -979,6 +1105,74 @@ def transcript_text_view_stylesheet(mode, font_size=16):
     """
 
 
+class TranscriptSelectionBubble(QFrame):
+    """Floating quick-action toolbar on transcript selection (Milestone 3.12)."""
+    playRequested = Signal()
+    storyRequested = Signal()
+    cutRequested = Signal()
+    exportRequested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("transcript_selection_bubble")
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setFixedHeight(32)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(3)
+
+        self.play_btn = QToolButton(self)
+        self.play_btn.setText("▶ Play")
+        self.play_btn.setToolTip("Preview audio for this selection (Space)")
+        self.play_btn.clicked.connect(self.playRequested.emit)
+        layout.addWidget(self.play_btn)
+
+        self.story_btn = QToolButton(self)
+        self.story_btn.setText("+ Story")
+        self.story_btn.setToolTip("Create a new story cut from highlighted text (Enter)")
+        self.story_btn.clicked.connect(self.storyRequested.emit)
+        layout.addWidget(self.story_btn)
+
+        self.cut_btn = QToolButton(self)
+        self.cut_btn.setText("✂ Exclude")
+        self.cut_btn.setToolTip("Exclude or cut this range")
+        self.cut_btn.clicked.connect(self.cutRequested.emit)
+        layout.addWidget(self.cut_btn)
+
+        self.export_btn = QToolButton(self)
+        self.export_btn.setText("⚡ Export")
+        self.export_btn.setToolTip("Quick export selection as audio soundbite")
+        self.export_btn.clicked.connect(self.exportRequested.emit)
+        layout.addWidget(self.export_btn)
+
+        self.setStyleSheet("""
+            QFrame#transcript_selection_bubble {
+                background-color: #1e293b;
+                border: 1px solid #475569;
+                border-radius: 6px;
+            }
+            QToolButton {
+                background-color: transparent;
+                color: #f1f5f9;
+                border: none;
+                border-radius: 4px;
+                padding: 3px 7px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QToolButton:hover {
+                background-color: #334155;
+                color: #38bdf8;
+            }
+            QToolButton:pressed {
+                background-color: #0f172a;
+            }
+        """)
+        self.hide()
+
+
 class InteractiveTranscriptEdit(QTextEdit):
     linkClicked = Signal(QUrl)
     editingModeChanged = Signal(bool)
@@ -993,6 +1187,7 @@ class InteractiveTranscriptEdit(QTextEdit):
         self.setReadOnly(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
+        self.setAcceptDrops(True)
 
         self.current_theme = "dark"
         self.font_scale = 1.0
@@ -1018,7 +1213,117 @@ class InteractiveTranscriptEdit(QTextEdit):
         self._right_press_cursor_pos = None
         self._suppress_next_context_menu = False
 
+        # Floating Quick-Action Bubble (Milestone 3.12)
+        self.selection_bubble = TranscriptSelectionBubble(self.viewport())
+        self.selection_bubble.playRequested.connect(self._on_bubble_play)
+        self.selection_bubble.storyRequested.connect(self._on_bubble_story)
+        self.selection_bubble.cutRequested.connect(self._on_bubble_cut)
+        self.selection_bubble.exportRequested.connect(self._on_bubble_export)
+
         self.apply_theme_style("dark")
+
+    def _on_bubble_play(self):
+        win = self.window()
+        if hasattr(win, "play_active_transcript_selection"):
+            win.play_active_transcript_selection()
+        elif hasattr(win, "play_selection"):
+            win.play_selection()
+
+    def _on_bubble_story(self):
+        win = self.window()
+        if hasattr(win, "add_story_from_active_selection"):
+            win.add_story_from_active_selection()
+        self.selection_bubble.hide()
+
+    def _on_bubble_cut(self):
+        win = self.window()
+        if hasattr(win, "exclude_selection"):
+            win.exclude_selection()
+        self.selection_bubble.hide()
+
+    def _on_bubble_export(self):
+        win = self.window()
+        if hasattr(win, "quick_export_selection"):
+            win.quick_export_selection()
+        self.selection_bubble.hide()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.document().isEmpty() or not self.toPlainText().strip():
+            painter = QPainter(self.viewport())
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            rect = self.viewport().rect()
+
+            card_w = min(460, rect.width() - 40)
+            card_h = min(220, rect.height() - 40)
+            if card_w > 120 and card_h > 80:
+                card_x = rect.x() + (rect.width() - card_w) // 2
+                card_y = rect.y() + (rect.height() - card_h) // 2
+                card_rect = QRectF(card_x, card_y, card_w, card_h)
+
+                is_dark = self.current_theme == "dark"
+                pen = QPen(QColor("#3b82f6" if is_dark else "#2563eb"), 1.5, Qt.PenStyle.DashLine)
+                painter.setPen(pen)
+                fill_color = QColor(30, 41, 59, 120) if is_dark else QColor(241, 245, 249, 180)
+                painter.setBrush(fill_color)
+                painter.drawRoundedRect(card_rect, 10.0, 10.0)
+
+                title_font = QFont(self.font())
+                title_font.setPointSize(12)
+                title_font.setBold(True)
+                painter.setFont(title_font)
+                painter.setPen(QColor("#f8fafc" if is_dark else "#0f172a"))
+                t_rect = QRectF(card_x + 16, card_y + 24, card_w - 32, 28)
+                painter.drawText(t_rect, Qt.AlignmentFlag.AlignCenter, "Drop an Audio or Video File Here to Begin")
+
+                sub_font = QFont(self.font())
+                sub_font.setPointSize(9)
+                painter.setFont(sub_font)
+                painter.setPen(QColor("#94a3b8" if is_dark else "#64748b"))
+                s_rect = QRectF(card_x + 16, card_y + 58, card_w - 32, 42)
+                painter.drawText(s_rect, Qt.AlignmentFlag.AlignCenter, "Supports WAV, MP3, MP4, M4A, MKV, FLAC, and OGG\nAuto-generates synchronized word-level transcription")
+
+                btn_font = QFont(self.font())
+                btn_font.setPointSize(9)
+                btn_font.setBold(True)
+                painter.setFont(btn_font)
+                btn_rect = QRectF(card_x + (card_w - 200) // 2, card_y + 115, 200, 32)
+                painter.fillRect(btn_rect, QColor("#2563eb"))
+                painter.setPen(QColor("#ffffff"))
+                painter.drawRoundedRect(btn_rect, 5.0, 5.0)
+                painter.drawText(btn_rect, Qt.AlignmentFlag.AlignCenter, "Open Media File... (Ctrl+O)")
+
+                hint_font = QFont(self.font())
+                hint_font.setPointSize(8)
+                painter.setFont(hint_font)
+                painter.setPen(QColor("#64748b"))
+                h_rect = QRectF(card_x + 16, card_y + 155, card_w - 32, 24)
+                painter.drawText(h_rect, Qt.AlignmentFlag.AlignCenter, "Or click File > Open Media in the menu bar")
+            painter.end()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() and any(u.isLocalFile() for u in event.mimeData().urls()):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls() and any(u.isLocalFile() for u in event.mimeData().urls()):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            for u in event.mimeData().urls():
+                if u.isLocalFile():
+                    path = u.toLocalFile()
+                    win = self.window()
+                    if hasattr(win, "load_media_file"):
+                        win.load_media_file(path)
+                        event.acceptProposedAction()
+                        return
+        super().dropEvent(event)
 
     def set_selection_mode(self, mode):
         self.selection_mode = mode if mode in ("replace", "keep") else "replace"
@@ -1044,6 +1349,8 @@ class InteractiveTranscriptEdit(QTextEdit):
             self.setTextCursor(cursor)
         self.saved_selections = []
         self.setExtraSelections([])
+        if hasattr(self, "selection_bubble"):
+            self.selection_bubble.hide()
         main_win = self.window()
         if hasattr(main_win, "timeline"):
             main_win.timeline.set_transcript_selection_range(None, None)
@@ -1192,6 +1499,16 @@ class InteractiveTranscriptEdit(QTextEdit):
                 main_win.timeline.set_transcript_selection_range(t_range[0], t_range[1])
             if hasattr(main_win, "statusBar") and t_range:
                 main_win.statusBar().showMessage(f"Transcript selection: {format_time(t_range[0])} – {format_time(t_range[1])}")
+
+        if hasattr(self, "selection_bubble") and not self.is_editing_mode:
+            c_rect = self.cursorRect(cursor)
+            b_w = 260
+            b_h = 32
+            bx = max(8, min(self.viewport().width() - b_w - 8, c_rect.center().x() - b_w // 2))
+            by = max(4, c_rect.top() - b_h - 4)
+            self.selection_bubble.setGeometry(bx, by, b_w, b_h)
+            self.selection_bubble.show()
+            self.selection_bubble.raise_()
 
     def apply_theme_style(self, mode):
         self.current_theme = mode
@@ -2223,14 +2540,29 @@ PEAKS_VERSION = 1
 def get_waveform_peak_cache_path(audio_file):
     """
     Return local or appdata path for waveform peak binary cache file.
-    Prefers project-adjacent <media>.peaks, falling back to appdata cache.
+    Prefers project-local hidden cache <Project>/.cache/peaks/<media>.peaks,
+    falling back to appdata cache.
     """
     if not audio_file:
         return None
     try:
-        audio_p = Path(audio_file)
-        if audio_p.parent.exists() and os.access(str(audio_p.parent), os.W_OK):
-            return audio_p.with_name(audio_p.name + ".peaks")
+        audio_p = Path(audio_file).resolve()
+        # Check if parent is 'media' inside a project bundle
+        if audio_p.parent.name.lower() in ("media", "audio"):
+            proj_dir = audio_p.parent.parent
+        else:
+            proj_dir = audio_p.parent
+
+        if proj_dir.exists() and os.access(str(proj_dir), os.W_OK):
+            cache_peaks_dir = proj_dir / ".cache" / "peaks"
+            cache_peaks_dir.mkdir(parents=True, exist_ok=True)
+            if sys.platform == "win32":
+                try:
+                    import ctypes
+                    ctypes.windll.kernel32.SetFileAttributesW(str(proj_dir / ".cache"), 0x02)
+                except Exception:
+                    pass
+            return cache_peaks_dir / f"{audio_p.stem}.peaks"
     except Exception:
         pass
     try:
@@ -2287,32 +2619,49 @@ def read_waveform_peak_cache(audio_file, points_per_second=WAVEFORM_POINTS_PER_S
     """
     Read cached waveform peak envelope from binary cache.
     Returns list of float peaks or None if cache is missing or stale.
+    Supports transparent migration from legacy adjacent .peaks files.
     """
     cache_path = get_waveform_peak_cache_path(audio_file)
-    if not cache_path or not cache_path.exists():
-        return None
-    try:
-        audio_p = Path(audio_file)
-        if audio_p.exists() and audio_p.stat().st_mtime > cache_path.stat().st_mtime:
-            return None
-        with open(cache_path, "rb") as f:
-            magic = f.read(8)
-            if magic != PEAKS_MAGIC:
-                return None
-            header_bytes = f.read(10)
-            if len(header_bytes) < 10:
-                return None
-            version, pps, count = struct.unpack("<HfI", header_bytes)
-            if version != PEAKS_VERSION or count == 0:
-                return None
-            raw_data = f.read(count * 4)
-            if len(raw_data) != count * 4:
-                return None
-            peaks = list(struct.unpack(f"<{count}f", raw_data))
-            levels = build_waveform_pyramid(peaks)
-            return WaveformEnvelope(peaks, levels=levels)
-    except Exception:
-        return None
+    audio_p = Path(audio_file) if audio_file else None
+    
+    # Check if primary cache path exists, otherwise look for legacy adjacent file
+    candidate_paths = []
+    if cache_path:
+        candidate_paths.append((cache_path, False))
+    if audio_p:
+        legacy_path = audio_p.with_name(audio_p.name + ".peaks")
+        if legacy_path != cache_path:
+            candidate_paths.append((legacy_path, True))
+
+    for p, is_legacy in candidate_paths:
+        if not p.exists():
+            continue
+        try:
+            if audio_p and audio_p.exists() and audio_p.stat().st_mtime > p.stat().st_mtime:
+                continue
+            with open(p, "rb") as f:
+                magic = f.read(8)
+                if magic != PEAKS_MAGIC:
+                    continue
+                header_bytes = f.read(10)
+                if len(header_bytes) < 10:
+                    continue
+                version, pps, count = struct.unpack("<HfI", header_bytes)
+                if version != PEAKS_VERSION or count == 0:
+                    continue
+                raw_data = f.read(count * 4)
+                if len(raw_data) != count * 4:
+                    continue
+                peaks = list(struct.unpack(f"<{count}f", raw_data))
+                levels = build_waveform_pyramid(peaks)
+                envelope = WaveformEnvelope(peaks, levels=levels)
+                # If read from legacy path, migrate to project .cache/peaks/ atomically
+                if is_legacy and cache_path and not cache_path.exists():
+                    write_waveform_peak_cache(audio_file, peaks, points_per_second=pps)
+                return envelope
+        except Exception:
+            continue
+    return None
 
 def write_waveform_peak_cache(audio_file, peaks, points_per_second=WAVEFORM_POINTS_PER_SECOND):
     """
@@ -2324,6 +2673,7 @@ def write_waveform_peak_cache(audio_file, peaks, points_per_second=WAVEFORM_POIN
         cache_path = get_waveform_peak_cache_path(audio_file)
         if not cache_path:
             return
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = cache_path.with_name(cache_path.name + ".tmp")
         count = len(peaks)
         with open(tmp_path, "wb") as f:
@@ -2338,15 +2688,22 @@ def write_waveform_peak_cache(audio_file, peaks, points_per_second=WAVEFORM_POIN
 
 
 def invalidate_waveform_peak_cache(audio_file):
-    """Delete any cached waveform peak binary file for audio_file."""
+    """Delete any cached waveform peak binary file for audio_file, including legacy paths."""
+    deleted = False
     try:
         cache_path = get_waveform_peak_cache_path(audio_file)
         if cache_path and cache_path.exists():
             cache_path.unlink(missing_ok=True)
-            return True
+            deleted = True
+        if audio_file:
+            audio_p = Path(audio_file)
+            legacy_p = audio_p.with_name(audio_p.name + ".peaks")
+            if legacy_p.exists():
+                legacy_p.unlink(missing_ok=True)
+                deleted = True
     except Exception:
         pass
-    return False
+    return deleted
 
 
 class WaveformWorker(QObject):
