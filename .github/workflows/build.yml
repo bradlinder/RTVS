@@ -75,16 +75,15 @@ jobs:
         id: get_version
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^[vV]?[0-9] ]]; then
+            VERSION="${GITHUB_REF_NAME}"
           elif [ -n "${{ inputs.release_tag }}" ]; then
             VERSION="${{ inputs.release_tag }}"
-            VERSION="${VERSION#v}"
           else
             VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
           fi
-          # Sanitize duplicate dots or invalid characters (e.g. 2.9..5 -> 2.9.5)
-          VERSION=$(echo "$VERSION" | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
+          # Strip leading v/V and sanitize duplicate dots / invalid characters
+          VERSION=$(echo "$VERSION" | sed -E 's/^[vV]+//' | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
           if [ -z "$VERSION" ]; then
             echo "::error::Could not extract version"
             exit 1
@@ -166,16 +165,15 @@ jobs:
         id: get_version
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^[vV]?[0-9] ]]; then
+            VERSION="${GITHUB_REF_NAME}"
           elif [ -n "${{ inputs.release_tag }}" ]; then
             VERSION="${{ inputs.release_tag }}"
-            VERSION="${VERSION#v}"
           else
             VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
           fi
-          # Sanitize duplicate dots or invalid characters (e.g. 2.9..5 -> 2.9.5)
-          VERSION=$(echo "$VERSION" | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
+          # Strip leading v/V and sanitize duplicate dots / invalid characters
+          VERSION=$(echo "$VERSION" | sed -E 's/^[vV]+//' | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
           if [ -z "$VERSION" ]; then
             echo "::error::Could not extract PROJECT_VERSION"
             exit 1
@@ -301,16 +299,15 @@ jobs:
         id: get_version
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^[vV]?[0-9] ]]; then
+            VERSION="${GITHUB_REF_NAME}"
           elif [ -n "${{ inputs.release_tag }}" ]; then
             VERSION="${{ inputs.release_tag }}"
-            VERSION="${VERSION#v}"
           else
             VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
           fi
-          # Sanitize duplicate dots or invalid characters (e.g. 2.9..5 -> 2.9.5)
-          VERSION=$(echo "$VERSION" | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
+          # Strip leading v/V and sanitize duplicate dots / invalid characters
+          VERSION=$(echo "$VERSION" | sed -E 's/^[vV]+//' | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
           if [ -z "$VERSION" ]; then
             echo "::error::Could not extract version"
             exit 1
@@ -385,16 +382,15 @@ jobs:
         id: get_version
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF_NAME}" =~ ^[vV]?[0-9] ]]; then
+            VERSION="${GITHUB_REF_NAME}"
           elif [ -n "${{ inputs.release_tag }}" ]; then
             VERSION="${{ inputs.release_tag }}"
-            VERSION="${VERSION#v}"
           else
             VERSION=$(python3 -c "import re, pathlib; print(re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('prs_shared.py').read_text(encoding='utf-8')).group(1))")
           fi
-          # Sanitize duplicate dots or invalid characters (e.g. 2.9..5 -> 2.9.5)
-          VERSION=$(echo "$VERSION" | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
+          # Strip leading v/V and sanitize duplicate dots / invalid characters
+          VERSION=$(echo "$VERSION" | sed -E 's/^[vV]+//' | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
           if [ -z "$VERSION" ]; then
             echo "::error::Could not extract version"
             exit 1

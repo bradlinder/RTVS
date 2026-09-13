@@ -118,7 +118,7 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules'] },
+  { ignores: ['dist', 'node_modules', '.vite'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
@@ -205,7 +205,6 @@ declare module '*.md?raw' {
 SRC_APP_TSX = """import React, { useState, useMemo } from 'react';
 import { 
   Radio, 
-  Tv, 
   Search, 
   Filter, 
   ChevronDown, 
@@ -229,7 +228,7 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVersion, setSelectedVersion] = useState('all');
   const [copiedVersion, setCopiedVersion] = useState<string | null>(null);
-  const [expandedVersions, setExpandedVersions] = useState<Record<string, boolean>>({ 'v2.9.6': true, 'v2.9.5': true });
+  const [expandedVersions, setExpandedVersions] = useState<Record<string, boolean>>({ 'v3.0.0-beta': true, 'v2.9.6': true });
 
   const releases: ReleaseSection[] = useMemo(() => {
     const rawSections = CHANGELOG_MARKDOWN.split(/\\n(?=## )/);
@@ -241,7 +240,7 @@ export function App() {
       const headerLine = lines[0];
       if (!headerLine.startsWith('## ')) continue;
 
-      const versionMatch = headerLine.match(/##\\s+(v[\\d\\.]+)/);
+      const versionMatch = headerLine.match(/##\\s+(v[\\w.-]+)/);
       const version = versionMatch ? versionMatch[1] : headerLine.replace('## ', '').trim();
       const title = headerLine.replace('## ', '').trim();
       const content = lines.slice(1);

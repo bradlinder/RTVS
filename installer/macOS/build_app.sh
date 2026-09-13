@@ -4,9 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 APP_NAME="RadioTVSegmenter"
 if [[ -n "${BUILD_VERSION:-}" ]]; then
-  VERSION=$(echo "$BUILD_VERSION" | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
+  VERSION=$(echo "$BUILD_VERSION" | tr -s '.' | tr -cd '0-9.a-zA-Z_-' | sed -E 's/^[vV]+//')
 else
-  VERSION=$(python3 -c "import re, pathlib; v = re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('$ROOT/prs_shared.py').read_text(encoding='utf-8')).group(1); print(re.sub(r'\.+', '.', v.strip().lstrip('v')))")
+  VERSION=$(python3 -c "import re, pathlib; v = re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('$ROOT/prs_shared.py').read_text(encoding='utf-8')).group(1); print(re.sub(r'^[vV]+', '', re.sub(r'\.+', '.', v.strip())))")
 fi
 if [[ -z "$VERSION" ]]; then
   echo "ERROR: Could not extract PROJECT_VERSION from prs_shared.py"

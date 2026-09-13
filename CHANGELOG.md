@@ -1,6 +1,10 @@
 # Changelog
 
 ## v3.0.0-beta
+- **Debian / Ubuntu (.deb) Control Version Compliance**:
+  - Fixed an issue where Debian control files generated with `V3.0.0-beta` or uppercase/prefixed version strings failed `dpkg-deb` validation (`'Version' field value: version number does not start with digit`).
+  - Added Debian-compliant version string sanitization (`DEB_VERSION`) in `installer/Linux/build_deb.sh`, ensuring version strings strictly begin with digits, convert uppercase tags to lowercase, and map hyphens to tildes (`~`).
+  - Sanitized version extraction across all GitHub Actions workflow jobs in `.github/workflows/build.yml`.
 - **Self-Contained Project Bundles & Ingest Preferences**:
   - Added project media ingest behavior preferences (Reference in place vs. Copy into project bundle vs. Ask when saving) in `playback_preferences.py` and `project_export.py`.
   - Added automated disk space preflight verification before media ingestion using `shutil.disk_usage`, prompting confirmation when source media is large (>1 GB) or low disk headroom (<10%) is detected.

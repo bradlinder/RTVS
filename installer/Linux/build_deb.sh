@@ -10,13 +10,19 @@ PKG_NAME="radiotvsegmenter"
 
 # Extract project version from single source of truth (prs_shared.py) or environment
 if [[ -n "${BUILD_VERSION:-}" ]]; then
-    VERSION=$(echo "$BUILD_VERSION" | tr -s '.' | tr -cd '0-9.a-zA-Z_-')
+    VERSION=$(echo "$BUILD_VERSION" | tr -s '.' | tr -cd '0-9.a-zA-Z_~+-' | sed -E 's/^[vV]+//')
 else
-    VERSION=$(python3 -c "import re, pathlib; v = re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('$ROOT/prs_shared.py').read_text(encoding='utf-8')).group(1); print(re.sub(r'\.+', '.', v.strip().lstrip('v')))")
+    VERSION=$(python3 -c "import re, pathlib; v = re.search(r'PROJECT_VERSION\s*=\s*[\x22\x27]([^\x22\x27]+)', pathlib.Path('$ROOT/prs_shared.py').read_text(encoding='utf-8')).group(1); print(re.sub(r'^[vV]+', '', re.sub(r'\.+', '.', v.strip())))")
 fi
 if [[ -z "$VERSION" ]]; then
     echo "[ERROR] Could not extract PROJECT_VERSION from prs_shared.py"
     exit 1
+fi
+
+# Ensure Debian-compliant version string (must start with a digit, lowercase tags/tilde)
+DEB_VERSION=$(echo "$VERSION" | sed -E 's/^[vV]+//' | tr '[:upper:]' '[:lower:]' | tr '-' '~')
+if [[ ! "$DEB_VERSION" =~ ^[0-9] ]]; then
+    DEB_VERSION="0.${DEB_VERSION}"
 fi
 DIST="$ROOT/dist"
 SOURCE_APP="$DIST/$APP_NAME"
@@ -102,7 +108,7 @@ INSTALLED_SIZE=$(du -sk "$STAGING" | cut -f1)
 # Generate DEBIAN/control file
 cat <<EOF > "$STAGING/DEBIAN/control"
 Package: ${PKG_NAME}
-Version: ${VERSION}
+Version: ${DEB_VERSION}
 Section: sound
 Priority: optional
 Architecture: amd64

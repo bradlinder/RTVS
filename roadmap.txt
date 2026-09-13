@@ -51,6 +51,7 @@ TABLE OF CONTENTS & STATUS OVERVIEW
    [x] 2.12 Floating Quick-Action Mini-Toolbar on Transcript Text Selection
    [x] 2.13 Dual-Layer Timeline Navigation (Macro Overview Strip + Detailed Zoom Strip)
    [x] 2.14 Synchronized Color-Coded Story Accents & Waveform Marker Badges
+   [x] 2.15 Debian / Ubuntu (.deb) Control Version Compliance & CI Extraction Sanitization
 
 3. Upcoming Milestone: Media Transcoding, Async Provisioning & Transcript Cleaning (Phase 2 - Planned for v3.1) [NOT STARTED]
    [ ] 3.1 Media Transcoding & Format Conversion on Export (Audio & Video Codecs)
@@ -178,6 +179,11 @@ TABLE OF CONTENTS & STATUS OVERVIEW
 [x] 2.14 SYNCHRONIZED COLOR-CODED STORY ACCENTS & WAVEFORM MARKER BADGES
 -------------------------------------------------------------------------
 - Implemented `StoryCardDelegate` with 8-color palette left border accents, matching timeline span tinting, and transcript story highlights.
+
+[x] 2.15 DEBIAN / UBUNTU (.DEB) CONTROL VERSION COMPLIANCE & CI EXTRACTION SANITIZATION
+----------------------------------------------------------------------------------------
+- Hardened `installer/Linux/build_deb.sh` to construct a clean Debian policy-compliant `DEB_VERSION` (starts with digit, lowercase tags, and hyphen-to-tilde mapping).
+- Sanitized workflow version extraction in `.github/workflows/build.yml` across all jobs to trim leading `v`/`V` prefixes and handle git release tag inputs safely.
 
 ================================================================================
 3. UPCOMING MILESTONE: MEDIA TRANSCODING, ASYNC PROVISIONING & TRANSCRIPT CLEANING (Phase 2 - Planned for v3.1) [NOT STARTED]
