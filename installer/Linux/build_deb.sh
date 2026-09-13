@@ -19,8 +19,13 @@ if [[ -z "$VERSION" ]]; then
     exit 1
 fi
 
-# Ensure Debian-compliant version string (must start with a digit, lowercase tags/tilde)
-DEB_VERSION=$(echo "$VERSION" | sed -E 's/^[vV]+//' | tr '[:upper:]' '[:lower:]' | tr '-' '~')
+# Ensure Debian-compliant version string (Debian version numbers prohibit underscores and uppercase)
+# 1. Strip leading 'v' / 'V'
+# 2. Lowercase all characters
+# 3. Replace hyphens with tildes '~' so pre-releases sort before final releases (e.g. 3.0.0~beta.2 < 3.0.0)
+# 4. Replace underscores '_' with dots '.' (Debian Policy § 5.6.12 strictly forbids underscores)
+# 5. Remove any other disallowed characters (only 0-9, a-z, ., +, ~, - are allowed)
+DEB_VERSION=$(echo "$VERSION" | sed -E 's/^[vV]+//' | tr '[:upper:]' '[:lower:]' | tr '-' '~' | tr '_' '.' | tr -cd '0-9a-z.+~-')
 if [[ ! "$DEB_VERSION" =~ ^[0-9] ]]; then
     DEB_VERSION="0.${DEB_VERSION}"
 fi
