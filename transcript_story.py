@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter v3.0.0-beta.3 — transcript story responsibilities.
+"""Radio & TV Segmenter v3.0.0-beta.4 — transcript story responsibilities.
 
 
 Methods intentionally retain the MainWindow-facing API so behavior remains
@@ -162,19 +162,20 @@ class TranscriptStoryMixin:
             )
 
             notes_html = ""
-            seg_indices = list(dict.fromkeys(item["seg_idx"] for item in p_words if "seg_idx" in item))
-            segments_list = self.transcript.get("segments", []) if self.transcript else []
-            for idx in seg_indices:
-                if 0 <= idx < len(segments_list):
-                    s_note = segments_list[idx].get("notes", "").strip()
-                    if s_note:
-                        esc_note = html.escape(s_note).replace("\n", "<br/>")
-                        notes_html += (
-                            f'<div style="margin-top: 4px; margin-bottom: 6px; padding: 4px 8px; '
-                            f'background-color: rgba(255, 193, 7, 0.15); border-left: 3px solid #ffc107; '
-                            f'color: #e6b800; font-size: 0.9em; border-radius: 4px;">'
-                            f'<b>Note:</b> {esc_note}</div>'
-                        )
+            if getattr(self, "show_notes", True):
+                seg_indices = list(dict.fromkeys(item["seg_idx"] for item in p_words if "seg_idx" in item))
+                segments_list = self.transcript.get("segments", []) if self.transcript else []
+                for idx in seg_indices:
+                    if 0 <= idx < len(segments_list):
+                        s_note = segments_list[idx].get("notes", "").strip()
+                        if s_note:
+                            esc_note = html.escape(s_note).replace("\n", "<br/>")
+                            notes_html += (
+                                f'<div style="margin-top: 4px; margin-bottom: 6px; padding: 4px 8px; '
+                                f'background-color: rgba(255, 193, 7, 0.15); border-left: 3px solid #ffc107; '
+                                f'color: #e6b800; font-size: 0.9em; border-radius: 4px;">'
+                                f'<b>Note:</b> {esc_note}</div>'
+                            )
 
             if display_mode in ("split", "bilingual") and es_segments:
                 es_text_parts = [es_segments[idx].get("text", "") for idx in seg_indices if 0 <= idx < len(es_segments)]
@@ -411,8 +412,8 @@ class TranscriptStoryMixin:
         current_note = seg.get("notes", "")
         text, ok = QInputDialog.getMultiLineText(
             self,
-            "Edit Segment Note",
-            f"Notes for segment {seg_idx + 1} ({format_time(seg.get('start', 0.0))}):",
+            "Add Note",
+            f"Note for segment {seg_idx + 1} ({format_time(seg.get('start', 0.0))}):",
             current_note,
         )
         if ok:

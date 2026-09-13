@@ -309,7 +309,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "3.0.0-beta.3"
+PROJECT_VERSION = "3.0.0-beta.4"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 
@@ -1121,6 +1121,7 @@ class TranscriptSelectionBubble(QFrame):
     storyRequested = Signal()
     cutRequested = Signal()
     exportRequested = Signal()
+    noteRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1144,6 +1145,12 @@ class TranscriptSelectionBubble(QFrame):
         self.story_btn.setToolTip("Create a new story cut from highlighted text (Enter)")
         self.story_btn.clicked.connect(self.storyRequested.emit)
         layout.addWidget(self.story_btn)
+
+        self.note_btn = QToolButton(self)
+        self.note_btn.setText("📝 Note")
+        self.note_btn.setToolTip("Add Note to highlighted section")
+        self.note_btn.clicked.connect(self.noteRequested.emit)
+        layout.addWidget(self.note_btn)
 
         self.cut_btn = QToolButton(self)
         self.cut_btn.setText("✂ Exclude")
@@ -1228,6 +1235,7 @@ class InteractiveTranscriptEdit(QTextEdit):
         self.selection_bubble = TranscriptSelectionBubble(self.viewport())
         self.selection_bubble.playRequested.connect(self._on_bubble_play)
         self.selection_bubble.storyRequested.connect(self._on_bubble_story)
+        self.selection_bubble.noteRequested.connect(self._on_bubble_note)
         self.selection_bubble.cutRequested.connect(self._on_bubble_cut)
         self.selection_bubble.exportRequested.connect(self._on_bubble_export)
 
@@ -1244,6 +1252,18 @@ class InteractiveTranscriptEdit(QTextEdit):
         win = self.window()
         if hasattr(win, "add_story_from_active_selection"):
             win.add_story_from_active_selection()
+        self.selection_bubble.hide()
+
+    def _on_bubble_note(self):
+        win = self.window()
+        if hasattr(win, "add_note_dialog"):
+            win.add_note_dialog()
+        elif hasattr(win, "edit_segment_note_dialog"):
+            cursor = self.textCursor()
+            seg_idx = self.get_segment_index_at_cursor(cursor)
+            if seg_idx is None:
+                seg_idx = cursor.blockNumber()
+            win.edit_segment_note_dialog(seg_idx)
         self.selection_bubble.hide()
 
     def _on_bubble_cut(self):
@@ -1864,12 +1884,35 @@ class InteractiveTranscriptEdit(QTextEdit):
             Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
             Qt.Key.Key_Home, Qt.Key.Key_End, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown
         ):
-            ts = self.get_timestamp_at_cursor(self.textCursor())
-            if ts is not None and ts >= 0:
-                main_win = self.window()
-                if hasattr(main_win, "seek_to"):
+            main_win = self.window()
+            skip_sec = float(getattr(main_win, "skip_seconds", 5.0) or 5.0)
+            cursor = self.textCursor()
+            key = event.key()
+
+            if key == Qt.Key.Key_Home:
+                cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+                self.setTextCursor(cursor)
+                self.ensureCursorVisible()
+                event.accept()
+                return
+            elif key == Qt.Key.Key_End:
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+                self.setTextCursor(cursor)
+                self.ensureCursorVisible()
+                event.accept()
+                return
+            elif key in (Qt.Key.Key_Left, Qt.Key.Key_Up, Qt.Key.Key_PageUp):
+                if hasattr(main_win, "seek_relative"):
                     main_win.last_position_source = "transcript"
-                    main_win.seek_to(ts)
+                    main_win.seek_relative(-skip_sec)
+                event.accept()
+                return
+            elif key in (Qt.Key.Key_Right, Qt.Key.Key_Down, Qt.Key.Key_PageDown):
+                if hasattr(main_win, "seek_relative"):
+                    main_win.last_position_source = "transcript"
+                    main_win.seek_relative(skip_sec)
+                event.accept()
+                return
 
     def show_context_menu(self, position):
         """Context menu for both viewing and editing modes.  Speaker labels
@@ -1989,7 +2032,7 @@ class InteractiveTranscriptEdit(QTextEdit):
             add_vocab.triggered.connect(_add_vocab_from_selection)
             menu.addAction(add_vocab)
 
-            edit_note_act = QAction("📝 Edit Segment Note...", self)
+            edit_note_act = QAction("📝 Add Note...", self)
             target_seg = self.get_segment_index_at_cursor(hit_cursor)
             if target_seg is None:
                 target_seg = hit_cursor.blockNumber()

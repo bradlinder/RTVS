@@ -350,8 +350,11 @@ class UnifiedExportDialog(QDialog):
         self.cb_speakers.setChecked(True)
         self.cb_timestamps = QCheckBox("Include Timestamps")
         self.cb_timestamps.setChecked(False)
+        self.cb_notes = QCheckBox("Include Segment & Project Notes")
+        self.cb_notes.setChecked(True)
         content_layout.addWidget(self.cb_speakers)
         content_layout.addWidget(self.cb_timestamps)
+        content_layout.addWidget(self.cb_notes)
 
         lang_layout = QHBoxLayout()
         self.cb_en = QCheckBox("English")
@@ -1926,6 +1929,7 @@ class UnifiedExportDialog(QDialog):
         # Content options
         self.cb_speakers.setChecked(str(settings.value("export_opt_include_speakers", "true")).lower() in {"1", "true", "yes"})
         self.cb_timestamps.setChecked(str(settings.value("export_opt_include_timestamps", "false")).lower() in {"1", "true", "yes"})
+        self.cb_notes.setChecked(str(settings.value("export_opt_include_notes", "true")).lower() in {"1", "true", "yes"})
         self.cb_en.setChecked(str(settings.value("export_opt_include_en", "true")).lower() in {"1", "true", "yes"})
         if self.cb_es.isEnabled():
             self.cb_es.setChecked(str(settings.value("export_opt_include_es", "true")).lower() in {"1", "true", "yes"})
@@ -1964,6 +1968,7 @@ class UnifiedExportDialog(QDialog):
 
         settings.setValue("export_opt_include_speakers", self.cb_speakers.isChecked())
         settings.setValue("export_opt_include_timestamps", self.cb_timestamps.isChecked())
+        settings.setValue("export_opt_include_notes", self.cb_notes.isChecked())
         settings.setValue("export_opt_include_en", self.cb_en.isChecked())
         settings.setValue("export_opt_include_es", self.cb_es.isChecked())
 
@@ -2139,6 +2144,7 @@ class UnifiedExportDialog(QDialog):
             options = {
                 "include_speakers": self.cb_speakers.isChecked(),
                 "include_timestamps": self.cb_timestamps.isChecked(),
+                "include_notes": self.cb_notes.isChecked(),
                 "include_english": self.cb_en.isChecked(),
                 "include_spanish": self.cb_es.isChecked(),
             }
@@ -3978,6 +3984,22 @@ class ProjectExportMixin:
 
                             p.add_run(paragraph_text)
                             p.paragraph_format.space_after = Pt(6)
+
+                            if options.get("include_notes", True):
+                                src_idx = block.get("_source_index")
+                                source_segs = self.transcript.get("segments", []) if self.transcript else []
+                                if src_idx is not None and 0 <= src_idx < len(source_segs):
+                                    seg_note = source_segs[src_idx].get("notes", "").strip()
+                                    if seg_note:
+                                        p_note = document.add_paragraph()
+                                        r_note_lbl = p_note.add_run("Note: ")
+                                        r_note_lbl.bold = True
+                                        r_note_lbl.font.color.rgb = RGBColor(180, 130, 0)
+                                        r_note_txt = p_note.add_run(seg_note)
+                                        r_note_txt.font.italic = True
+                                        r_note_txt.font.color.rgb = RGBColor(180, 130, 0)
+                                        p_note.paragraph_format.left_indent = Pt(18)
+                                        p_note.paragraph_format.space_after = Pt(6)
                     document.save(docx_file)
 
                 # Export Subtitles to Transcripts subfolder

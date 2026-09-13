@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.0-beta.4
+- **Transcript Navigation & Selection Jumping**:
+  - Implemented timestamp and speaker label cursor navigation: clicking any timestamp link `[00:00]` or speaker header in `InteractiveTranscriptEdit` seeks playback to that exact second and positions text cursor precisely at the clicked location.
+  - Paragraph-scoped `Home` and `End` key navigation moving the text cursor strictly to the start or end of the current paragraph block rather than jumping across the full transcript document.
+  - Arrow key skipping in transcript edit view synchronized with user playback skip preferences (`playback_skip_interval`).
+- **Interactive Notes & Highlighting System**:
+  - Multi-line text note input supporting spaces, tabs, and paragraph breaks via custom `NoteInputDialog`.
+  - Rich document-style section highlighting: text selections assigned notes are highlighted in distinct amber/yellow background styling (`#fef08a` / `#854d0e`), separate from active selection highlights.
+  - Hover tooltip badges and right-click context menu options to view, edit, or delete notes attached to transcript segments.
+  - "Add Note" trigger integrated into floating selection bubble and context menu.
+- **DOCX Export with Notes**:
+  - Updated `UnifiedExportDialog` and `project_export.py` with an "Include Segment & Project Notes" toggle (`export_opt_include_notes`).
+  - Native Word document export renders formatted note paragraphs with custom indented callouts and distinct styling.
+
 ## v3.0.0-beta.3
 - **Single-Instance Application Enforcement & Preference**:
   - Added preference setting in `playback_preferences.py` ("Instance Handling Mode") allowing users to choose between single-instance mode and multi-instance mode.
