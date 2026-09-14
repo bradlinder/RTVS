@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.2-dev-1
+- **Native PDF Document Export**:
+  - Implemented standalone `TranscriptPdfWriter` generating native, dependency-free PDF 1.4 vector documents for individual story transcripts and full episode transcripts.
+  - Added PDF format checkbox (`PDF document (.pdf)`) to Local Export formats alongside Text (.txt) and Word DOCX (.docx).
+  - High-precision typography layout with Helvetica, Helvetica-Bold, and Helvetica-Oblique font resources, headers, metadata ribbons, line dividers, word-wrapped body paragraphs, timestamps, and speaker labels.
+  - Professional comment callouts in PDF exports with yellow/amber side borders, distinctive backgrounds, and indented typography.
+  - Automatic multi-page pagination with running page headers, dividers, and document footers ("Page X" and "Radio & TV Story Segmenter").
+  - Export settings persistence (`export_format_pdf`) via `QSettings` and multi-format batch validation.
+- **Collapsible Export Center Sections**:
+  - Re-architected `UnifiedExportDialog` with reusable `CollapsibleSection` container widgets featuring animated disclosure chevrons, count badges, and clean rounded panels.
+  - Organized Local Files, WordPress, and YouTube Studio export panels into clean, individually expandable and collapsible sections to optimize window height and visibility.
+  - Added global "Collapse All / Expand All" toggle button to the main export header for one-click workflow navigation.
+
 ## v3.0.1-beta-1
 - **Transcript Rich Text Formatting Toolbar & Styling Engine**:
   - Added dedicated formatting toolbar above the transcript view that automatically appears when Editing Mode is toggled on (`Edit Transcript`).

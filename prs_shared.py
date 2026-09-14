@@ -148,6 +148,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QStyle,
     QToolButton,
+    QLayout,
 )
 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -304,13 +305,117 @@ class ResizableTextEdit(QWidget):
         return self.text_edit.textChanged
 
 
+class CollapsibleSection(QWidget):
+    """A clean, collapsible and expandable section widget with a styled toggle button,
+    expand/collapse indicator arrow (▾ / ▸), section title, optional subtitle/summary badge,
+    and a content container."""
+
+    toggled = Signal(bool)
+
+    def __init__(self, title: str = "", parent=None, is_expanded: bool = True, subtitle: str = ""):
+        super().__init__(parent)
+        self._is_expanded = bool(is_expanded)
+        self._title = title
+        self._subtitle = subtitle
+
+        self._main_layout = QVBoxLayout(self)
+        self._main_layout.setContentsMargins(0, 0, 0, 4)
+        self._main_layout.setSpacing(0)
+
+        # Header button
+        self.toggle_btn = QToolButton(self)
+        self.toggle_btn.setCheckable(True)
+        self.toggle_btn.setChecked(self._is_expanded)
+        self.toggle_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggle_btn.clicked.connect(self._on_btn_clicked)
+
+        # Content container
+        self.content_widget = QWidget(self)
+        self.content_widget.setObjectName("CollapsibleContent")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(10, 8, 10, 10)
+        self.content_layout.setSpacing(8)
+
+        self._main_layout.addWidget(self.toggle_btn)
+        self._main_layout.addWidget(self.content_widget)
+
+        self._update_ui()
+        self.content_widget.setVisible(self._is_expanded)
+
+    def _update_ui(self):
+        arrow = "▾" if self._is_expanded else "▸"
+        sub = f"  ({self._subtitle})" if self._subtitle else ""
+        self.toggle_btn.setText(f" {arrow}  {self._title}{sub}")
+
+        radius = "6px 6px 0px 0px" if self._is_expanded else "6px"
+        border_bottom = "none" if self._is_expanded else "1px solid #334155"
+
+        self.toggle_btn.setStyleSheet(f"""
+            QToolButton {{
+                background-color: #1e293b;
+                color: #f1f5f9;
+                font-weight: bold;
+                font-size: 12px;
+                border: 1px solid #334155;
+                border-bottom: {border_bottom};
+                border-radius: {radius};
+                padding: 7px 12px;
+                text-align: left;
+            }}
+            QToolButton:hover {{
+                background-color: #283548;
+                border-color: #475569;
+            }}
+            QToolButton:pressed {{
+                background-color: #0f172a;
+            }}
+        """)
+
+        self.content_widget.setStyleSheet("""
+            QWidget#CollapsibleContent {
+                background-color: rgba(15, 23, 42, 0.35);
+                border: 1px solid #334155;
+                border-top: none;
+                border-radius: 0px 0px 6px 6px;
+            }
+        """)
+
+    def _on_btn_clicked(self):
+        self.set_expanded(self.toggle_btn.isChecked())
+
+    def set_expanded(self, expanded: bool):
+        self._is_expanded = bool(expanded)
+        self.toggle_btn.setChecked(self._is_expanded)
+        self.content_widget.setVisible(self._is_expanded)
+        self._update_ui()
+        self.toggled.emit(self._is_expanded)
+
+    def is_expanded(self) -> bool:
+        return self._is_expanded
+
+    def set_title(self, title: str):
+        self._title = title
+        self._update_ui()
+
+    def set_subtitle(self, subtitle: str):
+        self._subtitle = subtitle
+        self._update_ui()
+
+    def add_widget(self, widget: QWidget):
+        self.content_layout.addWidget(widget)
+
+    def add_layout(self, layout: QLayout):
+        self.content_layout.addLayout(layout)
+
+
 # ============================================================
 # Application constants
 # ============================================================
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "3.0.1-beta-1"
+PROJECT_VERSION = "3.0.2-dev-1"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 
@@ -677,25 +782,26 @@ class ExportDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # Export Scope Selection
-        scope_group = QGroupBox("Export Scope")
-        scope_layout = QVBoxLayout(scope_group)
+        self.scope_section = CollapsibleSection("Export Scope", self, is_expanded=True)
         self.scope_combo = QComboBox()
         self.scope_combo.addItem("Full Episode", "full")
         self.scope_combo.addItem("All Stories", "all_stories")
         self.scope_combo.addItem("Selected Stories Only", "selected_stories")
         self.scope_combo.addItem("Full Episode & All Stories", "full_and_all_stories")
-        scope_layout.addWidget(self.scope_combo)
-        layout.addWidget(scope_group)
+        self.scope_section.add_widget(self.scope_combo)
+        layout.addWidget(self.scope_section)
 
         # Export Format Options
-        format_group = QGroupBox("Export Formats")
-        format_layout = QVBoxLayout(format_group)
+        self.format_section = CollapsibleSection("Export Formats", self, is_expanded=True)
 
         self.txt_checkbox = QCheckBox("Text (.txt)")
         self.txt_checkbox.setChecked(True)
 
         self.docx_checkbox = QCheckBox("Word Document (.docx)")
         self.docx_checkbox.setChecked(True)
+
+        self.pdf_checkbox = QCheckBox("PDF Document (.pdf)")
+        self.pdf_checkbox.setChecked(True)
 
         self.media_checkbox = QCheckBox("Export Audio / Video Clips")
         if not self.has_media:
@@ -709,11 +815,12 @@ class ExportDialog(QDialog):
         self.notes_checkbox = QCheckBox("Include Segment & Project Notes")
         self.notes_checkbox.setChecked(True)
 
-        format_layout.addWidget(self.txt_checkbox)
-        format_layout.addWidget(self.docx_checkbox)
-        format_layout.addWidget(self.notes_checkbox)
-        format_layout.addWidget(self.media_checkbox)
-        layout.addWidget(format_group)
+        self.format_section.add_widget(self.txt_checkbox)
+        self.format_section.add_widget(self.docx_checkbox)
+        self.format_section.add_widget(self.pdf_checkbox)
+        self.format_section.add_widget(self.notes_checkbox)
+        self.format_section.add_widget(self.media_checkbox)
+        layout.addWidget(self.format_section)
 
         # Base Filename Input
         form_layout = QFormLayout()
@@ -739,6 +846,7 @@ class ExportDialog(QDialog):
             "scope": self.scope_combo.currentData(),
             "txt": self.txt_checkbox.isChecked(),
             "docx": self.docx_checkbox.isChecked(),
+            "pdf": self.pdf_checkbox.isChecked(),
             "include_notes": self.notes_checkbox.isChecked(),
             "media": self.media_checkbox.isChecked(),
             "filename": self.filename_input.text().strip() or self.default_name,

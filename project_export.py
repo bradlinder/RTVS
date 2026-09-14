@@ -216,6 +216,203 @@ class YouTubeAssistedUploadGuideDialog(QDialog):
             QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
 
+class TranscriptPdfWriter:
+    """Lightweight, self-contained PDF 1.4 vector generator for transcript documents.
+    Generates fully compliant, paginated PDF documents with Helvetica fonts, headers,
+    word-wrapped paragraphs, timestamps, speaker labels, comment callout boxes, and footers."""
+
+    def __init__(self, doc_title="Transcript", page_width=612, page_height=792, margin=54):
+        if isinstance(doc_title, (int, float)):
+            margin = page_height if isinstance(page_height, (int, float)) and page_height < 100 else margin
+            page_height = page_width if isinstance(page_width, (int, float)) else 792.0
+            page_width = float(doc_title)
+            doc_title = "Transcript"
+        self.doc_title = str(doc_title or "Transcript")
+        self.width = float(page_width)
+        self.height = float(page_height)
+        self.margin = float(margin)
+        self.content_width = self.width - (2 * self.margin)
+        self.pages = []
+        self.cur_stream = io.BytesIO()
+        self.y = self.height - self.margin
+        self.current_page = 1
+
+    def _escape_pdf(self, s: str) -> str:
+        out = []
+        for ch in s:
+            if ch in ('(', ')', '\\'):
+                out.append('\\' + ch)
+            elif ord(ch) < 32 or ord(ch) > 126:
+                try:
+                    b = ch.encode('cp1252')
+                    for byte in b:
+                        out.append(f'\\{byte:03o}')
+                except Exception:
+                    out.append('?')
+            else:
+                out.append(ch)
+        return ''.join(out)
+
+    def _flush_page(self):
+        footer_cmd = (
+            f'0.6 0.65 0.7 RG 0.75 w\n'
+            f'{self.margin} 42 m {self.width - self.margin} 42 l S\n'
+            f'BT /F1 8 Tf 0.45 0.5 0.55 rg\n'
+            f'{self.margin} 30 Td (Radio & TV Story Segmenter) Tj\n'
+            f'{self.width - self.margin - 55} 30 Td (Page {self.current_page}) Tj\n'
+            f'ET\n'
+        )
+        self.cur_stream.write(footer_cmd.encode('latin1', errors='replace'))
+        self.pages.append(self.cur_stream.getvalue())
+        self.cur_stream = io.BytesIO()
+        self.current_page += 1
+        self.y = self.height - self.margin
+
+    def check_space(self, needed_pt: float):
+        if self.y - needed_pt < (self.margin + 40):
+            self._flush_page()
+
+    def add_header(self, title: str, subtitle: str = None):
+        self.check_space(60)
+        title_esc = self._escape_pdf(title)
+        cmd = f'BT /F2 16 Tf 0.1 0.15 0.25 rg {self.margin} {self.y} Td ({title_esc}) Tj ET\n'
+        self.cur_stream.write(cmd.encode('latin1', errors='replace'))
+        self.y -= 22
+
+        if subtitle:
+            sub_esc = self._escape_pdf(subtitle)
+            cmd = f'BT /F3 9.5 Tf 0.4 0.45 0.55 rg {self.margin} {self.y} Td ({sub_esc}) Tj ET\n'
+            self.cur_stream.write(cmd.encode('latin1', errors='replace'))
+            self.y -= 14
+
+        cmd = f'0.2 0.4 0.8 RG 1.5 w\n{self.margin} {self.y} m {self.width - self.margin} {self.y} l S\n'
+        self.cur_stream.write(cmd.encode('latin1', errors='replace'))
+        self.y -= 16
+
+    def _approx_char_width(self, font_name: str, size: float) -> float:
+        return size * (0.56 if 'Bold' in font_name else 0.51)
+
+    def _wrap_text(self, text: str, max_width: float, font_name: str, size: float):
+        char_w = self._approx_char_width(font_name, size)
+        max_chars = max(10, int(max_width / char_w))
+        words = text.split()
+        lines = []
+        cur_line = []
+        cur_len = 0
+        for w in words:
+            w_len = len(w)
+            if cur_len + (1 if cur_line else 0) + w_len <= max_chars:
+                cur_line.append(w)
+                cur_len += (1 if cur_line else 0) + w_len
+            else:
+                if cur_line:
+                    lines.append(' '.join(cur_line))
+                cur_line = [w]
+                cur_len = w_len
+        if cur_line:
+            lines.append(' '.join(cur_line))
+        return lines
+
+    def add_paragraph(self, text: str, speaker: str = '', timestamp: str = '', comment: str = ''):
+        font_size = 10.0
+        line_height = 14.0
+        prefix_parts = []
+        if timestamp:
+            prefix_parts.append(timestamp)
+        if speaker:
+            prefix_parts.append(f'{speaker}:')
+        prefix_str = ' '.join(prefix_parts) + (' ' if prefix_parts else '')
+
+        full_text = prefix_str + text
+        lines = self._wrap_text(full_text, self.content_width, 'Helvetica', font_size)
+
+        needed_height = (len(lines) * line_height) + 8
+        self.check_space(min(needed_height, 50))
+
+        for line in lines:
+            self.check_space(line_height)
+            line_esc = self._escape_pdf(line)
+            cmd = f'BT /F1 {font_size} Tf 0.15 0.15 0.15 rg {self.margin} {self.y} Td ({line_esc}) Tj ET\n'
+            self.cur_stream.write(cmd.encode('latin1', errors='replace'))
+            self.y -= line_height
+
+        self.y -= 4
+
+        if comment:
+            c_lines = self._wrap_text(comment, self.content_width - 24, 'Helvetica-Oblique', 9.0)
+            box_h = (len(c_lines) * 12.5) + 12
+            self.check_space(box_h + 4)
+            box_y = self.y - box_h + 6
+            bg_cmd = (
+                f'0.98 0.97 0.93 rg\n'
+                f'{self.margin + 12} {box_y} {self.content_width - 12} {box_h} re f\n'
+                f'0.85 0.65 0.15 RG 2 w\n'
+                f'{self.margin + 12} {box_y} m {self.margin + 12} {box_y + box_h} l S\n'
+            )
+            self.cur_stream.write(bg_cmd.encode('latin1', errors='replace'))
+
+            text_y = self.y - 4
+            lbl_esc = self._escape_pdf('Comment: ')
+            cmd = f'BT /F2 9.0 Tf 0.7 0.45 0.05 rg {self.margin + 20} {text_y} Td ({lbl_esc}) Tj ET\n'
+            self.cur_stream.write(cmd.encode('latin1', errors='replace'))
+
+            for c_idx, c_l in enumerate(c_lines):
+                c_esc = self._escape_pdf(c_l)
+                x_off = self.margin + 20 + (50 if c_idx == 0 else 0)
+                cmd = f'BT /F3 9.0 Tf 0.45 0.35 0.1 rg {x_off} {text_y} Td ({c_esc}) Tj ET\n'
+                self.cur_stream.write(cmd.encode('latin1', errors='replace'))
+                text_y -= 12.5
+            self.y = box_y - 6
+
+    def finish(self) -> bytes:
+        if self.cur_stream.tell() > 0 or not self.pages:
+            self._flush_page()
+
+        out = io.BytesIO()
+        out.write(b'%PDF-1.4\n%\xe2\xe3\xcf\xd3\n')
+        offsets = {}
+
+        def write_obj(num, content):
+            offsets[num] = out.tell()
+            out.write(f'{num} 0 obj\n'.encode('ascii'))
+            out.write(content)
+            out.write(b'\nendobj\n')
+
+        num_pages = len(self.pages)
+        page_obj_ids = [6 + i * 2 for i in range(num_pages)]
+        content_obj_ids = [7 + i * 2 for i in range(num_pages)]
+
+        write_obj(1, b'<< /Type /Catalog /Pages 2 0 R >>')
+        kids_str = ' '.join(f'{pid} 0 R' for pid in page_obj_ids)
+        write_obj(2, f'<< /Type /Pages /Kids [{kids_str}] /Count {num_pages} >>'.encode('ascii'))
+        write_obj(3, b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>')
+        write_obj(4, b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>')
+        write_obj(5, b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding >>')
+
+        for i, stream_data in enumerate(self.pages):
+            p_id = page_obj_ids[i]
+            c_id = content_obj_ids[i]
+            res = b'<< /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >>'
+            page_dict = f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {self.width} {self.height}] /Contents {c_id} 0 R /Resources {res.decode("ascii")} >>'.encode('ascii')
+            write_obj(p_id, page_dict)
+            stream_dict = f'<< /Length {len(stream_data)} >>\nstream\n'.encode('ascii') + stream_data + b'\nendstream'
+            write_obj(c_id, stream_dict)
+
+        xref_offset = out.tell()
+        total_objs = 5 + num_pages * 2
+        out.write(f'xref\n0 {total_objs + 1}\n'.encode('ascii'))
+        out.write(b'0000000000 65535 f \n')
+        for obj_num in range(1, total_objs + 1):
+            offset = offsets.get(obj_num, 0)
+            out.write(f'{offset:010d} 00000 n \n'.encode('ascii'))
+
+        out.write(f'trailer\n<< /Size {total_objs + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n'.encode('ascii'))
+        return out.getvalue()
+
+    def get_pdf_bytes(self) -> bytes:
+        return self.finish()
+
+
 class UnifiedExportDialog(QDialog):
     """Unified Export Center supporting Local Files, WordPress Draft Posts, and YouTube Studio Assisted Uploads."""
 
@@ -223,25 +420,54 @@ class UnifiedExportDialog(QDialog):
         super().__init__(parent or main_window)
         self.main_window = main_window
         self.setWindowTitle("Export")
-        self.setMinimumWidth(820)
-        self.setMinimumHeight(640)
-        self.resize(880, 720)
+        self.setMinimumWidth(780)
+        self.setMinimumHeight(520)
+        self.resize(840, 620)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
 
-        # Target Selection: Local vs WordPress vs YouTube
-        dest_group = QGroupBox("Export Destination")
-        dest_layout = QHBoxLayout(dest_group)
+        # Header bar with Expand / Collapse All control
+        hdr_row = QHBoxLayout()
+        hdr_row.setContentsMargins(2, 0, 2, 0)
+        hdr_label = QLabel("<b>Unified Export Center</b>")
+        hdr_label.setStyleSheet("font-size: 13px; color: #f1f5f9;")
+        self.toggle_all_btn = QPushButton("▾ Collapse All")
+        self.toggle_all_btn.setToolTip("Toggle expand/collapse for all sections on the current page")
+        self.toggle_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                color: #94a3b8;
+                border: 1px solid #334155;
+                border-radius: 4px;
+                padding: 3px 10px;
+                font-size: 11px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #334155;
+                color: #f1f5f9;
+            }
+        """)
+        self.toggle_all_btn.clicked.connect(self._toggle_all_sections)
+        hdr_row.addWidget(hdr_label)
+        hdr_row.addStretch()
+        hdr_row.addWidget(self.toggle_all_btn)
+        layout.addLayout(hdr_row)
+
+        # Target Selection: Local vs WordPress vs YouTube (Collapsible)
+        self.dest_section = CollapsibleSection("Export Destination", self, is_expanded=True)
+        dest_content_layout = QHBoxLayout()
         self.radio_local = QRadioButton("Local Files (Media && Transcripts)")
         self.radio_wp = QRadioButton("WordPress Draft Post")
         self.radio_youtube = QRadioButton("YouTube Studio (Assisted Upload)")
         self.radio_local.setChecked(True)
-        dest_layout.addWidget(self.radio_local)
-        dest_layout.addWidget(self.radio_wp)
-        dest_layout.addWidget(self.radio_youtube)
-        layout.addWidget(dest_group)
+        dest_content_layout.addWidget(self.radio_local)
+        dest_content_layout.addWidget(self.radio_wp)
+        dest_content_layout.addWidget(self.radio_youtube)
+        self.dest_section.add_layout(dest_content_layout)
+        layout.addWidget(self.dest_section)
 
         wp_enabled = hasattr(self.main_window, "plugin_manager") and self.main_window.plugin_manager.is_plugin_enabled("wordpress")
         yt_enabled = hasattr(self.main_window, "plugin_manager") and self.main_window.plugin_manager.is_plugin_enabled("youtube")
@@ -252,7 +478,7 @@ class UnifiedExportDialog(QDialog):
             self.radio_youtube.setVisible(False)
             self.radio_youtube.setEnabled(False)
         if not wp_enabled and not yt_enabled:
-            dest_group.setVisible(False)
+            self.dest_section.setVisible(False)
 
         self._temp_preview_files = set()
         self._is_video_project = bool(getattr(self.main_window, "current_media_is_video", False))
@@ -266,11 +492,10 @@ class UnifiedExportDialog(QDialog):
         self._yt_scrub_timer.setInterval(120)
         self._yt_scrub_timer.timeout.connect(self._on_yt_scrub_timer_timeout)
 
-        # Scope Selection
+        # Scope Selection (Collapsible)
         is_music = getattr(self.main_window, "story_detection_mode", "voice") == "music"
         term_plural = "Songs" if is_music else "Stories"
-        scope_group = QGroupBox("Export Scope")
-        scope_layout = QVBoxLayout(scope_group)
+        self.scope_section = CollapsibleSection("Export Scope", self, is_expanded=True)
         self.scope_combo = QComboBox()
         self.scope_combo.addItem(f"Selected {term_plural}", "selected_stories")
         self.scope_combo.addItem(f"All {term_plural}", "all_stories")
@@ -291,8 +516,8 @@ class UnifiedExportDialog(QDialog):
             else:
                 self.scope_combo.setCurrentIndex(2)
 
-        scope_layout.addWidget(self.scope_combo)
-        layout.addWidget(scope_group)
+        self.scope_section.add_widget(self.scope_combo)
+        layout.addWidget(self.scope_section)
 
         # Stacked options area for Destination
         self.stacked_widget = QStackedWidget()
@@ -313,10 +538,10 @@ class UnifiedExportDialog(QDialog):
         local_layout.setContentsMargins(2, 2, 2, 2)
         local_layout.setSpacing(10)
 
-        formats_group = QGroupBox("Local Formats")
-        formats_layout = QVBoxLayout(formats_group)
+        self.formats_section = CollapsibleSection("Export Formats", self, is_expanded=True, subtitle="TXT, DOCX, PDF, Media...")
         self.cb_txt = QCheckBox("Text transcript (.txt)")
         self.cb_docx = QCheckBox("Word document (.docx)")
+        self.cb_pdf = QCheckBox("PDF document (.pdf)")
         self.cb_srt = QCheckBox("SubRip subtitles (.srt)")
         self.cb_vtt = QCheckBox("WebVTT subtitles (.vtt)")
         self.cb_cue = QCheckBox("CUE sheet (.cue)")
@@ -329,34 +554,35 @@ class UnifiedExportDialog(QDialog):
         is_music_mode = getattr(self.main_window, "story_detection_mode", "") == "music"
         self.cb_txt.setChecked(not is_music_mode)
         self.cb_docx.setChecked(not is_music_mode)
+        self.cb_pdf.setChecked(not is_music_mode)
         self.cb_cue.setChecked(is_music_mode)
         self.cb_tracklist.setChecked(is_music_mode)
         self.cb_media.setChecked(audio_file is not None)
         self.cb_media.setEnabled(audio_file is not None)
 
-        formats_layout.addWidget(self.cb_txt)
-        formats_layout.addWidget(self.cb_docx)
-        formats_layout.addWidget(self.cb_srt)
-        formats_layout.addWidget(self.cb_vtt)
-        formats_layout.addWidget(self.cb_cue)
-        formats_layout.addWidget(self.cb_tracklist)
-        formats_layout.addWidget(self.cb_media)
-        local_layout.addWidget(formats_group)
+        self.formats_section.add_widget(self.cb_txt)
+        self.formats_section.add_widget(self.cb_docx)
+        self.formats_section.add_widget(self.cb_pdf)
+        self.formats_section.add_widget(self.cb_srt)
+        self.formats_section.add_widget(self.cb_vtt)
+        self.formats_section.add_widget(self.cb_cue)
+        self.formats_section.add_widget(self.cb_tracklist)
+        self.formats_section.add_widget(self.cb_media)
+        local_layout.addWidget(self.formats_section)
 
-        # Local Content & Language options
-        content_group = QGroupBox("Content & Language Options")
-        content_layout = QVBoxLayout(content_group)
+        # Local Content & Language options (Collapsible)
+        self.content_section = CollapsibleSection("Content & Language Options", self, is_expanded=True, subtitle="Speakers, Timestamps, Comments")
         self.cb_speakers = QCheckBox("Include Speaker Labels")
         self.cb_speakers.setChecked(True)
         self.cb_timestamps = QCheckBox("Include Timestamps")
         self.cb_timestamps.setChecked(False)
         self.cb_notes = QCheckBox("Include Comments")
-        self.cb_notes.setToolTip("Include transcript comments in exported DOCX documents")
+        self.cb_notes.setToolTip("Include transcript comments in exported DOCX and PDF documents")
         self.cb_notes.setChecked(True)
         self.cb_comments = self.cb_notes
-        content_layout.addWidget(self.cb_speakers)
-        content_layout.addWidget(self.cb_timestamps)
-        content_layout.addWidget(self.cb_notes)
+        self.content_section.add_widget(self.cb_speakers)
+        self.content_section.add_widget(self.cb_timestamps)
+        self.content_section.add_widget(self.cb_notes)
 
         lang_layout = QHBoxLayout()
         self.cb_en = QCheckBox("English")
@@ -373,13 +599,11 @@ class UnifiedExportDialog(QDialog):
         lang_layout.addWidget(self.cb_en)
         lang_layout.addWidget(self.cb_es)
         lang_layout.addStretch()
-        content_layout.addLayout(lang_layout)
-        local_layout.addWidget(content_group)
+        self.content_section.add_layout(lang_layout)
+        local_layout.addWidget(self.content_section)
 
-        # Export Location
-        loc_group = QGroupBox("Export Location")
-        loc_group_layout = QVBoxLayout(loc_group)
-        loc_group_layout.setSpacing(6)
+        # Export Location & Base Filename (Collapsible)
+        self.loc_section = CollapsibleSection("Export Location & File Name", self, is_expanded=True)
 
         default_dir = ""
         if getattr(self.main_window, "project_file", None):
@@ -412,12 +636,11 @@ class UnifiedExportDialog(QDialog):
 
         self.loc_radio_default.toggled.connect(self._on_location_radio_toggled)
 
-        loc_group_layout.addWidget(self.loc_radio_default)
-        loc_group_layout.addWidget(self.loc_radio_custom)
-        loc_group_layout.addLayout(loc_custom_row)
-        local_layout.addWidget(loc_group)
+        self.loc_section.add_widget(self.loc_radio_default)
+        self.loc_section.add_widget(self.loc_radio_custom)
+        self.loc_section.add_layout(loc_custom_row)
 
-        # Base Filename
+        # Base Filename inside Location section
         name_form = QFormLayout()
         default_name = safe_filename(
             self.main_window.project_file.stem
@@ -426,7 +649,8 @@ class UnifiedExportDialog(QDialog):
         )
         self.filename_edit = QLineEdit(default_name)
         name_form.addRow("File Name:", self.filename_edit)
-        local_layout.addLayout(name_form)
+        self.loc_section.add_layout(name_form)
+        local_layout.addWidget(self.loc_section)
         local_layout.addStretch()
 
         local_scroll.setWidget(local_scroll_content)
@@ -450,16 +674,13 @@ class UnifiedExportDialog(QDialog):
         wp_layout.setContentsMargins(2, 2, 2, 2)
         wp_layout.setSpacing(10)
 
-        wp_info_group = QGroupBox("WordPress Draft Settings")
-        wp_info_layout = QVBoxLayout(wp_info_group)
-        wp_info_layout.setSpacing(10)
-
+        self.wp_info_section = CollapsibleSection("WordPress Post Configuration", self, is_expanded=True, subtitle="Title, Excerpt, Authors, Categories")
         wp_notice = QLabel(
             "Extracts audio as <b>128 kbps MP3</b>, uploads to your WordPress Media Library, "
             "and creates a <b>Draft Post</b> with Gutenberg audio player and formatted transcript."
         )
         wp_notice.setWordWrap(True)
-        wp_info_layout.addWidget(wp_notice)
+        self.wp_info_section.add_widget(wp_notice)
 
         # Master-Detail Container for Posts
         self.wp_posts_container = QHBoxLayout()
@@ -572,10 +793,10 @@ class UnifiedExportDialog(QDialog):
 
         editor_layout.addLayout(tax_columns)
 
-        # WordPress Featured Image / Custom Thumbnail Group
-        wp_thumb_group = QGroupBox("Featured Image / Custom Thumbnail")
-        wp_thumb_layout = QHBoxLayout(wp_thumb_group)
-        wp_thumb_layout.setContentsMargins(8, 8, 8, 8)
+        # WordPress Featured Image / Custom Thumbnail (Collapsible)
+        self.wp_thumb_section = CollapsibleSection("Featured Image / Custom Thumbnail", self, is_expanded=True)
+        wp_thumb_layout = QHBoxLayout()
+        wp_thumb_layout.setContentsMargins(4, 4, 4, 4)
         wp_thumb_layout.setSpacing(10)
 
         wp_thumb_controls = QVBoxLayout()
@@ -665,7 +886,8 @@ class UnifiedExportDialog(QDialog):
         self.wp_thumb_preview_label.setStyleSheet("border: 1px dashed #475569; border-radius: 4px; background-color: #0f172a; color: #64748b; font-size: 10px;")
         wp_thumb_layout.addWidget(self.wp_thumb_preview_label, stretch=1)
 
-        editor_layout.addWidget(wp_thumb_group)
+        self.wp_thumb_section.add_layout(wp_thumb_layout)
+        editor_layout.addWidget(self.wp_thumb_section)
 
         self.wp_rad_thumb_none.toggled.connect(self._on_wp_thumb_mode_changed)
         self.wp_rad_thumb_grab.toggled.connect(self._on_wp_thumb_mode_changed)
@@ -691,7 +913,7 @@ class UnifiedExportDialog(QDialog):
         editor_layout.addWidget(self.wp_bulk_box)
 
         self.wp_posts_container.addWidget(self.wp_post_editor_widget)
-        wp_info_layout.addLayout(self.wp_posts_container)
+        self.wp_info_section.add_layout(self.wp_posts_container)
 
         # Post list selection change hook
         self.wp_posts_list.currentRowChanged.connect(self._on_wp_post_selection_changed)
@@ -716,11 +938,11 @@ class UnifiedExportDialog(QDialog):
         self.wp_refresh_meta_btn.clicked.connect(self._refresh_wp_metadata)
         meta_btn_row.addStretch()
         meta_btn_row.addWidget(self.wp_refresh_meta_btn)
-        wp_info_layout.addLayout(meta_btn_row)
+        self.wp_info_section.add_layout(meta_btn_row)
+        wp_layout.addWidget(self.wp_info_section)
 
-        # WordPress Language Options
-        wp_lang_group = QGroupBox("Transcript Languages")
-        wp_lang_layout = QVBoxLayout(wp_lang_group)
+        # WordPress Language Options (Collapsible)
+        self.wp_lang_section = CollapsibleSection("Transcript Languages & Presentation", self, is_expanded=True)
 
         wp_lang_checks = QHBoxLayout()
         self.wp_cb_en = QCheckBox("English")
@@ -733,7 +955,7 @@ class UnifiedExportDialog(QDialog):
         wp_lang_checks.addWidget(self.wp_cb_en)
         wp_lang_checks.addWidget(self.wp_cb_es)
         wp_lang_checks.addStretch()
-        wp_lang_layout.addLayout(wp_lang_checks)
+        self.wp_lang_section.add_layout(wp_lang_checks)
 
         # Dual-language options container (Primary Language + Placement)
         self.wp_pres_container = QWidget()
@@ -764,7 +986,7 @@ class UnifiedExportDialog(QDialog):
         pres_row.addStretch()
         pres_layout.addLayout(pres_row)
 
-        wp_lang_layout.addWidget(self.wp_pres_container)
+        self.wp_lang_section.add_widget(self.wp_pres_container)
 
         def update_wp_pres_visibility():
             both = self.wp_cb_en.isChecked() and self.wp_cb_es.isChecked()
@@ -774,18 +996,17 @@ class UnifiedExportDialog(QDialog):
         self.wp_cb_es.toggled.connect(update_wp_pres_visibility)
         update_wp_pres_visibility()
 
-        wp_info_layout.addWidget(wp_lang_group)
+        wp_layout.addWidget(self.wp_lang_section)
 
-        # Custom Header / Footer Notice Group
-        wp_custom_group = QGroupBox("Custom Header / Footer Text (Optional)")
-        wp_custom_layout = QVBoxLayout(wp_custom_group)
+        # Custom Header / Footer Notice Group (Collapsible)
+        self.wp_custom_section = CollapsibleSection("Custom Header / Footer Notice (Optional)", self, is_expanded=False)
 
         self.wp_custom_text_edit = ResizableTextEdit("")
         self.wp_custom_text_edit.setPlaceholderText(
             "e.g. Note: The following transcript was machine-generated and may contain some spelling errors or other inaccuracies."
         )
         self.wp_custom_text_edit.setMaximumHeight(65)
-        wp_custom_layout.addWidget(self.wp_custom_text_edit)
+        self.wp_custom_section.add_widget(self.wp_custom_text_edit)
 
         wp_pos_row = QHBoxLayout()
         self.wp_pos_button_group = QButtonGroup(self)
@@ -796,7 +1017,7 @@ class UnifiedExportDialog(QDialog):
         wp_pos_row.addWidget(self.wp_rad_pos_top)
         wp_pos_row.addWidget(self.wp_rad_pos_bottom)
         wp_pos_row.addStretch()
-        wp_custom_layout.addLayout(wp_pos_row)
+        self.wp_custom_section.add_layout(wp_pos_row)
 
         wp_opt_layout = QVBoxLayout()
         self.wp_chk_no_snippet = QCheckBox("Hide from Google & search engine snippets (data-nosnippet)")
@@ -809,9 +1030,9 @@ class UnifiedExportDialog(QDialog):
         )
         wp_opt_layout.addWidget(self.wp_chk_no_snippet)
         wp_opt_layout.addWidget(self.wp_chk_no_excerpt)
-        wp_custom_layout.addLayout(wp_opt_layout)
+        self.wp_custom_section.add_layout(wp_opt_layout)
 
-        wp_info_layout.addWidget(wp_custom_group)
+        wp_layout.addWidget(self.wp_custom_section)
 
         # Connection status & Settings button
         wp_conn_layout = QHBoxLayout()
@@ -821,11 +1042,10 @@ class UnifiedExportDialog(QDialog):
         wp_conn_layout.addWidget(self.wp_conn_status)
         wp_conn_layout.addStretch()
         wp_conn_layout.addWidget(self.wp_settings_btn)
-        wp_info_layout.addLayout(wp_conn_layout)
+        wp_layout.addLayout(wp_conn_layout)
 
         self._update_wp_conn_status()
 
-        wp_layout.addWidget(wp_info_group)
         wp_layout.addStretch()
 
         wp_scroll.setWidget(wp_scroll_content)
@@ -863,9 +1083,9 @@ class UnifiedExportDialog(QDialog):
         yt_b_layout.addWidget(yt_banner_info)
         yt_layout.addWidget(yt_banner)
 
-        # Video Metadata Group
-        yt_meta_group = QGroupBox("Video Details")
-        yt_meta_layout = QGridLayout(yt_meta_group)
+        # Video Metadata Section (Collapsible)
+        self.yt_meta_section = CollapsibleSection("Video Details", self, is_expanded=True, subtitle="Title, Category, Privacy, Tags")
+        yt_meta_layout = QGridLayout()
         yt_meta_layout.setSpacing(8)
 
         yt_meta_layout.addWidget(QLabel("Title:"), 0, 0)
@@ -903,11 +1123,12 @@ class UnifiedExportDialog(QDialog):
         self.yt_tags_edit.setPlaceholderText("Comma-separated tags, e.g. news, broadcast, interview")
         yt_meta_layout.addWidget(self.yt_tags_edit, 2, 1, 1, 3)
 
-        yt_layout.addWidget(yt_meta_group)
+        self.yt_meta_section.add_layout(yt_meta_layout)
+        yt_layout.addWidget(self.yt_meta_section)
 
-        # Description & Chapter Markers Group
-        yt_desc_group = QGroupBox("Description & Chapters")
-        yt_desc_layout = QVBoxLayout(yt_desc_group)
+        # Description & Chapter Markers Section (Collapsible)
+        self.yt_desc_section = CollapsibleSection("Description & Chapters", self, is_expanded=True)
+        yt_desc_layout = QVBoxLayout()
         yt_desc_layout.setSpacing(6)
 
         desc_header_layout = QHBoxLayout()
@@ -926,11 +1147,12 @@ class UnifiedExportDialog(QDialog):
         self.yt_desc_edit.setPlaceholderText("Enter video description and chapter timestamps...")
         yt_desc_layout.addWidget(self.yt_desc_edit)
 
-        yt_layout.addWidget(yt_desc_group)
+        self.yt_desc_section.add_layout(yt_desc_layout)
+        yt_layout.addWidget(self.yt_desc_section)
 
-        # Thumbnail & Extras Group
-        yt_extras_group = QGroupBox("Thumbnail & Extras")
-        yt_extras_layout = QVBoxLayout(yt_extras_group)
+        # Thumbnail & Extras Section (Collapsible)
+        self.yt_extras_section = CollapsibleSection("Thumbnail & Extras", self, is_expanded=True, subtitle="Thumbnail, Subtitles (.srt), Clipboard")
+        yt_extras_layout = QVBoxLayout()
         yt_extras_layout.setSpacing(8)
 
         # Thumbnail selector
@@ -1049,11 +1271,12 @@ class UnifiedExportDialog(QDialog):
         yt_options_box.addWidget(self.yt_cb_open_folder)
         yt_extras_layout.addLayout(yt_options_box)
 
-        yt_layout.addWidget(yt_extras_group)
+        self.yt_extras_section.add_layout(yt_extras_layout)
+        yt_layout.addWidget(self.yt_extras_section)
 
-        # Export Location Group
-        yt_loc_group = QGroupBox("YouTube Export Destination Directory")
-        yt_loc_layout = QVBoxLayout(yt_loc_group)
+        # Export Location Section (Collapsible)
+        self.yt_loc_section = CollapsibleSection("YouTube Export Destination Directory", self, is_expanded=True)
+        yt_loc_layout = QVBoxLayout()
         yt_loc_layout.setSpacing(6)
 
         self.yt_loc_default_radio = QRadioButton("Default project directory")
@@ -1071,7 +1294,8 @@ class UnifiedExportDialog(QDialog):
         yt_custom_row.addWidget(self.yt_loc_browse_btn)
         yt_loc_layout.addLayout(yt_custom_row)
 
-        yt_layout.addWidget(yt_loc_group)
+        self.yt_loc_section.add_layout(yt_loc_layout)
+        yt_layout.addWidget(self.yt_loc_section)
         yt_layout.addStretch()
 
         yt_scroll.setWidget(yt_scroll_content)
@@ -1110,6 +1334,40 @@ class UnifiedExportDialog(QDialog):
         elif initial_dest == "wordpress" and wp_enabled:
             self.radio_wp.setChecked(True)
         self._on_dest_changed()
+
+    def _toggle_all_sections(self):
+        """Toggle all collapsible sections on the currently visible page."""
+        all_sections = [getattr(self, "dest_section", None), getattr(self, "scope_section", None)]
+        curr_page = self.stacked_widget.currentIndex()
+        if curr_page == 0:
+            all_sections.extend([
+                getattr(self, "formats_section", None),
+                getattr(self, "content_section", None),
+                getattr(self, "loc_section", None),
+            ])
+        elif curr_page == 1:
+            all_sections.extend([
+                getattr(self, "wp_info_section", None),
+                getattr(self, "wp_thumb_section", None),
+                getattr(self, "wp_lang_section", None),
+                getattr(self, "wp_custom_section", None),
+            ])
+        elif curr_page == 2:
+            all_sections.extend([
+                getattr(self, "yt_meta_section", None),
+                getattr(self, "yt_desc_section", None),
+                getattr(self, "yt_extras_section", None),
+                getattr(self, "yt_loc_section", None),
+            ])
+
+        active_sections = [s for s in all_sections if s is not None and s.isVisible()]
+        if not active_sections:
+            return
+        any_expanded = any(s.is_expanded() for s in active_sections)
+        new_state = not any_expanded
+        for s in active_sections:
+            s.set_expanded(new_state)
+        self.toggle_all_btn.setText("▾ Collapse All" if new_state else "▸ Expand All")
 
     def done(self, r):
         if hasattr(self, "_wp_scrub_timer") and self._wp_scrub_timer.isActive():
@@ -1923,6 +2181,7 @@ class UnifiedExportDialog(QDialog):
         # Local formats
         self.cb_txt.setChecked(str(settings.value("export_opt_fmt_txt", "true")).lower() in {"1", "true", "yes"})
         self.cb_docx.setChecked(str(settings.value("export_opt_fmt_docx", "true")).lower() in {"1", "true", "yes"})
+        self.cb_pdf.setChecked(str(settings.value("export_opt_fmt_pdf", "true")).lower() in {"1", "true", "yes"})
         self.cb_srt.setChecked(str(settings.value("export_opt_fmt_srt", "false")).lower() in {"1", "true", "yes"})
         self.cb_vtt.setChecked(str(settings.value("export_opt_fmt_vtt", "false")).lower() in {"1", "true", "yes"})
         if self.cb_media.isEnabled():
@@ -1965,6 +2224,7 @@ class UnifiedExportDialog(QDialog):
         settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
         settings.setValue("export_opt_fmt_txt", self.cb_txt.isChecked())
         settings.setValue("export_opt_fmt_docx", self.cb_docx.isChecked())
+        settings.setValue("export_opt_fmt_pdf", self.cb_pdf.isChecked())
         settings.setValue("export_opt_fmt_srt", self.cb_srt.isChecked())
         settings.setValue("export_opt_fmt_vtt", self.cb_vtt.isChecked())
         settings.setValue("export_opt_fmt_media", self.cb_media.isChecked())
@@ -1994,6 +2254,7 @@ class UnifiedExportDialog(QDialog):
     def reset_options_to_defaults(self):
         self.cb_txt.setChecked(True)
         self.cb_docx.setChecked(True)
+        self.cb_pdf.setChecked(True)
         self.cb_srt.setChecked(False)
         self.cb_vtt.setChecked(False)
         if self.cb_media.isEnabled():
@@ -2017,7 +2278,7 @@ class UnifiedExportDialog(QDialog):
 
         settings = QSettings("RadioTVStorySegmenter", "RadioTVStorySegmenter")
         for k in [
-            "export_opt_fmt_txt", "export_opt_fmt_docx", "export_opt_fmt_srt", "export_opt_fmt_vtt",
+            "export_opt_fmt_txt", "export_opt_fmt_docx", "export_opt_fmt_pdf", "export_opt_fmt_srt", "export_opt_fmt_vtt",
             "export_opt_fmt_media", "export_opt_include_speakers", "export_opt_include_timestamps",
             "export_opt_include_en", "export_opt_include_es", "export_opt_custom_loc_enabled", "export_opt_custom_dir",
             "wp_custom_text", "wp_custom_text_pos", "wp_custom_text_no_snippet", "wp_custom_text_no_excerpt",
@@ -2037,6 +2298,7 @@ class UnifiedExportDialog(QDialog):
             formats = {
                 "txt": self.cb_txt.isChecked(),
                 "docx": self.cb_docx.isChecked(),
+                "pdf": self.cb_pdf.isChecked(),
                 "srt": self.cb_srt.isChecked(),
                 "vtt": self.cb_vtt.isChecked(),
                 "media": self.cb_media.isChecked(),
@@ -2045,7 +2307,7 @@ class UnifiedExportDialog(QDialog):
                 QMessageBox.warning(self, "Export", "Please select at least one format to export.")
                 return
 
-            if (formats["txt"] or formats["docx"]) and not self.cb_en.isChecked() and not self.cb_es.isChecked():
+            if (formats["txt"] or formats["docx"] or formats["pdf"]) and not self.cb_en.isChecked() and not self.cb_es.isChecked():
                 QMessageBox.warning(self, "Export", "Please select at least one language track (English or Spanish).")
                 return
         elif self.radio_youtube.isChecked():
@@ -2139,6 +2401,7 @@ class UnifiedExportDialog(QDialog):
             formats = {
                 "txt": self.cb_txt.isChecked(),
                 "docx": self.cb_docx.isChecked(),
+                "pdf": self.cb_pdf.isChecked(),
                 "srt": self.cb_srt.isChecked(),
                 "vtt": self.cb_vtt.isChecked(),
                 "media": self.cb_media.isChecked(),
@@ -3329,6 +3592,47 @@ class ProjectExportMixin:
                                 p_note.paragraph_format.space_after = Pt(6)
                     document.save(docx_file)
 
+                # Export PDF
+                if formats.get("pdf"):
+                    pdf_file = transcripts_out / f"{file_base}.pdf"
+                    lang_label = " (Spanish)" if lang_code == "es" else (" (English)" if lang_code == "en" else "")
+                    header_title = f"{story_title}{lang_label}"
+                    rec_info = f"Recording: {self.audio_file.name} ({format_time(story.start, False)} - {format_time(story.end, False)})" if self.audio_file else None
+                    pdf_writer = TranscriptPdfWriter(doc_title=header_title)
+                    pdf_writer.add_header(header_title, rec_info)
+
+                    last_speaker = None
+                    for block in blocks:
+                        speaker = (block.get("speaker") or "").strip() if options.get("include_speakers", True) else ""
+                        p_text = block.get("text", "").strip()
+                        if not p_text:
+                            continue
+                        t_stamp = ""
+                        if options.get("include_timestamps") and "start" in block and block["start"] is not None:
+                            t_stamp = f"[{format_time(block['start'], False)}]"
+                        is_speaker_change = block.get("is_speaker_change", (speaker != last_speaker))
+                        effective_speaker = speaker if (speaker and is_speaker_change and speaker != last_speaker) else ""
+                        if effective_speaker:
+                            last_speaker = speaker
+
+                        seg_comment = ""
+                        if options.get("include_comments", options.get("include_notes", True)):
+                            src_idx = block.get("_source_index")
+                            source_segs = self.transcript.get("segments", []) if self.transcript else []
+                            if src_idx is not None and 0 <= src_idx < len(source_segs):
+                                seg_comment = (source_segs[src_idx].get("comments") or source_segs[src_idx].get("notes", "")).strip()
+                            elif "comments" in block or "notes" in block:
+                                seg_comment = str(block.get("comments") or block.get("notes", "")).strip()
+
+                        pdf_writer.add_paragraph(
+                            text=p_text,
+                            speaker=effective_speaker,
+                            timestamp=t_stamp,
+                            comment=seg_comment,
+                        )
+                    with open(pdf_file, "wb") as pf:
+                        pf.write(pdf_writer.get_pdf_bytes())
+
                 # Export Subtitles
                 if formats.get("srt"):
                     self.write_subtitles(blocks, transcripts_out / f"{file_base}.srt", "srt", options.get("include_speakers", True))
@@ -3386,7 +3690,7 @@ class ProjectExportMixin:
             directory = str(project_dir)
             base = chosen_base
 
-        formats = custom_formats or {"txt": True, "docx": True, "srt": False, "vtt": False, "media": False}
+        formats = custom_formats or {"txt": True, "docx": True, "pdf": True, "srt": False, "vtt": False, "media": False}
         options = custom_options or {"include_speakers": True, "include_timestamps": False, "include_english": True, "include_spanish": False}
 
         self.export_cancelled = False
@@ -3429,7 +3733,7 @@ class ProjectExportMixin:
             directory = str(project_dir)
             base = chosen_base
 
-        formats = custom_formats or {"txt": True, "docx": True, "srt": False, "vtt": False, "media": False}
+        formats = custom_formats or {"txt": True, "docx": True, "pdf": True, "srt": False, "vtt": False, "media": False}
         options = custom_options or {"include_speakers": True, "include_timestamps": False, "include_english": True, "include_spanish": False}
 
         stories_to_export = list(enumerate(self.stories))
@@ -3466,7 +3770,7 @@ class ProjectExportMixin:
             directory = str(project_dir)
             base = chosen_base
 
-        formats = custom_formats or {"txt": True, "docx": True, "srt": False, "vtt": False, "media": False}
+        formats = custom_formats or {"txt": True, "docx": True, "pdf": True, "srt": False, "vtt": False, "media": False}
         options = custom_options or {"include_speakers": True, "include_timestamps": False, "include_english": True, "include_spanish": False}
         stories_to_export = list(enumerate(self.stories)) if getattr(self, "stories", []) else []
         total_items = 1 + len(stories_to_export)
@@ -4028,6 +4332,50 @@ class ProjectExportMixin:
                                         p_note.paragraph_format.space_after = Pt(6)
                     document.save(docx_file)
 
+                # Export PDF to Transcripts subfolder
+                if formats.get("pdf"):
+                    pdf_file = transcripts_out / f"{file_base}.pdf"
+                    lang_label = " (Spanish)" if lang_code == "es" else (" (English)" if lang_code == "en" else "")
+                    header_title = f"{doc_title}{lang_label}"
+                    rec_info = f"Recording: {self.audio_file.name}" if self.audio_file else None
+                    pdf_writer = TranscriptPdfWriter(doc_title=header_title)
+                    pdf_writer.add_header(header_title, rec_info)
+
+                    if blocks:
+                        last_speaker = None
+                        for block in blocks:
+                            speaker = (block.get("speaker") or "").strip() if options.get("include_speakers", True) else ""
+                            paragraph_text = block.get("text", "").strip()
+                            if not paragraph_text:
+                                continue
+
+                            t_stamp = ""
+                            if options.get("include_timestamps") and "start" in block and block["start"] is not None:
+                                t_stamp = f"[{format_time(block['start'], False)}]"
+
+                            is_speaker_change = block.get("is_speaker_change", (speaker != last_speaker))
+                            effective_speaker = speaker if (speaker and is_speaker_change and speaker != last_speaker) else ""
+                            if effective_speaker:
+                                last_speaker = speaker
+
+                            seg_comment = ""
+                            if options.get("include_comments", options.get("include_notes", True)):
+                                src_idx = block.get("_source_index")
+                                source_segs = self.transcript.get("segments", []) if self.transcript else []
+                                if src_idx is not None and 0 <= src_idx < len(source_segs):
+                                    seg_comment = (source_segs[src_idx].get("comments") or source_segs[src_idx].get("notes", "")).strip()
+                                elif "comments" in block or "notes" in block:
+                                    seg_comment = str(block.get("comments") or block.get("notes", "")).strip()
+
+                            pdf_writer.add_paragraph(
+                                text=paragraph_text,
+                                speaker=effective_speaker,
+                                timestamp=t_stamp,
+                                comment=seg_comment,
+                            )
+                    with open(pdf_file, "wb") as pf:
+                        pf.write(pdf_writer.get_pdf_bytes())
+
                 # Export Subtitles to Transcripts subfolder
                 if formats.get("srt"):
                     self.write_subtitles(blocks, transcripts_out / f"{file_base}.srt", "srt", options.get("include_speakers", True))
@@ -4081,6 +4429,7 @@ class ProjectExportMixin:
 
         txt = QCheckBox("Text (.txt)")
         docx = QCheckBox("DOCX (.docx)")
+        pdf = QCheckBox("PDF document (.pdf)")
         srt = QCheckBox("SubRip subtitles (.srt)")
         vtt = QCheckBox("WebVTT subtitles (.vtt)")
         media = QCheckBox(f"Media ({self.audio_file.suffix.lower() if self.audio_file else 'source format'})")
@@ -4088,11 +4437,13 @@ class ProjectExportMixin:
 
         txt.setChecked(True)
         docx.setChecked(True)
+        pdf.setChecked(True)
         media.setChecked(media_available)
         media.setVisible(media_available)
 
         layout.addWidget(txt)
         layout.addWidget(docx)
+        layout.addWidget(pdf)
         layout.addWidget(srt)
         layout.addWidget(vtt)
         if allow_media:
@@ -4118,7 +4469,14 @@ class ProjectExportMixin:
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
 
-        formats = {"txt": txt.isChecked(), "docx": docx.isChecked(), "srt": srt.isChecked(), "vtt": vtt.isChecked(), "media": media.isChecked() if allow_media else False}
+        formats = {
+            "txt": txt.isChecked(),
+            "docx": docx.isChecked(),
+            "pdf": pdf.isChecked(),
+            "srt": srt.isChecked(),
+            "vtt": vtt.isChecked(),
+            "media": media.isChecked() if allow_media else False,
+        }
         if not any(formats.values()):
             QMessageBox.warning(self, "Export", "Select at least one export format.")
             return None
@@ -4631,7 +4989,7 @@ class ProjectExportMixin:
         if not stories:
             return False
         base = custom_base or (safe_filename(self.project_file.stem if self.project_file else (self.audio_file.stem if self.audio_file else "export")))
-        formats = custom_formats or {"txt": True, "docx": True, "srt": False, "vtt": False, "media": False}
+        formats = custom_formats or {"txt": True, "docx": True, "pdf": True, "srt": False, "vtt": False, "media": False}
         options = custom_options or {"include_speakers": True, "include_timestamps": False, "include_english": True, "include_spanish": False}
         stories_to_export = list(enumerate(stories))
         success = self._export_story_files(stories_to_export, formats, base, options, directory)
