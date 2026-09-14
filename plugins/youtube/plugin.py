@@ -188,6 +188,10 @@ class Plugin(BasePlugin):
     def on_load(self) -> bool:
         return True
 
+    def get_export_destinations(self) -> List[Any]:
+        from plugins.youtube.export_destination import YouTubeExportDestination
+        return [YouTubeExportDestination(self)]
+
     def get_export_actions(self) -> List[tuple[str, Callable]]:
         return [
             ("Publish to YouTube Studio (Assisted)...", self.open_publish_dialog),

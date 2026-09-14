@@ -128,6 +128,10 @@ class BasePlugin:
         """Return list of (Action Label, callback_function) for Export menu."""
         return []
 
+    def get_export_destinations(self) -> List[ExportDestination]:
+        """Return list of ExportDestination providers to embed into UnifiedExportDialog."""
+        return []
+
     def get_tools_actions(self) -> List[tuple[str, Callable]]:
         """Return list of (Action Label, callback_function) for Tools menu."""
         return []
@@ -147,3 +151,34 @@ class BasePlugin:
     def on_project_saving(self, project_data: Dict[str, Any]) -> None:
         """Called before an .rtvs project is saved. Allows injecting plugin metadata."""
         pass
+
+
+class ExportDestination:
+    """Base class for plugin-provided export destinations in UnifiedExportDialog."""
+
+    def __init__(self, id: str, title: str, description: str = "", icon: Optional[str] = None):
+        self.id = id
+        self.title = title
+        self.description = description
+        self.icon = icon
+
+    def create_widget(self, parent: Any, main_window: Any) -> Any:
+        """Create the configuration and preview widget embedded into the destination tab."""
+        raise NotImplementedError
+
+    def on_scope_changed(self, scope: str, stories: list) -> None:
+        """Called when export scope changes in the dialog (full, selected, all)."""
+        pass
+
+    def validate(self) -> tuple[bool, str]:
+        """Validate destination settings before export begins. Returns (ok, error_msg)."""
+        return True, ""
+
+    def get_export_data(self) -> Dict[str, Any]:
+        """Collect export parameters to include in the final dialog result."""
+        return {}
+
+    def execute_export(self, main_window: Any, export_data: Dict[str, Any], progress_dialog: Any = None) -> bool:
+        """Execute the export action for this destination."""
+        return True
+

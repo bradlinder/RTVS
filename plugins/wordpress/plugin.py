@@ -518,6 +518,10 @@ class Plugin(BasePlugin):
     def on_load(self) -> bool:
         return True
 
+    def get_export_destinations(self) -> List[Any]:
+        from plugins.wordpress.export_destination import WordPressExportDestination
+        return [WordPressExportDestination(self)]
+
     def get_export_actions(self) -> List[tuple[str, Callable]]:
         return [
             ("Publish to WordPress...", self.open_publish_dialog),

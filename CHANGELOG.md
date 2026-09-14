@@ -1,6 +1,13 @@
 # Changelog
 
-## v3.0.2-dev-1
+## v3.1.0-dev-1
+- **Codebase Modularization & Decoupled Architecture**:
+  - Decoupled domain-specific export engines out of monolithic scripts into a dedicated `export/` package (`export/pdf.py`, `export/docx.py`, `export/subtitles.py`, `export/dialog.py`).
+  - Implemented true dynamic plugin export destination architecture via `plugins.base.ExportDestination` and `PluginManager`.
+  - Created structured data model layer (`models.py`) with type-annotated dataclasses (`StoryItem`, `ActivitySnapshot`, `ExportOptions`) and TypedDict definitions.
+  - Extracted core utilities and dialog components into `utils/` (`constants.py`, `time_format.py`) and `ui/dialogs/` (`find_replace.py`, `comment_editor.py`).
+
+## v3.0.2
 - **Native PDF Document Export**:
   - Implemented standalone `TranscriptPdfWriter` generating native, dependency-free PDF 1.4 vector documents for individual story transcripts and full episode transcripts.
   - Added PDF format checkbox (`PDF document (.pdf)`) to Local Export formats alongside Text (.txt) and Word DOCX (.docx).

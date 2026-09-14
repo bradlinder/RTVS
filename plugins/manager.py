@@ -354,6 +354,19 @@ class PluginManager:
                 print(f"[PLUGINS] Error during unload of {plugin_id}: {exc}")
             del self.plugins[plugin_id]
 
+    def get_export_destinations(self) -> List[Any]:
+        """Returns all ExportDestination objects contributed by currently enabled plugins."""
+        destinations = []
+        for plugin_id, plugin in self.plugins.items():
+            if plugin.is_enabled:
+                try:
+                    for dest in plugin.get_export_destinations():
+                        destinations.append(dest)
+                except Exception as exc:
+                    print(f"[PLUGINS] Error getting export destinations from {plugin_id}: {exc}")
+        return destinations
+
+
     def uninstall_plugin(self, plugin_id: str) -> bool:
         """Uninstalls and removes a plugin completely from the system."""
         # Unload if currently loaded
