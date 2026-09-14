@@ -1,6 +1,10 @@
 # Changelog
 
-## v3.1.4 (In Development / Roadmap)
+## v3.1.5 (In Development / Roadmap)
+- **Spacebar Play/Pause Restoration in Transcript Viewing Mode**:
+  - Refined the global event filter inside `playback_preferences.py` to allow the Spacebar key to toggle play/pause when the transcript text editor is focused in read-only viewing mode, instead of acting as a "Page Down" key.
+- **UNC Network Share Safe File/Autosave Replacement Fallback**:
+  - Implemented `safe_replace` across all persistent save pathways (`prs_shared.py`, `playback_preferences.py`, and `model_management.py`) utilizing exponential retry backoff loops and write-stream file copy fallbacks. This completely resolves `WinError 5 Access is denied` permission blocks during auto-saves and manual project saves on Windows SMB/UNC network storage shares.
 - **Plugin Archive Path Traversal & Zip Slip Security Hardening**:
   - Implemented safe path validation (`safe_extract_zip` & `safe_extract_tar`) across `plugins/manager.py` and `runtime_manager.py` to strictly sanitize archive target paths and prevent path traversal vulnerabilities.
   - Added cryptographic SHA-256 checksum verification for downloaded plugin archives and standalone runtime binaries prior to extraction.
@@ -10,6 +14,10 @@
   - Isolated translation dependencies, fallbacks, and runtime models strictly inside `plugins/translation/`, stripping direct ML model fallbacks from core code paths.
 - **Deterministic Provisioning State Machine**:
   - Converted runtime environment provisioning in `runtime_manager.py` to a formal state machine (`NOT_INSTALLED` -> `CREATING` -> `INSTALLING` -> `VALIDATING` -> `READY` / `BROKEN`) with standardized recovery paths.
+
+## v3.1.4
+- **Diarization & Missing Type Definition Corrections**:
+  - Resolved `NameError: name 'Optional' is not defined` crash on program launch after clean installation by explicitly importing type definitions inside `transcript_story.py`.
 
 ## v3.1.3
 - **Floating Selection Popup Initialization & Preference Enforcement**:

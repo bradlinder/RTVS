@@ -2377,7 +2377,10 @@ class PlaybackPreferencesMixin:
             if is_play_key:
                 focused_widget = QApplication.focusWidget()
                 if focused_widget and isinstance(focused_widget, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox)):
-                    return super().eventFilter(watched, event)
+                    if isinstance(focused_widget, InteractiveTranscriptEdit) and not focused_widget.is_editing_mode:
+                        pass
+                    else:
+                        return super().eventFilter(watched, event)
                 if QApplication.activeModalWidget() is not None:
                     return super().eventFilter(watched, event)
                 if focused_widget and (focused_widget.window() != self or isinstance(focused_widget.window(), QDialog)):
@@ -3151,7 +3154,7 @@ class PlaybackPreferencesMixin:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
                 f.flush(); os.fsync(f.fileno())
-            os.replace(tmp, autosave)
+            safe_replace(tmp, autosave)
             current_time = QTime.currentTime().toString("hh:mm A")
             self.log_activity(f"[AUTOSAVE] Recovery snapshot written ({current_time}).", mark_dirty=False)
             self.statusBar().showMessage(f"Recovery snapshot saved at {current_time}")

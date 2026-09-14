@@ -88,6 +88,47 @@ def safe_extract_tar(tar_source, dest_dir) -> None:
     else:
         _verify_and_extract(tar_source)
 
+def safe_replace(src: str | Path, dest: str | Path) -> None:
+    """
+    Safely and atomically replace dest with src, handling file locks, permissions,
+    and network share anomalies (e.g., WinError 5 PermissionError) with retry loops
+    and a final robust write-copy stream fallback.
+    """
+    src_path = Path(src).resolve()
+    dest_path = Path(dest).resolve()
+    for i in range(5):
+        try:
+            os.replace(src_path, dest_path)
+            return
+        except PermissionError as e:
+            if i < 4:
+                time.sleep(0.05 * (2 ** i))  # exponential backoff (0.05s, 0.1s, 0.2s, 0.4s)
+                continue
+            else:
+                # If atomic replace still fails, attempt copy-and-unlink fallback.
+                # Writing directly to the existing destination handle/path bypasses 
+                # rename lock constraints common on Windows SMB/UNC network shares.
+                try:
+                    shutil.copyfile(src_path, dest_path)
+                    try:
+                        os.unlink(src_path)
+                    except Exception:
+                        pass
+                    return
+                except Exception:
+                    raise e
+        except Exception:
+            try:
+                os.replace(src_path, dest_path)
+                return
+            except Exception:
+                shutil.copyfile(src_path, dest_path)
+                try:
+                    os.unlink(src_path)
+                except Exception:
+                    pass
+                return
+
 from docx import Document
 from docx.shared import Pt, RGBColor
 
@@ -456,7 +497,7 @@ class CollapsibleSection(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "3.1.4"
+PROJECT_VERSION = "3.1.5"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 
@@ -3899,7 +3940,7 @@ def write_waveform_peak_cache(audio_file, peaks, points_per_second=WAVEFORM_POIN
             f.write(struct.pack(f"<{count}f", *peaks))
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, cache_path)
+        safe_replace(tmp_path, cache_path)
     except Exception:
         pass
 
@@ -4184,7 +4225,7 @@ def write_rtvs_project_file(file_path, data: dict):
         f.write(blob)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(temp_file, p)
+    safe_replace(temp_file, p)
 
 
 # ============================================================

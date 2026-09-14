@@ -99,7 +99,7 @@ class WhisperModelInstallWorker(QObject):
 
             if not temp.exists() or temp.stat().st_size == 0:
                 raise RuntimeError(f"Downloaded file '{destination.name}' is empty.")
-            os.replace(temp, destination)
+            safe_replace(temp, destination)
         except Exception as exc:
             try:
                 temp.unlink(missing_ok=True)

@@ -29,19 +29,18 @@ ROADMAP MAINTENANCE POLICY: N-1 SLIDING-WINDOW & STATUS TRACKING
 --------------------------------------------------------------------------------
 TABLE OF CONTENTS & STATUS OVERVIEW
 --------------------------------------------------------------------------------
-1. Previous Release: Selection Popup Persistence & Deep-State Universal Undo/Redo (Completed in v3.1.3)
-   [x] 1.1 Floating Selection Popup Preference Initialization on Launch in RadioTVSegmenter.py
-   [x] 1.2 Deep Copy State Cloning in playback_preferences.py and prs_shared.py for Universal Undo (Ctrl+Z) & Redo (Ctrl+Shift+Z)
-   [x] 1.3 Automatic Comments Panel and Transcript Re-rendering Restoration on Undo / Redo
-   [x] 1.4 Contiguous Highlight Removal & Background Brush Clearing across Multi-Sentence Spans
+1. Previous Release: clean installation type definition correction (Completed in v3.1.4)
+   [x] 1.1 Correct NameError: name 'Optional' is not defined on post-install program launch
 
-2. Current Release: Security Hardening, Staged Plugin Updates & Isolated Translation Architecture (Planned for v3.1.4) [IN-PROGRESS]
-   [ ] 2.1 Zip Slip & Path Traversal Safe Archive Extraction (`plugins/manager.py` & `runtime_manager.py`)
-   [ ] 2.2 Cryptographic SHA-256 Checksum Verification & Asset Integrity Validation
-   [ ] 2.3 Transactional Staged Plugin Installation & Atomic Folder Swaps with Automated Rollback
-   [ ] 2.4 Translation Runtime Decoupling & Complete Core ML Fallback Cleanup
-   [ ] 2.5 Deterministic Runtime Provisioning State Machine (`RuntimeManager`)
-   [ ] 2.6 Hugging Face Model Revision Pinning & Explicit Download Verification
+2. Current Release: Security Hardening, Staged Updates, Network Saves & Spacebar Fix (Planned for v3.1.5) [IN-PROGRESS]
+   [x] 2.1 Spacebar Play/Pause Restoration in Transcript Viewing Mode
+   [x] 2.2 UNC Network Share Safe File/Autosave Replacement Fallback (`safe_replace`)
+   [ ] 2.3 Zip Slip & Path Traversal Safe Archive Extraction (`plugins/manager.py` & `runtime_manager.py`)
+   [ ] 2.4 Cryptographic SHA-256 Checksum Verification & Asset Integrity Validation
+   [ ] 2.5 Transactional Staged Plugin Installation & Atomic Folder Swaps with Automated Rollback
+   [ ] 2.6 Translation Runtime Decoupling & Complete Core ML Fallback Cleanup
+   [ ] 2.7 Deterministic Runtime Provisioning State Machine (`RuntimeManager`)
+   [ ] 2.8 Hugging Face Model Revision Pinning & Explicit Download Verification
 
 3. Upcoming Milestone: Media Transcoding, Async Provisioning & Transcript Cleaning (Phase 3 - Planned for v3.2) [NOT STARTED]
    [ ] 3.1 Media Transcoding & Format Conversion on Export (Audio & Video Codecs)
@@ -83,7 +82,7 @@ TABLE OF CONTENTS & STATUS OVERVIEW
 - Re-engineered `remove_highlight` to clear character background brushes and word/segment metadata across contiguous highlighted sections spanning multiple sentences or paragraphs.
 
 ================================================================================
-2. CURRENT RELEASE: SECURITY HARDENING & ISOLATED TRANSLATION (Planned for v3.1.4) [IN-PROGRESS]
+2. CURRENT RELEASE: SECURITY HARDENING, STAGED UPDATES, NETWORK SAVES & SPACEBAR FIX (Planned for v3.1.5) [IN-PROGRESS]
 ================================================================================
 
 [ ] 2.1 ZIP SLIP & PATH TRAVERSAL SAFE ARCHIVE EXTRACTION

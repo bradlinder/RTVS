@@ -219,7 +219,32 @@ class TranslationWorker(QObject):
                 os.fsync(out.fileno())
             if not temp.exists() or temp.stat().st_size == 0:
                 raise RuntimeError(f"Downloaded model file '{filename}' is empty.")
-            os.replace(temp, destination)
+            import time
+            for i in range(5):
+                try:
+                    os.replace(temp, destination)
+                    break
+                except PermissionError as e:
+                    if i < 4:
+                        time.sleep(0.05 * (2 ** i))
+                    else:
+                        try:
+                            shutil.copyfile(temp, destination)
+                            try:
+                                os.unlink(temp)
+                            except Exception:
+                                pass
+                        except Exception:
+                            raise e
+                except Exception:
+                    try:
+                        shutil.copyfile(temp, destination)
+                        try:
+                            os.unlink(temp)
+                        except Exception:
+                            pass
+                    except Exception:
+                        raise
         except InterruptedError:
             try:
                 temp.unlink(missing_ok=True)
