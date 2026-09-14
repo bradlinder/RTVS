@@ -156,11 +156,20 @@ class BasePlugin:
 class ExportDestination:
     """Base class for plugin-provided export destinations in UnifiedExportDialog."""
 
-    def __init__(self, id: str, title: str, description: str = "", icon: Optional[str] = None):
+    def __init__(
+        self,
+        id: str,
+        title: str,
+        description: str = "",
+        icon: Optional[str] = None,
+        button_label: Optional[str] = None,
+    ):
         self.id = id
         self.title = title
         self.description = description
         self.icon = icon
+        self.button_label = button_label or f"Export {title}..."
+        self.action_title = self.button_label
 
     def create_widget(self, parent: Any, main_window: Any) -> Any:
         """Create the configuration and preview widget embedded into the destination tab."""

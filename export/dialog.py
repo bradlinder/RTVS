@@ -8,25 +8,34 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt, QSettings
-from PySide6.QtWidgets import (
-    QButtonGroup,
-    QCheckBox,
-    QComboBox,
-    QDialog,
-    QFileDialog,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QMessageBox,
-    QPushButton,
-    QRadioButton,
-    QScrollArea,
-    QStackedWidget,
-    QVBoxLayout,
-    QWidget,
-)
+try:
+    from PySide6.QtCore import Qt, QSettings
+    from PySide6.QtWidgets import (
+        QButtonGroup,
+        QCheckBox,
+        QComboBox,
+        QDialog,
+        QFileDialog,
+        QFrame,
+        QHBoxLayout,
+        QLabel,
+        QLineEdit,
+        QMessageBox,
+        QPushButton,
+        QRadioButton,
+        QScrollArea,
+        QSpinBox,
+        QStackedWidget,
+        QTabWidget,
+        QVBoxLayout,
+        QWidget,
+    )
+    GUI_AVAILABLE = True
+except ImportError:
+    GUI_AVAILABLE = False
+    Qt = None
+    QSettings = None
+    QDialog = object
 
 from prs_shared import (
     INTERNAL_APP_ID,
@@ -331,7 +340,8 @@ class UnifiedExportDialog(QDialog):
         for radio, dest, widget in self._plugin_destinations:
             if radio.isChecked():
                 self.stacked_widget.setCurrentWidget(widget)
-                self.export_btn.setText(dest.button_label or f"Export {dest.title}...")
+                btn_lbl = getattr(dest, "button_label", None) or f"Export {getattr(dest, 'title', 'Files')}..."
+                self.export_btn.setText(btn_lbl)
                 break
 
     def _on_scope_changed(self):

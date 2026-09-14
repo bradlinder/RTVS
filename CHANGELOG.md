@@ -1,6 +1,96 @@
 # Changelog
 
-## v3.1.0-dev-1
+## v3.1.3
+- **Floating Selection Popup Initialization & Preference Enforcement**:
+  - Ensured `TranscriptSelectionBubble` starts hidden upon widget initialization so the floating toolbar is never displayed at startup.
+  - Enforced `show_floating_selection_toolbar` preference checks across `prs_shared.py`, `ui_layout.py`, and `playback_preferences.py` so that if disabled in Preferences, the floating toolbar is never displayed at startup or on text selection.
+- **Deep-State Isolation for Universal Undo & Redo**:
+  - Resolved `_clone_transcript_state` object reference sharing in `playback_preferences.py` and `prs_shared.py` using complete deep copies.
+  - Pressing `Ctrl+Z` (Undo) or `Ctrl+Shift+Z` (Redo) now reliably restores removed highlights and deleted comments, auto-refreshing both transcript views and the sidebar comments panel.
+- **Enhanced Contiguous Highlight Removal**:
+  - Re-engineered `remove_highlight` to clear character background brushes and word/segment metadata across contiguous highlighted sections spanning multiple sentences or paragraphs.
+
+## v3.1.2
+- **Expanded Keyboard Shortcut Customization Suite**:
+  - Registered all application functions across File, Edit, View, Tools, Settings, and Help menus, right-click context menus, and transcript editor views into the shortcut customization manager.
+  - Added default keyboard shortcut bindings for **Export Project Archive (.zip)** (`Ctrl+Shift+E` / `Cmd+Shift+E`), **Redo** (`Ctrl+Shift+Z` / `Cmd+Shift+Z`), **Delete Comment** (`Ctrl+Alt+D`), **Remove Highlight** (`Ctrl+Alt+H`), **Add Selected Text to New Story** (`Ctrl+Alt+N`), **Play Selected Text** (`Ctrl+Space`), and **Clear Text Selection** (`Esc`).
+- **Alphabetical & Category Shortcut Sorting**:
+  - Enhanced the Keyboard Shortcut Customizer dialog (`F8` / Preferences) with instant sorting controls ("Action (Alphabetical)" vs. "Category").
+  - Shortcuts are arranged in clean alphabetical order by action name by default, with one-click toggles and interactive column header sorting.
+
+## v3.1.1-beta-4
+- **Contiguous Section Highlight Removal**:
+  - Re-engineered `remove_highlight` in `prs_shared.py` to trace linear word sequences across single and multi-paragraph highlighted text blocks.
+  - Selecting text or right-clicking anywhere within a highlighted region and choosing "Remove Highlight" now clears background highlighting across the entire contiguous highlighted section spanning multiple sentences or paragraphs.
+- **Universal Undo & Redo Integration for Comments and Highlights**:
+  - Captured project state baselines before comment deletion, comment creation, comment editing, highlight removal, and highlight toggling.
+  - Pushed explicit `ProjectStateCommand` instances to `MainWindow.undo_stack` for every comment and highlight operation.
+  - Pressing `Ctrl+Z` (Undo) and `Ctrl+Shift+Z` / `Ctrl+Y` (Redo) now reliably restores or reverts deleted comments and removed highlights.
+
+## v3.1.1-beta-3
+- **Bi-Directional Comment & Transcript Selection Synchronization**:
+  - Implemented active visual styling for selected comment cards in `CommentsPanel` with high-contrast active borders and background fill.
+  - Clicking a comment card in the sidebar highlights the card as active, seeks playback, and selects the corresponding text in the transcript.
+  - Clicking or selecting commented text in the transcript view now automatically brings the corresponding comment card into active focus and scrolls it into view.
+- **Rich Text Formatting in DOCX Export**:
+  - Enhanced DOCX export engine (`create_story_docx` in `export/docx.py`) to reflect word-level and block-level rich text formatting options (**bold**, *italics*, <u>underline</u>, ~strikethrough~, and ==highlighted text==) in exported `.docx` documents.
+- **Enhanced Right-Click Context Menu Options**:
+  - Added **"Remove Highlight"** option to right-click context menus in both viewing and editing modes to clear highlighting from selected text or targeted segments.
+  - Added **"Delete Comment"** option to right-click context menus in both viewing and editing modes to remove the comment and clear any associated highlights.
+
+## v3.1.1-beta-2
+- **Range-Based Comment Anchoring & Complete DOCX Export Capture**:
+  - Upgraded comment creation (`add_comment_from_selection`) to anchor comments to the full selected text span (e.g. "Back when..." to "...about how") across single or multi-segment selections instead of single words or cursor blocks.
+  - Sidebar comment cards and transcript highlights now display and highlight the exact quoted text selection span.
+  - Clicking a comment card in the sidebar now seeks to the exact start time and selects the exact highlighted text range in the transcript view.
+  - Enhanced DOCX export (`create_story_docx` & `inject_native_comments_to_docx`) to split paragraph runs and anchor OpenXML `w:commentRangeStart` and `w:commentRangeEnd` directly around selected text quotes.
+  - Guaranteed 100% complete capture of all comments in transcript exports without omission.
+- **Toggle Floating Selection Quick-Action Toolbar Preference**:
+  - Added preference setting in Preferences dialog (General -> Selection Popup: "Show floating quick-action toolbar on text selection in transcript") to toggle floating selection tooltips (Play, Story, Comment, Exclude, Export).
+
+## v3.1.1-beta-1
+- **Streamlined Click-to-Record Keyboard Shortcut Tools**:
+  - Eliminated redundant "Record Key" and "Record Shortcut" buttons from both the Shortcut Lookup Tool and the Shortcut Customizer Editor.
+  - Users can now simply click or focus on the shortcut input text box to automatically engage recording mode, significantly streamlining the customizer UX.
+- **Unified Export Window & Dialog Initialization Fix**:
+  - Restored missing `QStackedWidget` import in `export/dialog.py` to ensure the unified export dialog opens properly without runtime initialization exceptions.
+- **Resolved Ambiguous Shortcut Overloads & In-Focus Comment Toggle**:
+  - Eliminated duplicate `QAction` shortcut bindings for `Ctrl+Alt+C` across window menus and context menus that previously caused Qt ambiguous shortcut warnings.
+  - Replaced duplicate action instances with unified action references and ensured `TranscriptView` key press event routing triggers `toggle_comments_panel()` directly.
+  - Re-architected Word `.docx` export pipeline (`create_story_docx` / `export/docx.py`) to package native OOXML annotations (`word/comments.xml`, `w:commentRangeStart`, `w:commentRangeEnd`, and `w:commentReference`) matching Microsoft Word and LibreOffice Writer specification standards.
+  - Resolved LibreOffice document corruption warnings by ensuring fully-formed XML namespaces, sequence IDs, and schema references.
+  - Exported comments and notes now render as native sidebar comment annotations in both Microsoft Word and LibreOffice Writer (as well as Google Docs).
+  - Preserved full author metadata, timestamps, highlighted text ranges, and multi-note threading.
+- **Interactive Keyboard Shortcut Lookup Tool & Conflict Inspector**:
+  - Added dedicated Shortcut Lookup Tool directly inside the Keyboard Shortcut Customizer (`F8` / Preferences): enter or record any key combination to instantly see which function is currently mapped to it.
+  - Displays rich metadata (action name, category, description, custom vs default status, and availability state).
+  - Included interactive "📍 Select in Table" one-click jump to highlight and focus the matching action in the customizer table.
+- **Transcript Text Selection Preservation**:
+  - Fixed selection loss during text formatting: invoking Bold (`Ctrl+B`), Italic (`Ctrl+I`), Underline (`Ctrl+U`), Strikethrough (`Ctrl+K`), Highlighter, or Clear Formatting (`Ctrl+\`) now preserves the active text selection range until the user clicks elsewhere in the transcript.
+- **Multi-Color Highlighter Palette & HTML Rendering**:
+  - Restored highlighter functionality with support for 6 vibrant, standard highlighting colors: Yellow (`#fef08a`), Green (`#bbf7d0`), Cyan/Blue (`#bae6fd`), Pink (`#fbcfe8`), Orange (`#fed7aa`), and Purple (`#e9d5ff`).
+  - Added color dropdown menu to the Highlight toolbar button and right-click context menu, with full token persistence and dynamic HTML styling.
+- **Harmonized Keyboard Shortcut Engine & In-Focus Window Overrides**:
+  - Enforced `Qt.ShortcutContext.ApplicationShortcut` across actions so in-focus application events execute reliably without OS collisions.
+  - Set default keyboard shortcut for toggling the Comments Sidebar & Annotations to `Ctrl+Alt+C` (macOS: `Cmd+Option+C`).
+  - Added full shortcut bindings and customization support for Rich Text Formatting (**Highlight**: `Ctrl+Shift+H`, **Bold**: `Ctrl+B`, **Italic**: `Ctrl+I`, **Underline**: `Ctrl+U`, **Strikethrough**: `Ctrl+K`, **Clear Formatting**: `Ctrl+\`) and **Split Speaker Segment** (`Shift+Enter`).
+  - Enhanced Shortcut Customizer with automatic recording lifecycle and conflict resolution dialog.
+- **Dynamic Toolbar Tooltips with Live Keyboard Shortcuts**:
+  - All toolbar buttons (Comments toggle, Transcript Edit Mode toggle, Font size increase/decrease/reset, Bold, Italic, Underline, Strikethrough, Highlight, Clear Formatting, Split Speaker, Play/Pause, and Story controls) dynamically reflect their current assigned keyboard shortcuts directly in hover tooltips.
+
+## v3.1.0-dev-2
+- **Universal .docx Comments Compatibility (Microsoft Word, LibreOffice, Google Docs)**:
+  - Re-engineered the Word (.docx) document export engine to generate both native OpenXML comments (`word/comments.xml`, `w:commentRangeStart`, `w:commentRangeEnd`, and `w:commentReference`) and styled visual annotation callouts.
+  - Exported comments now appear in Microsoft Word's comment review pane, LibreOffice Writer's comment margin cards, and when uploaded to Google Docs.
+  - Includes user preference integration (`export_include_comments`) with full timestamp spans, speaker attribution, and author metadata.
+- **Keyboard Shortcut Customizer & Conflict Resolution System**:
+  - Integrated interactive conflict detection in the Keyboard Shortcut Customizer (`F8` / Preferences): when assigning a key combination already in use by another action, a warning dialog prompts the user to either apply the shortcut to the new action (reassigning it) or keep the original binding.
+  - If keeping the original binding, the customizer automatically re-engages recording mode so the user can immediately enter an alternative shortcut combination.
+  - Added new actions to the shortcut registry: **Add / Edit Comment** (`Ctrl+M`), **Toggle Comments Sidebar** (`Alt+5`), **Toggle Transcript Edit Mode** (`F2`), **Bold** (`Ctrl+B`), **Italic** (`Ctrl+I`), **Underline** (`Ctrl+U`), **Strikethrough** (`Ctrl+K`), and **Clear Formatting** (`Ctrl+\`).
+  - Resolved shortcut collisions across the application (e.g., separating Batch Processing to `Ctrl+Shift+B` so `Ctrl+B` is dedicated to Bold text formatting).
+  - Enforced window-scoped shortcut context (`Qt.ShortcutContext.WindowShortcut`) across all actions so in-focus application events execute reliably.
+- **Plugin Export Destination Architecture & WordPress Publishing Fix**:
+  - Resolved plugin interface contracts in `export/dialog.py` and `plugins/wordpress/export_destination.py`, ensuring all plugin destinations supply appropriate button labels, icons, and configuration panels.
 - **Codebase Modularization & Decoupled Architecture**:
   - Decoupled domain-specific export engines out of monolithic scripts into a dedicated `export/` package (`export/pdf.py`, `export/docx.py`, `export/subtitles.py`, `export/dialog.py`).
   - Implemented true dynamic plugin export destination architecture via `plugins.base.ExportDestination` and `PluginManager`.

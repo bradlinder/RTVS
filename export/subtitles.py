@@ -27,6 +27,32 @@ def format_subtitle_timestamp(seconds: float, vtt: bool = False) -> str:
     return f"{h:02d}:{m:02d}:{sec:02d}{delimiter}{ms:03d}"
 
 
+def format_srt_timestamp(seconds: float) -> str:
+    """Format seconds into SRT (HH:MM:SS,mmm) timestamp."""
+    return format_subtitle_timestamp(seconds, vtt=False)
+
+
+def format_vtt_timestamp(seconds: float) -> str:
+    """Format seconds into WebVTT (HH:MM:SS.mmm) timestamp."""
+    return format_subtitle_timestamp(seconds, vtt=True)
+
+
+def format_cue_timestamp(seconds: float) -> str:
+    """Format seconds into standard CUE sheet MM:SS:FF (75 frames per second)."""
+    return seconds_to_cue_time(seconds)
+
+
+def format_youtube_timestamp(seconds: float) -> str:
+    """Format seconds into YouTube chapter timestamp (e.g. 03:45 or 01:23:45)."""
+    t = max(0.0, float(seconds or 0.0))
+    h = int(t // 3600)
+    m = int((t % 3600) // 60)
+    s = int(t % 60)
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
 def seconds_to_cue_time(seconds: float) -> str:
     """Format seconds into standard CUE sheet MM:SS:FF (75 frames per second)."""
     total_secs = max(0.0, float(seconds or 0.0))
@@ -62,6 +88,11 @@ def generate_cue_sheet(stories: list, media_filename: str = "", album_title: str
         lines.append(f'    TITLE "{title}"')
         lines.append(f'    INDEX 01 {cue_time}')
     return "\n".join(lines) + "\n"
+
+
+def generate_cue_content(stories: list, media_filename: str = "", album_title: str = "Album") -> str:
+    """Generate CUE sheet content from story segments (alias for generate_cue_sheet)."""
+    return generate_cue_sheet(stories, media_filename=media_filename, album_title=album_title)
 
 
 def generate_youtube_chapters(stories: list, ensure_zero_start: bool = True) -> str:
@@ -139,3 +170,22 @@ def write_subtitles_file(
     """Writes formatted subtitles (SRT or VTT) to a destination path."""
     content = format_subtitles(blocks, fmt=fmt, include_speakers=include_speakers, clean_text_fn=clean_text_fn)
     Path(path).write_text(content, encoding="utf-8")
+
+
+def generate_srt_content(
+    blocks: List[Dict[str, Any]],
+    include_speakers: bool = True,
+    clean_text_fn: Optional[Callable[[str, str], str]] = None,
+) -> str:
+    """Generate SubRip (.srt) subtitle content from blocks."""
+    return format_subtitles(blocks, fmt="srt", include_speakers=include_speakers, clean_text_fn=clean_text_fn)
+
+
+def generate_vtt_content(
+    blocks: List[Dict[str, Any]],
+    include_speakers: bool = True,
+    clean_text_fn: Optional[Callable[[str, str], str]] = None,
+) -> str:
+    """Generate WebVTT (.vtt) subtitle content from blocks."""
+    return format_subtitles(blocks, fmt="vtt", include_speakers=include_speakers, clean_text_fn=clean_text_fn)
+

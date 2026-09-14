@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSplitter,
     QStatusBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -186,7 +187,7 @@ class UiLayoutMixin:
         self.transcript_mode_toggle_btn = QPushButton("Edit Transcript", self)
         self.transcript_mode_toggle_btn.setCheckable(True)
         self.transcript_mode_toggle_btn.setChecked(False)
-        self.transcript_mode_toggle_btn.setToolTip("Click to edit transcript text.")
+        self.transcript_mode_toggle_btn.setToolTip("Switch between interactive playback and text editing mode (F2)")
         self.transcript_mode_toggle_btn.clicked.connect(self.toggle_transcript_editing_mode)
         search_bar.addWidget(self.transcript_mode_toggle_btn)
 
@@ -194,19 +195,19 @@ class UiLayoutMixin:
         # rest of the application and is persisted between sessions.
         self.transcript_font_down_btn = QPushButton("A−", self)
         self.transcript_font_down_btn.setObjectName("transcript_font_down_btn")
-        self.transcript_font_down_btn.setToolTip("Decrease transcript font size")
+        self.transcript_font_down_btn.setToolTip("Decrease transcript font size (Ctrl+-)")
         self.transcript_font_down_btn.clicked.connect(lambda: self.adjust_transcript_font_size(-1))
         search_bar.addWidget(self.transcript_font_down_btn)
 
         self.transcript_font_reset_btn = QPushButton("A", self)
         self.transcript_font_reset_btn.setObjectName("transcript_font_reset_btn")
-        self.transcript_font_reset_btn.setToolTip("Reset transcript font size")
+        self.transcript_font_reset_btn.setToolTip("Reset transcript font size (Ctrl+0)")
         self.transcript_font_reset_btn.clicked.connect(self.reset_transcript_font_size)
         search_bar.addWidget(self.transcript_font_reset_btn)
 
         self.transcript_font_up_btn = QPushButton("A+", self)
         self.transcript_font_up_btn.setObjectName("transcript_font_up_btn")
-        self.transcript_font_up_btn.setToolTip("Increase transcript font size")
+        self.transcript_font_up_btn.setToolTip("Increase transcript font size (Ctrl++)")
         self.transcript_font_up_btn.clicked.connect(lambda: self.adjust_transcript_font_size(1))
         search_bar.addWidget(self.transcript_font_up_btn)
 
@@ -214,7 +215,7 @@ class UiLayoutMixin:
         self.comments_toggle_btn.setObjectName("comments_toggle_btn")
         self.comments_toggle_btn.setCheckable(True)
         self.comments_toggle_btn.setChecked(getattr(self, "show_comments", True))
-        self.comments_toggle_btn.setToolTip("Toggle comments sidebar (Ctrl+Alt+M)")
+        self.comments_toggle_btn.setToolTip("Toggle comments sidebar & annotations (Ctrl+Alt+C)")
         self.comments_toggle_btn.clicked.connect(lambda: getattr(self, "toggle_comments_panel", lambda: None)())
         search_bar.addWidget(self.comments_toggle_btn)
 
@@ -230,6 +231,7 @@ class UiLayoutMixin:
         self.fmt_bold_btn = QToolButton(self.transcript_format_toolbar)
         self.fmt_bold_btn.setText("B")
         self.fmt_bold_btn.setCheckable(True)
+        self.fmt_bold_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.fmt_bold_btn.setToolTip("Bold (Ctrl+B)")
         self.fmt_bold_btn.setStyleSheet("font-weight: bold; min-width: 26px; padding: 2px 6px;")
         self.fmt_bold_btn.clicked.connect(lambda: getattr(self.transcript_view, "toggle_bold", lambda: None)())
@@ -238,6 +240,7 @@ class UiLayoutMixin:
         self.fmt_italic_btn = QToolButton(self.transcript_format_toolbar)
         self.fmt_italic_btn.setText("I")
         self.fmt_italic_btn.setCheckable(True)
+        self.fmt_italic_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.fmt_italic_btn.setToolTip("Italic (Ctrl+I)")
         self.fmt_italic_btn.setStyleSheet("font-style: italic; min-width: 26px; padding: 2px 6px;")
         self.fmt_italic_btn.clicked.connect(lambda: getattr(self.transcript_view, "toggle_italic", lambda: None)())
@@ -246,6 +249,7 @@ class UiLayoutMixin:
         self.fmt_underline_btn = QToolButton(self.transcript_format_toolbar)
         self.fmt_underline_btn.setText("U")
         self.fmt_underline_btn.setCheckable(True)
+        self.fmt_underline_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.fmt_underline_btn.setToolTip("Underline (Ctrl+U)")
         self.fmt_underline_btn.setStyleSheet("text-decoration: underline; min-width: 26px; padding: 2px 6px;")
         self.fmt_underline_btn.clicked.connect(lambda: getattr(self.transcript_view, "toggle_underline", lambda: None)())
@@ -254,6 +258,7 @@ class UiLayoutMixin:
         self.fmt_strike_btn = QToolButton(self.transcript_format_toolbar)
         self.fmt_strike_btn.setText("S")
         self.fmt_strike_btn.setCheckable(True)
+        self.fmt_strike_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.fmt_strike_btn.setToolTip("Strikethrough (Ctrl+K)")
         self.fmt_strike_btn.setStyleSheet("text-decoration: line-through; min-width: 26px; padding: 2px 6px;")
         self.fmt_strike_btn.clicked.connect(lambda: getattr(self.transcript_view, "toggle_strikethrough", lambda: None)())
@@ -264,15 +269,52 @@ class UiLayoutMixin:
         fmt_sep1.setFrameShadow(QFrame.Shadow.Sunken)
         fmt_layout.addWidget(fmt_sep1)
 
+        # 6 Custom Highlighter Color Options
+        self.current_highlight_color = "#fef08a"
         self.fmt_highlight_btn = QToolButton(self.transcript_format_toolbar)
-        self.fmt_highlight_btn.setText("🖊️ Highlight")
-        self.fmt_highlight_btn.setToolTip("Highlight text (Yellow)")
+        self.fmt_highlight_btn.setText("🖊️ Highlight ▾")
+        self.fmt_highlight_btn.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self.fmt_highlight_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.fmt_highlight_btn.setToolTip("Highlight selected text (Ctrl+Shift+H)")
         self.fmt_highlight_btn.setStyleSheet("padding: 2px 6px;")
-        self.fmt_highlight_btn.clicked.connect(lambda: getattr(self.transcript_view, "toggle_highlight", lambda: None)())
+
+        highlight_menu = QMenu(self.fmt_highlight_btn)
+        hl_colors = [
+            ("🟡 Yellow", "#fef08a"),
+            ("🟢 Green", "#bbf7d0"),
+            ("🔵 Blue / Cyan", "#bae6fd"),
+            ("🌸 Pink", "#fbcfe8"),
+            ("🟠 Orange", "#fed7aa"),
+            ("🟣 Purple", "#e9d5ff"),
+        ]
+
+        def _make_hl_handler(col_hex, label_name):
+            def _handler():
+                self.current_highlight_color = col_hex
+                self.fmt_highlight_btn.setToolTip(f"Highlight text ({label_name}) (Ctrl+Shift+H)")
+                if hasattr(self, "transcript_view") and hasattr(self.transcript_view, "toggle_highlight"):
+                    self.transcript_view.toggle_highlight(col_hex, force_apply=True)
+            return _handler
+
+        for label, hex_code in hl_colors:
+            act = highlight_menu.addAction(label)
+            act.triggered.connect(_make_hl_handler(hex_code, label))
+
+        highlight_menu.addSeparator()
+        clear_hl_act = highlight_menu.addAction("⚪ Remove Highlight")
+        clear_hl_act.triggered.connect(
+            lambda: getattr(self.transcript_view, "toggle_highlight", lambda c: None)("#00000000", force_apply=False)
+        )
+
+        self.fmt_highlight_btn.setMenu(highlight_menu)
+        self.fmt_highlight_btn.clicked.connect(
+            lambda: getattr(self.transcript_view, "toggle_highlight", lambda c: None)(self.current_highlight_color)
+        )
         fmt_layout.addWidget(self.fmt_highlight_btn)
 
         self.fmt_clear_btn = QToolButton(self.transcript_format_toolbar)
         self.fmt_clear_btn.setText("Tx Clear")
+        self.fmt_clear_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.fmt_clear_btn.setToolTip("Clear text formatting (Ctrl+\\)")
         self.fmt_clear_btn.setStyleSheet("padding: 2px 6px;")
         self.fmt_clear_btn.clicked.connect(lambda: getattr(self.transcript_view, "clear_formatting", lambda: None)())
@@ -285,6 +327,7 @@ class UiLayoutMixin:
 
         self.fmt_split_btn = QToolButton(self.transcript_format_toolbar)
         self.fmt_split_btn.setText("↵ Split Speaker")
+        self.fmt_split_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.fmt_split_btn.setToolTip("Split speaker segment at cursor (Shift+Enter)")
         self.fmt_split_btn.setStyleSheet("padding: 2px 6px;")
         self.fmt_split_btn.clicked.connect(self._on_toolbar_split_speaker)
@@ -306,11 +349,17 @@ class UiLayoutMixin:
         self.transcript_view = InteractiveTranscriptEdit(self)
         self.transcript_view.setObjectName("transcript_view")
         self.transcript_view.set_font_scale(getattr(self, "transcript_font_scale", 1.0))
+        if hasattr(self, "show_floating_selection_toolbar"):
+            self.transcript_view.show_floating_selection_toolbar = self.show_floating_selection_toolbar
         self.transcript_comments_splitter.addWidget(self.transcript_view)
 
         self.comments_panel = CommentsPanel(self)
         self.comments_panel.setObjectName("comments_panel")
-        self.comments_panel.commentSeekRequested.connect(self.seek_to)
+        def _on_comment_seek(start_time, seg_idx):
+            self.seek_to(start_time)
+            if hasattr(self, "transcript_view") and hasattr(self.transcript_view, "select_comment_range"):
+                self.transcript_view.select_comment_range(seg_idx)
+        self.comments_panel.commentSeekRequested.connect(_on_comment_seek)
         self.comments_panel.commentEditRequested.connect(lambda s: getattr(self, "edit_segment_comment_dialog", getattr(self, "edit_segment_note_dialog", lambda x: None))(s))
         self.comments_panel.commentDeleteRequested.connect(lambda s: getattr(self, "delete_segment_comment", lambda x: None)(s))
         self.transcript_comments_splitter.addWidget(self.comments_panel)
@@ -492,11 +541,57 @@ class UiLayoutMixin:
 
         # Transcript zoom shortcuts. Use platform_seq so Ctrl becomes Command on macOS.
         self.shortcut_transcript_font_up = QShortcut(platform_seq("Ctrl++"), self)
+        self.shortcut_transcript_font_up.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut_transcript_font_up.activated.connect(lambda: self.adjust_transcript_font_size(1))
         self.shortcut_transcript_font_down = QShortcut(platform_seq("Ctrl+-"), self)
+        self.shortcut_transcript_font_down.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut_transcript_font_down.activated.connect(lambda: self.adjust_transcript_font_size(-1))
         self.shortcut_transcript_font_reset = QShortcut(platform_seq("Ctrl+0"), self)
+        self.shortcut_transcript_font_reset.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut_transcript_font_reset.activated.connect(self.reset_transcript_font_size)
+
+        # Formatting actions
+        self.fmt_bold_action = QAction("Bold Text", self)
+        self.fmt_bold_action.setShortcut(platform_seq("Ctrl+B"))
+        self.fmt_bold_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.fmt_bold_action.triggered.connect(lambda: getattr(self.transcript_view, "toggle_bold", lambda: None)())
+        self.addAction(self.fmt_bold_action)
+
+        self.fmt_italic_action = QAction("Italic Text", self)
+        self.fmt_italic_action.setShortcut(platform_seq("Ctrl+I"))
+        self.fmt_italic_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.fmt_italic_action.triggered.connect(lambda: getattr(self.transcript_view, "toggle_italic", lambda: None)())
+        self.addAction(self.fmt_italic_action)
+
+        self.fmt_underline_action = QAction("Underline Text", self)
+        self.fmt_underline_action.setShortcut(platform_seq("Ctrl+U"))
+        self.fmt_underline_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.fmt_underline_action.triggered.connect(lambda: getattr(self.transcript_view, "toggle_underline", lambda: None)())
+        self.addAction(self.fmt_underline_action)
+
+        self.fmt_strike_action = QAction("Strikethrough Text", self)
+        self.fmt_strike_action.setShortcut(platform_seq("Ctrl+K"))
+        self.fmt_strike_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.fmt_strike_action.triggered.connect(lambda: getattr(self.transcript_view, "toggle_strikethrough", lambda: None)())
+        self.addAction(self.fmt_strike_action)
+
+        self.fmt_highlight_action = QAction("Highlight Text (Yellow)", self)
+        self.fmt_highlight_action.setShortcut(platform_seq("Ctrl+Shift+H"))
+        self.fmt_highlight_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.fmt_highlight_action.triggered.connect(lambda: getattr(self.transcript_view, "toggle_highlight", lambda: None)())
+        self.addAction(self.fmt_highlight_action)
+
+        self.fmt_clear_action = QAction("Clear Text Formatting", self)
+        self.fmt_clear_action.setShortcut(platform_seq("Ctrl+\\"))
+        self.fmt_clear_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.fmt_clear_action.triggered.connect(lambda: getattr(self.transcript_view, "clear_formatting", lambda: None)())
+        self.addAction(self.fmt_clear_action)
+
+        self.fmt_split_action = QAction("Split Speaker Segment", self)
+        self.fmt_split_action.setShortcut(platform_seq("Shift+Return"))
+        self.fmt_split_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.fmt_split_action.triggered.connect(self._on_toolbar_split_speaker)
+        self.addAction(self.fmt_split_action)
 
         # Connect Story List signals
         self.story_list.itemSelectionChanged.connect(self.story_selection_changed)
@@ -575,7 +670,7 @@ class UiLayoutMixin:
         file_menu.addAction(self.save_as_action)
 
         self.export_zip_action = QAction("Export &Project Archive (.zip)...", self)
-        self.export_zip_action.setShortcut(platform_seq("Ctrl+Shift+Z"))
+        self.export_zip_action.setShortcut(platform_seq("Ctrl+Shift+E"))
         self.export_zip_action.triggered.connect(self.export_project_archive)
         file_menu.addAction(self.export_zip_action)
 
@@ -615,8 +710,16 @@ class UiLayoutMixin:
         edit_menu.addAction(self.undo_action)
 
         self.redo_action = self.undo_stack.createRedoAction(self, "&Redo")
-        self.redo_action.setShortcuts([QKeySequence.Redo, QKeySequence("Ctrl+Y")])
+        self.redo_action.setShortcut(platform_seq("Ctrl+Shift+Z"))
         edit_menu.addAction(self.redo_action)
+
+        edit_menu.addSeparator()
+
+        add_comment_act = QAction("Add / Edit &Comment...", self)
+        add_comment_act.setShortcut(platform_seq("Ctrl+M"))
+        add_comment_act.triggered.connect(lambda: getattr(self.transcript_view, "edit_active_segment_comment", lambda: None)() if hasattr(self, "transcript_view") else None)
+        self.add_comment_action = add_comment_act
+        edit_menu.addAction(add_comment_act)
 
         edit_menu.addSeparator()
 
@@ -631,7 +734,7 @@ class UiLayoutMixin:
         # ==========================================
         view_menu = menubar.addMenu("&View")
 
-        # Main Panel Visibility Toggles (Alt+1-4 on Win/Linux, Ctrl+Alt+1-4 on Mac)
+        # Main Panel Visibility Toggles (Alt+1-5 on Win/Linux, Ctrl+Alt+1-5 on Mac)
         panel_mod = "Ctrl+Alt" if sys.platform == "darwin" else "Alt"
 
         self.toggle_timeline_action = QAction("&Timeline Panel", self, checkable=True)
@@ -659,7 +762,8 @@ class UiLayoutMixin:
         view_menu.addAction(self.toggle_activity_action)
 
         self.toggle_comments_action = QAction("Show &Comments Sidebar & Highlights", self, checkable=True)
-        self.toggle_comments_action.setShortcut(platform_seq("Ctrl+Alt+M"))
+        self.toggle_comments_action.setShortcut(platform_seq("Ctrl+Alt+C"))
+        self.toggle_comments_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
         self.toggle_comments_action.setChecked(str(getattr(self, "show_comments", getattr(self, "show_notes", True))).lower() in {"1", "true", "yes"})
         self.toggle_comments_action.toggled.connect(lambda checked: getattr(self, "toggle_show_comments", getattr(self, "toggle_show_notes", lambda c: None))(checked))
         view_menu.addAction(self.toggle_comments_action)
@@ -685,7 +789,7 @@ class UiLayoutMixin:
         timeline_menu.addSeparator()
 
         self.video_preview_action = QAction("&Video Preview Window", self, checkable=True)
-        self.video_preview_action.setShortcut(platform_seq("Ctrl+Shift+M"))
+        self.video_preview_action.setShortcut(platform_seq("Ctrl+Shift+V"))
         self.video_preview_action.setEnabled(False)
         self.video_preview_action.toggled.connect(self.toggle_video_preview)
         timeline_menu.addAction(self.video_preview_action)
@@ -707,14 +811,11 @@ class UiLayoutMixin:
 
         transcript_menu.addSeparator()
 
-        self.transcript_show_comments_action = QAction("Show &Comments Sidebar", self, checkable=True)
-        self.transcript_show_comments_action.setShortcut(platform_seq("Ctrl+Alt+M"))
-        self.transcript_show_comments_action.setChecked(str(getattr(self, "show_comments", getattr(self, "show_notes", True))).lower() in {"1", "true", "yes"})
-        self.transcript_show_comments_action.toggled.connect(lambda checked: getattr(self, "toggle_show_comments", getattr(self, "toggle_show_notes", lambda c: None))(checked))
+        self.transcript_show_comments_action = self.toggle_comments_action
         transcript_menu.addAction(self.transcript_show_comments_action)
 
         self.transcript_edit_mode_action = QAction("&Edit Transcript Mode", self, checkable=True)
-        self.transcript_edit_mode_action.setShortcut(platform_seq("Ctrl+E"))
+        self.transcript_edit_mode_action.setShortcut(platform_seq("F2"))
         self.transcript_edit_mode_action.setChecked(getattr(self.transcript_view, "is_editing_mode", False) if hasattr(self, "transcript_view") else False)
         self.transcript_edit_mode_action.toggled.connect(lambda checked: getattr(self, "toggle_transcript_editing_mode", lambda: None)())
         transcript_menu.addAction(self.transcript_edit_mode_action)
@@ -782,9 +883,7 @@ class UiLayoutMixin:
 
         tools_menu.addSeparator()
 
-        self.batch_processing_action = QAction("&Batch Processing...", self)
-        self.batch_processing_action.setShortcut(platform_seq("Ctrl+B"))
-        self.batch_processing_action.triggered.connect(self.open_batch_processing_dialog)
+        self.batch_processing_action = self.batch_file_action
         tools_menu.addAction(self.batch_processing_action)
 
         tools_menu.addSeparator()
@@ -802,14 +901,13 @@ class UiLayoutMixin:
         tools_menu.addAction(self.regen_thumbnails_action)
 
         self.clear_cache_action = QAction("&Clear Temporary Cache...", self)
-        self.clear_cache_action.setShortcut(platform_seq("Ctrl+Alt+C"))
         self.clear_cache_action.triggered.connect(self.open_clear_cache_dialog)
         tools_menu.addAction(self.clear_cache_action)
 
         tools_menu.addSeparator()
 
         self.manage_models_action = QAction("&Manage AI Models...", self)
-        self.manage_models_action.setShortcut(platform_seq("Ctrl+M"))
+        self.manage_models_action.setShortcut(platform_seq("Ctrl+Alt+M"))
         self.manage_models_action.triggered.connect(self.open_model_cleanup_dialog)
         self.translation_model_action = self.manage_models_action
         tools_menu.addAction(self.manage_models_action)
@@ -832,13 +930,12 @@ class UiLayoutMixin:
         settings_menu.addAction(pref_act)
 
         shortcuts_pref_act = QAction("Customize &Keyboard Shortcuts...", self)
-        shortcuts_pref_act.setShortcut(platform_seq("Ctrl+K"))
+        shortcuts_pref_act.setShortcut(platform_seq("F8"))
         shortcuts_pref_act.triggered.connect(lambda: self.open_preferences_dialog(initial_category="Keyboard Shortcuts"))
         self.shortcuts_pref_action = shortcuts_pref_act
         settings_menu.addAction(shortcuts_pref_act)
 
         clear_cache_settings_act = QAction("Clear &Temporary Cache...", self)
-        clear_cache_settings_act.setShortcut(platform_seq("Ctrl+Alt+C"))
         clear_cache_settings_act.triggered.connect(self.open_clear_cache_dialog)
         settings_menu.addAction(clear_cache_settings_act)
 
@@ -876,7 +973,7 @@ class UiLayoutMixin:
         settings_menu.addSeparator()
 
         update_act = QAction("Check for &Updates...", self)
-        update_act.setShortcut(platform_seq("Ctrl+U"))
+        update_act.setShortcut(platform_seq("Ctrl+Shift+U"))
         update_act.triggered.connect(self.check_for_updates)
         self.update_action = update_act
         settings_menu.addAction(update_act)
@@ -1186,6 +1283,8 @@ class UiLayoutMixin:
                     return "Unassigned"
             return fallback
 
+        clear_fmt_sc = get_sc("fmt_clear", f"{cmd}+\\")
+
         html_content = f"""
         <style>
             table {{ width: 100%; border-collapse: collapse; margin-bottom: 16px; }}
@@ -1236,6 +1335,7 @@ class UiLayoutMixin:
             <tr><td><b>Toggle Transcript Panel</b></td><td><kbd>{get_sc("toggle_transcript", f"{panel_mod}+2")}</kbd></td></tr>
             <tr><td><b>Toggle Stories Panel</b></td><td><kbd>{get_sc("toggle_stories", f"{panel_mod}+3")}</kbd></td></tr>
             <tr><td><b>Toggle Activity History Panel</b></td><td><kbd>{get_sc("toggle_activity", f"{panel_mod}+4")}</kbd></td></tr>
+            <tr><td><b>Toggle Comments Sidebar & Annotations</b></td><td><kbd>{get_sc("toggle_comments", f"{cmd}+{opt}+C")}</kbd></td></tr>
             <tr><td><b>Toggle Waveform Display</b></td><td><kbd>{get_sc("toggle_waveform", f"{cmd}+{opt}+W")}</kbd></td></tr>
             <tr><td><b>Toggle Video Thumbnails</b></td><td><kbd>{get_sc("toggle_thumbnails", f"{cmd}+{opt}+T")}</kbd></td></tr>
             <tr><td><b>Toggle Video Preview Window</b></td><td><kbd>{get_sc("toggle_video_preview", f"{cmd}+Shift+M")}</kbd></td></tr>
@@ -1245,10 +1345,15 @@ class UiLayoutMixin:
 
         <h3>Editing & Transcript</h3>
         <table>
+            <tr><td><b>Toggle Transcript Edit Mode</b></td><td><kbd>{get_sc("toggle_edit_mode", "F2")}</kbd></td></tr>
             <tr><td><b>Undo / Redo</b></td><td><kbd>{get_sc("undo", f"{cmd}+Z")}</kbd> / <kbd>{get_sc("redo", f"{cmd}+Y")}</kbd></td></tr>
+            <tr><td><b>Bold / Italic / Underline / Strike</b></td><td><kbd>{get_sc("fmt_bold", f"{cmd}+B")}</kbd> / <kbd>{get_sc("fmt_italic", f"{cmd}+I")}</kbd> / <kbd>{get_sc("fmt_underline", f"{cmd}+U")}</kbd> / <kbd>{get_sc("fmt_strikethrough", f"{cmd}+K")}</kbd></td></tr>
+            <tr><td><b>Highlight Text (Yellow)</b></td><td><kbd>{get_sc("fmt_highlight", f"{cmd}+Shift+H")}</kbd></td></tr>
+            <tr><td><b>Clear Text Formatting</b></td><td><kbd>{clear_fmt_sc}</kbd></td></tr>
+            <tr><td><b>Add / Edit Comment</b></td><td><kbd>{get_sc("add_comment", f"{cmd}+M")}</kbd></td></tr>
+            <tr><td><b>Split Speaker Segment</b></td><td><kbd>{get_sc("split_speaker", "Shift+Enter")}</kbd></td></tr>
             <tr><td><b>Find and Replace</b></td><td><kbd>{get_sc("find_replace", f"{cmd}+F")}</kbd></td></tr>
             <tr><td><b>Find Next Match</b></td><td><kbd>{get_sc("find_next", f"{cmd}+G")}</kbd></td></tr>
-            <tr><td><b>Insert Speaker Break (Edit Mode)</b></td><td><kbd>Shift+Enter</kbd></td></tr>
             <tr><td><b>Insert Timestamp Line (Edit Mode)</b></td><td><kbd>Enter</kbd></td></tr>
             <tr><td><b>Exit Editing Mode</b></td><td><kbd>Esc</kbd></td></tr>
         </table>

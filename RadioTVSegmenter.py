@@ -212,6 +212,7 @@ class MainWindow(
         if self.timeline_thumbnail_position not in ("above", "below"):
             self.timeline_thumbnail_position = "below"
         self.transcript_selection_mode = str(self.settings_store.value("transcript_selection_mode", "replace") or "replace")
+        self.show_floating_selection_toolbar = str(self.settings_store.value("show_floating_selection_toolbar", "true")).lower() in {"1", "true", "yes"}
         try:
             self.transcript_font_scale = max(0.80, min(1.80, float(self.settings_store.value("transcript_font_scale", 1.0))))
         except (TypeError, ValueError):

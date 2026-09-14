@@ -1,10 +1,14 @@
 """Application constants and environment configuration."""
 import os
-from PySide6.QtCore import QSettings
+
+try:
+    from PySide6.QtCore import QSettings
+except ImportError:
+    QSettings = None
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "3.1.0-dev-1"
+PROJECT_VERSION = "3.1.1-beta-2"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 # Internal identifiers are intentionally left as "RadioTVStorySegmenter" (the

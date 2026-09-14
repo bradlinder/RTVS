@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter v3.1.0-dev-1 — transcript story responsibilities.
+"""Radio & TV Segmenter v3.1.3 — transcript story responsibilities.
 
 
 Methods intentionally retain the MainWindow-facing API so behavior remains
@@ -58,7 +58,9 @@ class TranscriptStoryMixin:
                     if w.get("italic"): token["italic"] = True
                     if w.get("underline"): token["underline"] = True
                     if w.get("strike"): token["strike"] = True
-                    if w.get("highlight"): token["highlight"] = w["highlight"]
+                    if w.get("highlight"):
+                        hl = w.get("highlight")
+                        token["highlight"] = "#fef08a" if isinstance(hl, bool) or hl in ("True", "true", 1) else str(hl)
                     word_tokens.append(token)
             else:
                 seg_text = segment.get("text", "")
@@ -143,6 +145,22 @@ class TranscriptStoryMixin:
             current_char_pos += len(plain_prefix)
 
             word_html_list = []
+            current_hl_color = None
+            current_hl_words = []
+
+            def _flush_hl_group():
+                nonlocal current_hl_words, current_hl_color
+                if not current_hl_words:
+                    return
+                joined_html = " ".join(current_hl_words)
+                if current_hl_color:
+                    word_html_list.append(
+                        f'<span style="background-color:{current_hl_color}; color:#0f172a; padding:1px 0px; border-radius:2px;">{joined_html}</span>'
+                    )
+                else:
+                    word_html_list.append(joined_html)
+                current_hl_words = []
+
             for item in p_words:
                 w_text = item["word"]
                 w_start = item["start"]
@@ -164,12 +182,20 @@ class TranscriptStoryMixin:
                     w_style += " text-decoration:underline;"
                 elif item.get("strike"):
                     w_style += " text-decoration:line-through;"
-                if item.get("highlight"):
-                    w_style += f" background-color:{item.get('highlight')};"
-                word_html_list.append(
-                    f'<a href="word:{w_start}:{w_seg}" style="{w_style}">{esc_w}</a>'
-                )
 
+                hl_val = item.get("highlight")
+                item_hl_color = None
+                if hl_val:
+                    item_hl_color = "#fef08a" if isinstance(hl_val, bool) or hl_val in ("True", "true", 1) else str(hl_val)
+                    w_style += f" color:#0f172a;"
+
+                if item_hl_color != current_hl_color:
+                    _flush_hl_group()
+                    current_hl_color = item_hl_color
+
+                current_hl_words.append(f'<a href="word:{w_start}:{w_seg}" style="{w_style}">{esc_w}</a>')
+
+            _flush_hl_group()
             current_char_pos += 2
 
             body_content = " ".join(word_html_list)
@@ -257,6 +283,8 @@ class TranscriptStoryMixin:
         self.transcript_view.set_char_timestamp_map(char_timestamp_map)
         if hasattr(self, "comments_panel"):
             self.comments_panel.set_comments(self.transcript.get("segments", []))
+        if hasattr(self, "transcript_view"):
+            self.transcript_view.update_extra_selections()
         # This is the exact project state represented by the rendered editor.
         # Text edits are grouped from this baseline into one undoable action.
         if hasattr(self, "_capture_project_state") and not getattr(self, "is_restoring_undo", False):
@@ -292,6 +320,39 @@ class TranscriptStoryMixin:
             if ts is not None and ts >= 0:
                 self.last_transcript_cursor_time = ts
                 self.last_position_source = "transcript"
+
+        # Reverse Selection: bring corresponding comment card into active focus when user clicks highlighted text
+        cursor = self.transcript_view.textCursor()
+        target_seg = self.transcript_view.get_segment_index_at_cursor(cursor)
+        if target_seg is None:
+            target_seg = cursor.blockNumber()
+
+        active_comment_seg = None
+        segments = self.transcript.get("segments", []) if self.transcript else []
+        if 0 <= target_seg < len(segments):
+            seg = segments[target_seg]
+            if (seg.get("comments") or seg.get("notes", "")).strip():
+                active_comment_seg = target_seg
+
+        if active_comment_seg is None and segments:
+            pos = cursor.position()
+            doc_text = self.transcript_view.document().toPlainText()
+            for idx, seg in enumerate(segments):
+                if (seg.get("comments") or seg.get("notes", "")).strip():
+                    c_start = seg.get("comment_char_start")
+                    c_end = seg.get("comment_char_end")
+                    if c_start is not None and c_end is not None and c_start <= pos <= c_end:
+                        active_comment_seg = idx
+                        break
+                    sel_quote = (seg.get("comment_selected_text") or "").strip()
+                    if sel_quote and sel_quote in doc_text:
+                        q_pos = doc_text.find(sel_quote)
+                        if q_pos >= 0 and q_pos <= pos <= (q_pos + len(sel_quote)):
+                            active_comment_seg = idx
+                            break
+
+        if hasattr(self, "comments_panel"):
+            self.comments_panel.highlight_segment(active_comment_seg)
 
     def on_transcript_text_changed(self):
         if self.is_updating_transcript_view or getattr(self, "is_restoring_undo", False) or not self.transcript:
@@ -405,6 +466,9 @@ class TranscriptStoryMixin:
                 self.translations[key]["status"] = "stale"
             self.log_activity("[TRANSLATION] Source transcript edited; existing translations marked for update.", mark_dirty=False)
 
+        if hasattr(self, "transcript_view"):
+            self.transcript_view.update_extra_selections()
+
         if getattr(self, "_pending_transcript_edit_before", None) is None:
             baseline = getattr(self, "_transcript_edit_baseline", None)
             if baseline is not None:
@@ -450,8 +514,16 @@ class TranscriptStoryMixin:
                     if hasattr(self.transcript_view, "move_cursor_to_time"):
                         self.transcript_view.move_cursor_to_time(start_time, self.transcript)
 
-    def edit_segment_comment_dialog(self, seg_idx):
-        """Open comment editor dialog for the targeted transcript segment."""
+    def edit_segment_comment_dialog(
+        self,
+        seg_idx: int,
+        sel_text: str = "",
+        start_char: Optional[int] = None,
+        end_char: Optional[int] = None,
+        t_range: Optional[tuple[float, float]] = None,
+        covered_indices: Optional[List[int]] = None
+    ):
+        """Open comment editor dialog for the targeted transcript segment and selection range."""
         if not self.transcript or "segments" not in self.transcript:
             QMessageBox.information(self, "No Transcript", "No transcript is currently loaded.")
             return
@@ -460,67 +532,164 @@ class TranscriptStoryMixin:
             return
         seg = segments[seg_idx]
         current_comment = seg.get("comments") or seg.get("notes", "")
+
+        # If no explicit selection was passed, use any previously saved comment text selection
+        if not sel_text:
+            sel_text = seg.get("comment_selected_text", "")
+
+        prompt = f"Comment for Segment {seg_idx + 1} ({format_time(seg.get('start', 0.0))}):"
+        if sel_text:
+            disp_quote = sel_text if len(sel_text) <= 80 else sel_text[:77] + "..."
+            prompt = f'Comment for selection: "{disp_quote}"'
+
         dialog = CommentEditorDialog(
             self,
             comment_text=current_comment,
             title="Edit Comment" if current_comment else "Add Comment",
-            prompt=f"Comment for Segment {seg_idx + 1} ({format_time(seg.get('start', 0.0))}):",
+            prompt=prompt,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
+            target_indices = covered_indices if covered_indices else [seg_idx]
             if dialog.is_deleted():
-                seg.pop("comments", None)
-                seg.pop("notes", None)
+                for idx in target_indices:
+                    if 0 <= idx < len(segments):
+                        s = segments[idx]
+                        s.pop("comments", None)
+                        s.pop("notes", None)
+                        s.pop("comment_selected_text", None)
+                        s.pop("comment_char_start", None)
+                        s.pop("comment_char_end", None)
+                        s.pop("comment_start_time", None)
+                        s.pop("comment_end_time", None)
             else:
                 text = dialog.get_comment_text()
                 if text.strip():
-                    seg["comments"] = text
-                    seg["notes"] = text  # preserve backward compatibility
+                    for idx in target_indices:
+                        if 0 <= idx < len(segments):
+                            s = segments[idx]
+                            s["comments"] = text
+                            s["notes"] = text  # preserve backward compatibility
+                            if sel_text:
+                                s["comment_selected_text"] = sel_text
+                            if start_char is not None and end_char is not None:
+                                s["comment_char_start"] = start_char
+                                s["comment_char_end"] = end_char
+                            if t_range:
+                                s["comment_start_time"] = t_range[0]
+                                s["comment_end_time"] = t_range[1]
                 else:
-                    seg.pop("comments", None)
-                    seg.pop("notes", None)
+                    for idx in target_indices:
+                        if 0 <= idx < len(segments):
+                            s = segments[idx]
+                            s.pop("comments", None)
+                            s.pop("notes", None)
+                            s.pop("comment_selected_text", None)
+                            s.pop("comment_char_start", None)
+                            s.pop("comment_char_end", None)
+                            s.pop("comment_start_time", None)
+                            s.pop("comment_end_time", None)
+
             self.mark_project_dirty()
             if hasattr(self, "transcript_view"):
                 self.transcript_view.update_extra_selections()
             if hasattr(self, "comments_panel"):
                 self.comments_panel.set_comments(segments)
                 self.comments_panel.highlight_segment(seg_idx)
+            if before_state and hasattr(self, "_commit_project_state_change"):
+                self._commit_project_state_change(before_state, "Update Comment")
 
     # Alias for backward compatibility
     edit_segment_note_dialog = edit_segment_comment_dialog
 
     def add_comment_from_selection(self):
         """Add or edit comment anchored to the active transcript selection."""
-        if not hasattr(self, "transcript_view"):
+        if not hasattr(self, "transcript_view") or not self.transcript or "segments" not in self.transcript:
             return
+
+        segments = self.transcript.get("segments", [])
         cursor = self.transcript_view.textCursor()
-        seg_idx = self.transcript_view.get_segment_index_at_cursor(cursor)
-        if seg_idx is None:
-            ranges = self.transcript_view.get_all_selected_story_ranges()
-            if ranges and hasattr(self, "transcript") and self.transcript:
-                t = ranges[0].get("start_time", 0.0)
-                segs = self.transcript.get("segments", [])
-                for i, s in enumerate(segs):
-                    if s.get("start", 0.0) <= t <= s.get("end", 0.0):
-                        seg_idx = i
-                        break
-        if seg_idx is None:
-            seg_idx = cursor.blockNumber()
-        self.edit_segment_comment_dialog(seg_idx)
+        sel_text = ""
+        start_char = None
+        end_char = None
+        t_range = None
+        covered_indices = []
+
+        if cursor.hasSelection():
+            sel_text = cursor.selectedText().replace('\u2029', '\n').strip()
+            start_char = min(cursor.selectionStart(), cursor.selectionEnd())
+            end_char = max(cursor.selectionStart(), cursor.selectionEnd())
+            if hasattr(self.transcript_view, "get_time_range_for_char_span"):
+                t_range = self.transcript_view.get_time_range_for_char_span(start_char, end_char)
+        elif hasattr(self.transcript_view, "saved_selections") and self.transcript_view.saved_selections:
+            sel = self.transcript_view.saved_selections[0]
+            sel_text = sel.get("text", "").strip()
+            start_char = sel.get("start_char")
+            end_char = sel.get("end_char")
+            if "start_time" in sel and "end_time" in sel:
+                t_range = (sel["start_time"], sel["end_time"])
+
+        if t_range and t_range[0] is not None and t_range[1] is not None:
+            st, et = t_range
+            for i, s in enumerate(segments):
+                s_start = s.get("start", 0.0)
+                s_end = s.get("end", 0.0)
+                if (s_start <= et and s_end >= st):
+                    covered_indices.append(i)
+
+        seg_idx = None
+        if covered_indices:
+            seg_idx = covered_indices[0]
+        else:
+            seg_idx = self.transcript_view.get_segment_index_at_cursor(cursor)
+            if seg_idx is None:
+                ranges = self.transcript_view.get_all_selected_story_ranges()
+                if ranges and hasattr(self, "transcript") and self.transcript:
+                    t = ranges[0].get("start_time", 0.0)
+                    for i, s in enumerate(segments):
+                        if s.get("start", 0.0) <= t <= s.get("end", 0.0):
+                            seg_idx = i
+                            break
+            if seg_idx is None:
+                seg_idx = cursor.blockNumber()
+
+        if seg_idx is not None and 0 <= seg_idx < len(segments):
+            self.edit_segment_comment_dialog(
+                seg_idx,
+                sel_text=sel_text,
+                start_char=start_char,
+                end_char=end_char,
+                t_range=t_range,
+                covered_indices=covered_indices
+            )
 
     def delete_segment_comment(self, seg_idx):
-        """Delete comment anchored to the specified segment."""
+        """Delete comment anchored to the specified segment and clear associated highlights."""
         if not self.transcript or "segments" not in self.transcript:
             return
+        before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
         segments = self.transcript["segments"]
         if 0 <= seg_idx < len(segments):
             seg = segments[seg_idx]
             seg.pop("comments", None)
             seg.pop("notes", None)
+            seg.pop("comment_selected_text", None)
+            seg.pop("comment_char_start", None)
+            seg.pop("comment_char_end", None)
+            seg.pop("comment_start_time", None)
+            seg.pop("comment_end_time", None)
+            seg.pop("highlight", None)
+            if "words" in seg and isinstance(seg["words"], list):
+                for w in seg["words"]:
+                    if isinstance(w, dict):
+                        w.pop("highlight", None)
             self.mark_project_dirty()
             if hasattr(self, "transcript_view"):
                 self.transcript_view.update_extra_selections()
             if hasattr(self, "comments_panel"):
                 self.comments_panel.set_comments(segments)
+            if before_state and hasattr(self, "_commit_project_state_change"):
+                self._commit_project_state_change(before_state, "Delete Comment")
 
     def toggle_comments_panel(self):
         """Toggle visibility of the comments sidebar."""

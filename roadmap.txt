@@ -29,20 +29,16 @@ ROADMAP MAINTENANCE POLICY: N-1 SLIDING-WINDOW & STATUS TRACKING
 --------------------------------------------------------------------------------
 TABLE OF CONTENTS & STATUS OVERVIEW
 --------------------------------------------------------------------------------
-1. Previous Release: Native PDF Document Export & Collapsible Export Center Sections (Completed in v3.0.2)
-   [x] 1.1 Native PDF Document Export Engine (Lightweight, self-contained TranscriptPdfWriter with PDF 1.4 vector streams)
-   [x] 1.2 Local Export PDF Option & Format Checkbox (PDF document alongside .txt and .docx in UnifiedExportDialog)
-   [x] 1.3 Automatic Multi-Page Pagination, Headers, Footers & Formatted Comment Callouts
-   [x] 1.4 Collapsible Export Center Sections (Reusable CollapsibleSection containers with chevrons and badges)
-   [x] 1.5 Global Collapse All / Expand All Header Toggle Control
-   [x] 1.6 Settings Persistence & Multi-Format Validation (QSettings export_format_pdf and format checks)
+1. Previous Release: Expanded Keyboard Shortcut Registry & Alphabetical Customizer (Completed in v3.1.2)
+   [x] 1.1 Complete Function Registration Across All Window Menus, Context Menus, and Transcript Editor
+   [x] 1.2 Updated Default Shortcuts: Redo (Ctrl+Shift+Z) & Export Project Archive (.zip) (Ctrl+Shift+E)
+   [x] 1.3 Alphabetical Sorting by Default in Keyboard Shortcut Customizer with Category Toggle Buttons
 
-2. Current Release: Codebase Modularization & True Plugin Architecture (Active in v3.1.0-dev-1)
-   [-] 2.1 True Plugin Architecture for WordPress & YouTube Publishing (plugins/wordpress & plugins/youtube with ExportDestination)
-   [x] 2.2 Decouple Domain-Specific Export Handlers into export/ Package (export/pdf.py, export/docx.py, export/subtitles.py, export/dialog.py)
-   [-] 2.3 Split prs_shared.py into Logical UI, Widget, and Utility Modules (ui/dialogs/, utils/)
-   [x] 2.4 Establish Lean Public Interface & Data Models Layer (models.py with @dataclass / TypedDict)
-   [-] 2.5 Dynamic Plugin Registration Hooks for Export Center & Processing Pipeline
+2. Current Release: Selection Popup First-Launch Persistence & Deep-State Universal Undo/Redo (Completed in v3.1.3)
+   [x] 2.1 Floating Selection Popup Preference Initialization on Launch in RadioTVSegmenter.py
+   [x] 2.2 Deep Copy State Cloning in playback_preferences.py and prs_shared.py for Universal Undo (Ctrl+Z) & Redo (Ctrl+Shift+Z)
+   [x] 2.3 Automatic Comments Panel and Transcript Re-rendering Restoration on Undo / Redo
+   [x] 2.4 Contiguous Highlight Removal & Background Brush Clearing across Multi-Sentence Spans
 
 3. Upcoming Milestone: Media Transcoding, Async Provisioning & Transcript Cleaning (Phase 3 - Planned for v3.2) [NOT STARTED]
    [ ] 3.1 Media Transcoding & Format Conversion on Export (Audio & Video Codecs)
@@ -66,82 +62,56 @@ TABLE OF CONTENTS & STATUS OVERVIEW
    [ ] 5.4 Memory-Bounded Diarization & Chunked Streaming
 
 ================================================================================
-1. PREVIOUS RELEASE: NATIVE PDF EXPORT & COLLAPSIBLE SECTIONS (Completed in v3.0.2)
+1. PREVIOUS RELEASE: CODEBASE MODULARIZATION & EXPORT ENGINE (Completed in v3.1.0-dev-2)
 ================================================================================
 
-[x] 1.1 NATIVE PDF DOCUMENT EXPORT ENGINE
------------------------------------------
-- Implemented lightweight, fully self-contained `TranscriptPdfWriter` (PDF 1.4 vector generator) with zero third-party dependencies (eliminating external heavy PDF engine requirements).
-- Built with standard Type 1 fonts (`/Helvetica`, `/Helvetica-Bold`, `/Helvetica-Oblique`), WinAnsiEncoding byte escaping, object catalogs, cross-reference tables, and trailers.
-- Implemented automatic word wrapping, typographic line spacing, speaker label headers, and timestamp metadata formatting.
+[x] 1.1 UNIVERSAL OPENXML .DOCX COMMENTS COMPATIBILITY
+-----------------------------------------------------
+- Re-engineered the Word (.docx) document export engine to generate both native OpenXML comments (`word/comments.xml`, `w:commentRangeStart`, `w:commentRangeEnd`, and `w:commentReference`) and styled visual annotation callouts.
+- Includes user preference integration (`export_include_comments`) with full timestamp spans, speaker attribution, and author metadata.
 
-[x] 1.2 LOCAL EXPORT PDF OPTION & FORMAT CHECKBOX
--------------------------------------------------
-- Integrated "PDF document (.pdf)" format option into `UnifiedExportDialog` alongside Text (.txt) and Word (.docx).
-- Added multi-format batch validation: ensures at least one format is checked and enables seamless simultaneous export of TXT, DOCX, and PDF documents into the project `Transcripts/` directory.
-- Added support across all export entry points: selected stories, all stories, full episode, and unified multi-story exports.
+[x] 1.2 INTERACTIVE KEYBOARD SHORTCUT CUSTOMIZER WITH CONFLICT RESOLUTION
+------------------------------------------------------------------------
+- Integrated interactive conflict detection in the Keyboard Shortcut Customizer (`F8` / Preferences): when assigning a key combination already in use, a warning dialog prompts the user to reassign or keep the original binding.
+- If keeping the original binding, the customizer automatically re-engages recording mode for immediate alternative entry.
 
-[x] 1.3 MULTI-PAGE PAGINATION, HEADERS, FOOTERS & COMMENT CALLOUTS
-------------------------------------------------------------------
-- Dynamic Y-coordinate space tracking automatically flushes completed pages and emits standard PDF page objects.
-- Each page features professional running footers with divider rules ("Radio & TV Story Segmenter" and "Page X").
-- Formatted comment callout boxes rendered with amber/yellow accent borders (`#d97706`), soft parchment background fill (`#fefce8`), and indented quote/comment typography.
-
-[x] 1.4 COLLAPSIBLE EXPORT CENTER SECTIONS
-------------------------------------------
-- Designed reusable `CollapsibleSection` container widget in `prs_shared.py` featuring styled header bars, animated/interactive disclosure chevrons (`▼`/`▶`), item count badges, and clean rounded borders.
-- Re-architected `UnifiedExportDialog` to wrap Local Files, WordPress, and YouTube Studio export options into modular collapsible panels, preventing dialog window height overflows and making large configurations easy to manage.
-
-[x] 1.5 GLOBAL COLLAPSE ALL / EXPAND ALL CONTROL
-------------------------------------------------
-- Added a convenient "Collapse All" / "Expand All" toggle button to the top header bar of `UnifiedExportDialog`.
-- Automatically tracks disclosure state across all active collapsible containers on the currently visible export page.
-
-[x] 1.6 SETTINGS PERSISTENCE & MULTI-FORMAT VALIDATION
-------------------------------------------------------
-- Saved user format preference for PDF (`export_format_pdf`) in persistent `QSettings` across application sessions.
-- Automatically restores format selection and section states upon dialog initialization.
-
-================================================================================
-2. CURRENT RELEASE: CODEBASE MODULARIZATION & TRUE PLUGIN ARCHITECTURE (Active in v3.1.0-dev-1)
-================================================================================
-
-[-] 2.1 TRUE PLUGIN ARCHITECTURE FOR WORDPRESS & YOUTUBE PUBLISHING
--------------------------------------------------------------------
-- Created abstract `ExportDestination` base class in `plugins/base.py` defining clean contracts (`create_widget()`, `get_export_data()`, `validate()`, `on_scope_changed()`).
-- Refactored `plugins/wordpress` and `plugins/youtube` into self-contained plugins registering export destinations dynamically with `PluginManager`.
-- Features isolated to `plugins/wordpress/`:
-  * WordPress REST API client, Application Password credential storage, category/tag taxonomy caching, author selection, featured image upload, audio chunking, and Gutenberg audio/transcript block builders.
-- Features isolated to `plugins/youtube/`:
-  * Video chapter timestamp generation, description template formatting, frame-accurate thumbnail extractor, tags editor, and clipboard copy automation.
-- Token & Architecture Impact: Shrinks `project_export.py` by over 50% and allows independent maintenance.
-
-[x] 2.2 DECOUPLE DOMAIN-SPECIFIC EXPORT HANDLERS INTO EXPORT/ PACKAGE
+[x] 1.3 DECOUPLE DOMAIN-SPECIFIC EXPORT HANDLERS INTO EXPORT/ PACKAGE
 ---------------------------------------------------------------------
-- Split monolithic export logic into a modular `export/` package:
-  * `export/pdf.py`: Dedicated `TranscriptPdfWriter` engine (Helvetica vector stream generation, comment callouts, pagination).
-  * `export/docx.py`: Dedicated Microsoft Word (`.docx`) document generator with styled callouts, speaker headers, and tables.
-  * `export/subtitles.py`: Dedicated SubRip (`.srt`), WebVTT (`.vtt`), CUE sheets, and YouTube chapter formatters.
-  * `export/dialog.py`: Modular `UnifiedExportDialog` with dynamic plugin destination discovery and collapsible sections.
-- Token Impact: AI assistants inspecting or modifying specific export formats only need to read 200–400 line files instead of a 5,000-line monolith.
+- Split monolithic export logic into a modular `export/` package (`export/pdf.py`, `export/docx.py`, `export/subtitles.py`, `export/dialog.py`).
 
-[-] 2.3 SPLIT PRS_SHARED.PY INTO LOGICAL UI & UTILITY MODULES
--------------------------------------------------------------
-- Created `utils/` (`constants.py`, `time_format.py`) for reusable timing, filename sanitization, and app constants.
-- Created `ui/dialogs/` (`find_replace.py`, `comment_editor.py`) for decoupled dialog components.
-- Re-export members via `prs_shared.py` (facade imports) to maintain 100% backward compatibility with existing imports.
+[x] 1.4 TRUE PLUGIN ARCHITECTURE FOR WORDPRESS & YOUTUBE PUBLISHING
+-------------------------------------------------------------------
+- Created abstract `ExportDestination` base class in `plugins/base.py` defining clean contracts.
 
-[x] 2.4 ESTABLISH LEAN PUBLIC INTERFACE & DATA MODELS LAYER
+[x] 1.5 ESTABLISH LEAN PUBLIC INTERFACE & DATA MODELS LAYER
 -----------------------------------------------------------
-- Defined standardized, strongly typed data structures using Python `@dataclass` and `TypedDict` in `models.py`:
-  * `SegmentWord`: start, end, word, id, bold, italic, underline, strike, highlight, deleted, muted.
-  * `StoryItem`: id, title, start_time, end_time, summary, notes/comments, category, tags, locked.
-  * `ActivitySnapshot`: action, undoable, details, timestamp.
-  * `ExportOptions`: include_speakers, include_timestamps, include_comments, formats dictionary.
+- Defined standardized, strongly typed data structures in `models.py` (`SegmentWord`, `StoryItem`, `ActivitySnapshot`, `ExportOptions`).
 
-[-] 2.5 DYNAMIC PLUGIN REGISTRATION HOOKS
------------------------------------------
-- Extended `PluginManager` to discover and register export destinations dynamically, isolating external publishing dependencies from core export routines.
+================================================================================
+2. CURRENT RELEASE: NATIVE SIDEBAR ANNOTATIONS & IN-FOCUS SHORTCUTS (Active in v3.1.1-beta-1)
+================================================================================
+
+[x] 2.1 NATIVE OOXML COMMENTS ARCHITECTURE FOR WORD & LIBREOFFICE WRITER
+-----------------------------------------------------------------------
+- Re-architected Word `.docx` export pipeline to package native OOXML annotations (`word/comments.xml`, `w:commentRangeStart`, `w:commentRangeEnd`, `w:commentReference`) conforming directly to Word and LibreOffice specifications.
+- Comments and notes render as native sidebar comment annotations in both Microsoft Word and LibreOffice Writer (as well as Google Docs).
+- Retains full speaker attribution, timestamps, and highlighted text selections.
+
+[x] 2.2 IN-FOCUS WINDOW SHORTCUT CONTEXT & PRIORITY OVERRIDES
+-------------------------------------------------------------
+- Enforced `Qt.ShortcutContext.ApplicationShortcut` across actions so in-focus application events execute reliably without OS shortcut collisions.
+
+[x] 2.3 COMMENTS TOGGLE SHORTCUT STANDARDIZED TO CTRL+SHIFT+C
+------------------------------------------------------------
+- Updated default shortcut for toggling Comments Sidebar & Annotations to `Ctrl+Shift+C`.
+
+[x] 2.4 RICH TEXT FORMATTING & SPLIT SPEAKER SHORTCUTS IN REGISTRY
+------------------------------------------------------------------
+- Added Highlight (`Ctrl+Shift+H`), Bold (`Ctrl+B`), Italic (`Ctrl+I`), Underline (`Ctrl+U`), Strikethrough (`Ctrl+K`), Clear Formatting (`Ctrl+\`), and Split Speaker (`Shift+Enter`) to shortcut customizer.
+
+[x] 2.5 DYNAMIC LIVE SHORTCUT TOOLTIPS FOR ALL TOOLBAR BUTTONS
+--------------------------------------------------------------
+- All toolbar buttons dynamically display their currently assigned shortcuts directly in their hover tooltips.
 
 ================================================================================
 4. FUTURE MILESTONE: MEDIA TRANSCODING, ASYNC PROVISIONING & TRANSCRIPT CLEANING (Phase 3 - Planned for v3.2) [NOT STARTED]

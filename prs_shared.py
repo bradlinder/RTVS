@@ -118,6 +118,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QHeaderView,
     QAbstractItemView,
+    QAbstractSpinBox,
     QTextEdit,
     QPlainTextEdit,
     QTextBrowser,
@@ -415,7 +416,7 @@ class CollapsibleSection(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "3.1.0-dev-1"
+PROJECT_VERSION = "3.1.3"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 
@@ -991,8 +992,8 @@ class ProjectStateCommand(QUndoCommand):
         # before_state and after_state are already isolated snapshot dicts produced
         # by _capture_project_state(). Storing shallow dict copies avoids expensive
         # recursive deepcopy duplication and prevents GC hitches on long files (>60 min).
-        self.before_state = dict(before_state) if isinstance(before_state, dict) else before_state
-        self.after_state = dict(after_state) if isinstance(after_state, dict) else after_state
+        self.before_state = copy.deepcopy(before_state) if isinstance(before_state, dict) else before_state
+        self.after_state = copy.deepcopy(after_state) if isinstance(after_state, dict) else after_state
 
     def undo(self):
         self.main_window._restore_project_state_for_undo(self.before_state)
@@ -1353,22 +1354,65 @@ class CommentCardWidget(QFrame):
         self.comment_lbl.setStyleSheet("font-size: 12px; line-height: 1.4;")
         layout.addWidget(self.comment_lbl)
 
-        self.setStyleSheet("""
-            QFrame#comment_card {
-                background-color: rgba(254, 240, 138, 0.08);
-                border: 1px solid rgba(234, 179, 8, 0.35);
-                border-left: 4px solid #eab308;
-                border-radius: 6px;
-                margin-bottom: 4px;
-            }
-            QFrame#comment_card:hover {
-                background-color: rgba(254, 240, 138, 0.16);
-                border-color: #eab308;
-            }
-        """)
+        self.set_selected(False)
+
+    def set_selected(self, is_selected=True, theme="dark"):
+        """Apply distinct active/selected visual indication to card."""
+        self._is_selected = is_selected
+        if is_selected:
+            if theme == "light":
+                self.setStyleSheet("""
+                    QFrame#comment_card {
+                        background-color: #fef08a;
+                        border: 2px solid #ca8a04;
+                        border-left: 6px solid #a16207;
+                        border-radius: 6px;
+                        margin-bottom: 4px;
+                    }
+                """)
+            else:
+                self.setStyleSheet("""
+                    QFrame#comment_card {
+                        background-color: rgba(250, 204, 21, 0.35);
+                        border: 2px solid #f59e0b;
+                        border-left: 6px solid #d97706;
+                        border-radius: 6px;
+                        margin-bottom: 4px;
+                    }
+                """)
+        else:
+            if theme == "light":
+                self.setStyleSheet("""
+                    QFrame#comment_card {
+                        background-color: #fef9c3;
+                        border: 1px solid #fde047;
+                        border-left: 4px solid #eab308;
+                        border-radius: 6px;
+                        margin-bottom: 4px;
+                    }
+                    QFrame#comment_card:hover {
+                        background-color: #fef08a;
+                        border-color: #ca8a04;
+                    }
+                """)
+            else:
+                self.setStyleSheet("""
+                    QFrame#comment_card {
+                        background-color: rgba(254, 240, 138, 0.08);
+                        border: 1px solid rgba(234, 179, 8, 0.35);
+                        border-left: 4px solid #eab308;
+                        border-radius: 6px;
+                        margin-bottom: 4px;
+                    }
+                    QFrame#comment_card:hover {
+                        background-color: rgba(254, 240, 138, 0.16);
+                        border-color: #eab308;
+                    }
+                """)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            self.set_selected(True)
             self.seekRequested.emit(self.start_time, self.seg_idx)
             event.accept()
             return
@@ -1401,14 +1445,14 @@ class CommentsPanel(QWidget):
 
         self.add_btn = QToolButton(self)
         self.add_btn.setText("+ Add")
-        self.add_btn.setToolTip("Add comment to current transcript selection (Ctrl+Alt+C)")
+        self.add_btn.setToolTip("Add comment to current transcript selection (Ctrl+M)")
         self.add_btn.setStyleSheet("padding: 2px 6px; font-weight: bold;")
         self.add_btn.clicked.connect(self._on_add_clicked)
         header_layout.addWidget(self.add_btn)
 
         self.close_btn = QToolButton(self)
         self.close_btn.setText("✕")
-        self.close_btn.setToolTip("Close Comments Sidebar (Ctrl+Alt+M)")
+        self.close_btn.setToolTip("Close Comments Sidebar (Ctrl+Alt+C)")
         self.close_btn.setStyleSheet("border: none; padding: 2px 4px; color: #94a3b8;")
         self.close_btn.clicked.connect(self._on_close_clicked)
         header_layout.addWidget(self.close_btn)
@@ -1468,7 +1512,7 @@ class CommentsPanel(QWidget):
                 c_text = seg.get("comments") or seg.get("notes", "")
                 if c_text and c_text.strip():
                     comment_count += 1
-                    quote = seg.get("text", "")
+                    quote = seg.get("comment_selected_text") or seg.get("text", "")
                     card = CommentCardWidget(
                         seg_idx=idx,
                         start_time=seg.get("start", 0.0),
@@ -1492,35 +1536,16 @@ class CommentsPanel(QWidget):
 
     def highlight_segment(self, target_seg_idx):
         """Visually flash/highlight a specific comment card."""
+        main_win = self.window()
+        theme = getattr(main_win, "current_theme", "dark")
         for i in range(self.cards_layout.count() - 1):
             item = self.cards_layout.itemAt(i)
             if item and item.widget() and isinstance(item.widget(), CommentCardWidget):
                 card = item.widget()
-                if card.seg_idx == target_seg_idx:
-                    card.setStyleSheet("""
-                        QFrame#comment_card {
-                            background-color: rgba(254, 240, 138, 0.28);
-                            border: 2px solid #eab308;
-                            border-left: 5px solid #ca8a04;
-                            border-radius: 6px;
-                            margin-bottom: 4px;
-                        }
-                    """)
+                is_sel = (target_seg_idx is not None and card.seg_idx == target_seg_idx)
+                card.set_selected(is_sel, theme)
+                if is_sel:
                     self.scroll_area.ensureWidgetVisible(card)
-                else:
-                    card.setStyleSheet("""
-                        QFrame#comment_card {
-                            background-color: rgba(254, 240, 138, 0.08);
-                            border: 1px solid rgba(234, 179, 8, 0.35);
-                            border-left: 4px solid #eab308;
-                            border-radius: 6px;
-                            margin-bottom: 4px;
-                        }
-                        QFrame#comment_card:hover {
-                            background-color: rgba(254, 240, 138, 0.16);
-                            border-color: #eab308;
-                        }
-                    """)
 
 
 class TranscriptSelectionBubble(QFrame):
@@ -1557,7 +1582,7 @@ class TranscriptSelectionBubble(QFrame):
 
         self.comment_btn = QToolButton(self)
         self.comment_btn.setText("💬 Comment")
-        self.comment_btn.setToolTip("Add comment to highlighted section (Ctrl+Alt+C)")
+        self.comment_btn.setToolTip("Add comment to highlighted section (Ctrl+M)")
         self.comment_btn.clicked.connect(self._emit_comment)
         layout.addWidget(self.comment_btn)
 
@@ -1599,6 +1624,7 @@ class TranscriptSelectionBubble(QFrame):
                 background-color: #0f172a;
             }
         """)
+        self.hide()
 
     def _emit_comment(self):
         self.commentRequested.emit()
@@ -1654,6 +1680,7 @@ class InteractiveTranscriptEdit(QTextEdit):
         self.selection_bubble.noteRequested.connect(self._on_bubble_note)
         self.selection_bubble.cutRequested.connect(self._on_bubble_cut)
         self.selection_bubble.exportRequested.connect(self._on_bubble_export)
+        self.selection_bubble.hide()
 
         self.apply_theme_style("dark")
         self.setTextInteractionFlags(
@@ -1888,28 +1915,108 @@ class InteractiveTranscriptEdit(QTextEdit):
             }]
         return []
 
+    def select_comment_range(self, seg_idx):
+        """Navigate and select the exact comment text range in the transcript view."""
+        main_win = self.window()
+        t_data = getattr(self, "transcript_data", None)
+        if not t_data and hasattr(main_win, "transcript"):
+            t_data = main_win.transcript
+        if not t_data or not isinstance(t_data, dict) or "segments" not in t_data:
+            return
+        segments = t_data.get("segments", [])
+        if not (0 <= seg_idx < len(segments)):
+            return
+        seg = segments[seg_idx]
+        c_selected = (seg.get("comment_selected_text") or "").strip()
+        c_start = seg.get("comment_char_start")
+        c_end = seg.get("comment_char_end")
+
+        doc = self.document()
+        doc_text = doc.toPlainText()
+        positions = None
+        if c_selected:
+            pos_in_doc = doc_text.find(c_selected)
+            if pos_in_doc >= 0:
+                positions = (pos_in_doc, pos_in_doc + len(c_selected))
+            else:
+                block = doc.findBlockByNumber(seg_idx)
+                if block.isValid():
+                    block_text = block.text()
+                    pos_in_block = block_text.find(c_selected)
+                    if pos_in_block >= 0:
+                        start_p = block.position() + pos_in_block
+                        positions = (start_p, start_p + len(c_selected))
+        if not positions and c_start is not None and c_end is not None and c_end > c_start and c_end <= doc.characterCount():
+            positions = (c_start, c_end)
+
+        if not positions:
+            block = doc.findBlockByNumber(seg_idx)
+            if block.isValid():
+                positions = (block.position(), block.position() + max(1, block.length() - 1))
+
+        if positions:
+            cursor = QTextCursor(doc)
+            cursor.setPosition(positions[0])
+            cursor.setPosition(positions[1], QTextCursor.MoveMode.KeepAnchor)
+            self.setTextCursor(cursor)
+            self.ensureCursorVisible()
+            self.setFocus()
+
     def update_extra_selections(self):
         extras = []
         main_win = self.window()
         show_comments = str(getattr(main_win, "show_comments", getattr(main_win, "show_notes", True))).lower() in {"1", "true", "yes"}
 
         # Amber / Yellow Comment Highlights (Word & Google Docs Style)
-        if show_comments and hasattr(self, "transcript_data") and self.transcript_data and "segments" in self.transcript_data:
-            segments = self.transcript_data.get("segments", [])
+        t_data = getattr(self, "transcript_data", None)
+        if not t_data and hasattr(main_win, "transcript"):
+            t_data = main_win.transcript
+        if show_comments and t_data and isinstance(t_data, dict) and "segments" in t_data:
+            segments = t_data.get("segments", [])
             doc = self.document()
+            doc_text = doc.toPlainText()
+            seen_spans = set()
             for idx, seg in enumerate(segments):
                 comment_text = seg.get("comments") or seg.get("notes", "")
                 if comment_text and comment_text.strip():
-                    target_anchor = f"seg_{idx}"
-                    positions = self.anchor_ranges.get(target_anchor)
+                    c_start = seg.get("comment_char_start")
+                    c_end = seg.get("comment_char_end")
+                    c_selected = (seg.get("comment_selected_text") or "").strip()
+
+                    span_key = (comment_text.strip(), c_selected, c_start, c_end)
+                    if span_key in seen_spans:
+                        continue
+                    seen_spans.add(span_key)
+
+                    positions = None
+                    if c_selected:
+                        pos_in_doc = doc_text.find(c_selected)
+                        if pos_in_doc >= 0:
+                            positions = (pos_in_doc, pos_in_doc + len(c_selected))
+                        else:
+                            block = doc.findBlockByNumber(idx)
+                            if block.isValid():
+                                block_text = block.text()
+                                pos_in_block = block_text.find(c_selected)
+                                if pos_in_block >= 0:
+                                    start_p = block.position() + pos_in_block
+                                    positions = (start_p, start_p + len(c_selected))
+
+                    if not positions and c_start is not None and c_end is not None and c_end > c_start and c_end <= doc.characterCount():
+                        positions = (c_start, c_end)
+
                     if not positions:
-                        block = doc.findBlockByNumber(idx)
-                        if block.isValid():
-                            positions = (block.position(), block.position() + max(1, block.length() - 1))
+                        target_anchor = f"seg_{idx}"
+                        positions = self.anchor_ranges.get(target_anchor)
+                        if not positions:
+                            block = doc.findBlockByNumber(idx)
+                            if block.isValid():
+                                positions = (block.position(), block.position() + max(1, block.length() - 1))
+
                     if positions:
                         comment_fmt = QTextCharFormat()
                         if getattr(self, "current_theme", "dark") == "light":
-                            comment_fmt.setBackground(QColor(254, 240, 138, 220))  # Light warm amber highlight
+                            comment_fmt.setBackground(QColor(254, 240, 138, 220))  # Warm amber highlight
                             comment_fmt.setForeground(QColor(133, 77, 14))
                         else:
                             comment_fmt.setBackground(QColor(133, 77, 14, 200))  # Dark warm amber highlight
@@ -2007,7 +2114,9 @@ class InteractiveTranscriptEdit(QTextEdit):
             if hasattr(main_win, "statusBar") and t_range:
                 main_win.statusBar().showMessage(f"Transcript selection: {format_time(t_range[0])} – {format_time(t_range[1])}")
 
-        if hasattr(self, "selection_bubble") and not self.is_editing_mode:
+        main_win = self.window()
+        show_floating = str(getattr(main_win, "show_floating_selection_toolbar", getattr(self, "show_floating_selection_toolbar", True))).lower() in {"1", "true", "yes"}
+        if hasattr(self, "selection_bubble") and not self.is_editing_mode and show_floating:
             c_rect = self.cursorRect(cursor)
             bubble_hint = self.selection_bubble.sizeHint()
             b_w = max(336, bubble_hint.width() + 16)
@@ -2018,6 +2127,8 @@ class InteractiveTranscriptEdit(QTextEdit):
             self.selection_bubble.setGeometry(bx, by, b_w, b_h)
             self.selection_bubble.show()
             self.selection_bubble.raise_()
+        elif hasattr(self, "selection_bubble"):
+            self.selection_bubble.hide()
 
     def apply_theme_style(self, mode):
         self.current_theme = mode
@@ -2052,9 +2163,15 @@ class InteractiveTranscriptEdit(QTextEdit):
         new_weight = QFont.Weight.Normal if curr_weight > QFont.Weight.Medium else QFont.Weight.Bold
         fmt.setFontWeight(new_weight)
         if cursor.hasSelection():
+            sel_start = cursor.selectionStart()
+            sel_end = cursor.selectionEnd()
             cursor.mergeCharFormat(fmt)
+            cursor.setPosition(sel_start)
+            cursor.setPosition(sel_end, QTextCursor.MoveMode.KeepAnchor)
+            self.setTextCursor(cursor)
         else:
             self.mergeCurrentCharFormat(fmt)
+        self.setFocus()
         self.formatChanged.emit()
 
     def toggle_italic(self):
@@ -2062,9 +2179,15 @@ class InteractiveTranscriptEdit(QTextEdit):
         fmt = QTextCharFormat()
         fmt.setFontItalic(not self.fontItalic())
         if cursor.hasSelection():
+            sel_start = cursor.selectionStart()
+            sel_end = cursor.selectionEnd()
             cursor.mergeCharFormat(fmt)
+            cursor.setPosition(sel_start)
+            cursor.setPosition(sel_end, QTextCursor.MoveMode.KeepAnchor)
+            self.setTextCursor(cursor)
         else:
             self.mergeCurrentCharFormat(fmt)
+        self.setFocus()
         self.formatChanged.emit()
 
     def toggle_underline(self):
@@ -2072,9 +2195,15 @@ class InteractiveTranscriptEdit(QTextEdit):
         fmt = QTextCharFormat()
         fmt.setFontUnderline(not self.fontUnderline())
         if cursor.hasSelection():
+            sel_start = cursor.selectionStart()
+            sel_end = cursor.selectionEnd()
             cursor.mergeCharFormat(fmt)
+            cursor.setPosition(sel_start)
+            cursor.setPosition(sel_end, QTextCursor.MoveMode.KeepAnchor)
+            self.setTextCursor(cursor)
         else:
             self.mergeCurrentCharFormat(fmt)
+        self.setFocus()
         self.formatChanged.emit()
 
     def toggle_strikethrough(self):
@@ -2083,37 +2212,238 @@ class InteractiveTranscriptEdit(QTextEdit):
         is_strike = self.currentCharFormat().fontStrikeOut()
         fmt.setFontStrikeOut(not is_strike)
         if cursor.hasSelection():
+            sel_start = cursor.selectionStart()
+            sel_end = cursor.selectionEnd()
             cursor.mergeCharFormat(fmt)
+            cursor.setPosition(sel_start)
+            cursor.setPosition(sel_end, QTextCursor.MoveMode.KeepAnchor)
+            self.setTextCursor(cursor)
         else:
             self.mergeCurrentCharFormat(fmt)
+        self.setFocus()
         self.formatChanged.emit()
 
-    def toggle_highlight(self, color_name="#fef08a"):
+    def toggle_highlight(self, color_name="#fef08a", force_apply=False):
+        """Toggle or apply rich color highlighting on active text selection while preserving selection."""
         cursor = self.textCursor()
+        main_win = self.window()
+        before_state = main_win._capture_project_state() if hasattr(main_win, "_capture_project_state") else None
+
         fmt = QTextCharFormat()
-        curr_bg = self.currentCharFormat().background().color()
-        if curr_bg.isValid() and curr_bg.alpha() > 0:
-            fmt.setBackground(QBrush(Qt.BrushStyle.NoBrush))
+        
+        # Check current highlight state
+        cur_fmt = self.currentCharFormat()
+        curr_bg = cur_fmt.background().color()
+        has_active_highlight = (
+            cur_fmt.background().style() != Qt.BrushStyle.NoBrush
+            and curr_bg.isValid()
+            and curr_bg.alpha() > 0
+            and curr_bg.name().lower() not in ["#000000", "#1e1e1e", "#0f172a", "#ffffff", "#00000000"]
+        )
+
+        if has_active_highlight and not force_apply:
+            # Turn off highlight across contiguous section
+            self.remove_highlight()
+            return
         else:
-            fmt.setBackground(QColor(color_name))
+            # Apply vibrant highlight with contrasting text color
+            highlight_color = QColor(color_name)
+            fmt.setBackground(QBrush(highlight_color))
+            fmt.setForeground(QBrush(QColor("#0f172a")))
+
+        if cursor.hasSelection():
+            sel_start = cursor.selectionStart()
+            sel_end = cursor.selectionEnd()
+            cursor.mergeCharFormat(fmt)
+            cursor.setPosition(sel_start)
+            cursor.setPosition(sel_end, QTextCursor.MoveMode.KeepAnchor)
+            self.setTextCursor(cursor)
+        else:
+            self.mergeCurrentCharFormat(fmt)
+
+        if before_state and hasattr(main_win, "_commit_project_state_change"):
+            main_win._commit_project_state_change(before_state, "Toggle Highlight")
+
+        self.setFocus()
+        self.formatChanged.emit()
+
+    def remove_highlight(self):
+        """Removes background highlighting for the entire contiguous highlighted section(s) intersecting active selection or cursor."""
+        cursor = self.textCursor()
+        main_win = self.window()
+
+        # Capture baseline for universal undo / redo history
+        before_state = main_win._capture_project_state() if hasattr(main_win, "_capture_project_state") else None
+        segs = main_win.transcript.get("segments", []) if (hasattr(main_win, "transcript") and main_win.transcript) else []
+
+        # 1. Determine target segment index/indices from selection or cursor position
+        target_segs = set()
+        if cursor.hasSelection():
+            sel_start = min(cursor.selectionStart(), cursor.selectionEnd())
+            sel_end = max(cursor.selectionStart(), cursor.selectionEnd())
+            if hasattr(self, "get_time_range_for_char_span"):
+                t_range = self.get_time_range_for_char_span(sel_start, sel_end)
+                if t_range and t_range[0] is not None and t_range[1] is not None:
+                    st, et = t_range
+                    for i, s in enumerate(segs):
+                        s_st = s.get("start", 0.0)
+                        s_et = s.get("end", 0.0)
+                        if s_st <= et and s_et >= st:
+                            target_segs.add(i)
+
+        if not target_segs:
+            c_seg = self.get_segment_index_at_cursor(cursor)
+            if c_seg is not None and 0 <= c_seg < len(segs):
+                target_segs.add(c_seg)
+            else:
+                blk = cursor.blockNumber()
+                if 0 <= blk < len(segs):
+                    target_segs.add(blk)
+
+        # 2. Build flattened word list to identify contiguous highlighted regions
+        flat_words = []
+        for s_idx, seg in enumerate(segs):
+            if not isinstance(seg, dict):
+                continue
+            seg_hl = seg.get("highlight")
+            words = seg.get("words", [])
+            if isinstance(words, list) and words:
+                for w_idx, w in enumerate(words):
+                    if isinstance(w, dict):
+                        w_hl = w.get("highlight") or seg_hl
+                        is_hl = bool(w_hl and w_hl not in (False, "false", "False", 0, None))
+                        flat_words.append({
+                            "seg_idx": s_idx,
+                            "word_idx": w_idx,
+                            "word_dict": w,
+                            "seg_dict": seg,
+                            "is_hl": is_hl
+                        })
+            else:
+                text = seg.get("text", "")
+                for w_idx, word_str in enumerate(text.split()):
+                    is_hl = bool(seg_hl and seg_hl not in (False, "false", "False", 0, None))
+                    flat_words.append({
+                        "seg_idx": s_idx,
+                        "word_idx": w_idx,
+                        "word_dict": None,
+                        "seg_dict": seg,
+                        "is_hl": is_hl
+                    })
+
+        total_words = len(flat_words)
+        targeted_flat_indices = set()
+        for idx, fw in enumerate(flat_words):
+            if fw["seg_idx"] in target_segs:
+                targeted_flat_indices.add(idx)
+
+        # 3. Expand backwards and forwards across contiguous highlighted word blocks
+        indices_to_clear = set()
+        for t_idx in targeted_flat_indices:
+            if 0 <= t_idx < total_words and flat_words[t_idx]["is_hl"]:
+                start_i = t_idx
+                while start_i > 0 and flat_words[start_i - 1]["is_hl"]:
+                    start_i -= 1
+                end_i = t_idx
+                while end_i < total_words - 1 and flat_words[end_i + 1]["is_hl"]:
+                    end_i += 1
+                for k in range(start_i, end_i + 1):
+                    indices_to_clear.add(k)
+
+        # If user clicked near a highlighted region (e.g. adjacent space or word boundary)
+        if not indices_to_clear and targeted_flat_indices:
+            for t_idx in targeted_flat_indices:
+                for offset in (-1, 1, -2, 2):
+                    adj = t_idx + offset
+                    if 0 <= adj < total_words and flat_words[adj]["is_hl"]:
+                        start_i = adj
+                        while start_i > 0 and flat_words[start_i - 1]["is_hl"]:
+                            start_i -= 1
+                        end_i = adj
+                        while end_i < total_words - 1 and flat_words[end_i + 1]["is_hl"]:
+                            end_i += 1
+                        for k in range(start_i, end_i + 1):
+                            indices_to_clear.add(k)
+
+        # 4. Clear highlight on all contiguous words and clean up segment metadata
+        if not indices_to_clear:
+            for s_idx in target_segs:
+                if 0 <= s_idx < len(segs):
+                    seg = segs[s_idx]
+                    seg.pop("highlight", None)
+                    if "words" in seg and isinstance(seg["words"], list):
+                        for w in seg["words"]:
+                            if isinstance(w, dict):
+                                w.pop("highlight", None)
+        else:
+            affected_segs = set()
+            for k in indices_to_clear:
+                fw = flat_words[k]
+                if fw["word_dict"]:
+                    fw["word_dict"].pop("highlight", None)
+                affected_segs.add(fw["seg_idx"])
+
+            for s_idx in affected_segs:
+                seg = segs[s_idx]
+                words = seg.get("words", [])
+                if isinstance(words, list):
+                    has_remaining_hl = any(
+                        isinstance(w, dict) and bool(w.get("highlight"))
+                        for w in words
+                    )
+                    if not has_remaining_hl:
+                        seg.pop("highlight", None)
+                else:
+                    seg.pop("highlight", None)
+
+        # Clear character format background brush on cursor
+        fmt = QTextCharFormat()
+        fmt.setBackground(QBrush(Qt.BrushStyle.NoBrush))
         if cursor.hasSelection():
             cursor.mergeCharFormat(fmt)
         else:
-            self.mergeCurrentCharFormat(fmt)
+            self.setCurrentCharFormat(fmt)
+
+        if hasattr(main_win, "mark_project_dirty"):
+            main_win.mark_project_dirty()
+
+        # Re-render transcript to reflect exact updated state
+        if hasattr(main_win, "render_transcript"):
+            main_win.render_transcript()
+
+        # Commit project state change for undo stack
+        if before_state and hasattr(main_win, "_commit_project_state_change"):
+            main_win._commit_project_state_change(before_state, "Remove Highlight")
+
         self.formatChanged.emit()
+        self.update_extra_selections()
 
     def clear_formatting(self):
         cursor = self.textCursor()
+        main_win = self.window()
+        before_state = main_win._capture_project_state() if hasattr(main_win, "_capture_project_state") else None
+
         fmt = QTextCharFormat()
         fmt.setFontWeight(QFont.Weight.Normal)
         fmt.setFontItalic(False)
         fmt.setFontUnderline(False)
         fmt.setFontStrikeOut(False)
         fmt.setBackground(QBrush(Qt.BrushStyle.NoBrush))
+        fmt.setForeground(QBrush(Qt.BrushStyle.NoBrush))
         if cursor.hasSelection():
+            sel_start = cursor.selectionStart()
+            sel_end = cursor.selectionEnd()
             cursor.setCharFormat(fmt)
+            cursor.setPosition(sel_start)
+            cursor.setPosition(sel_end, QTextCursor.MoveMode.KeepAnchor)
+            self.setTextCursor(cursor)
         else:
             self.setCurrentCharFormat(fmt)
+
+        if before_state and hasattr(main_win, "_commit_project_state_change"):
+            main_win._commit_project_state_change(before_state, "Clear Formatting")
+
+        self.setFocus()
         self.formatChanged.emit()
 
     def get_current_formatting(self):
@@ -2419,13 +2749,40 @@ class InteractiveTranscriptEdit(QTextEdit):
                 event.accept()
                 return
 
-        if self.is_editing_mode:
-            modifiers = event.modifiers()
-            is_ctrl = bool(modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier))
-            is_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
-            key = event.key()
+        modifiers = event.modifiers()
+        is_ctrl = bool(modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier))
+        is_alt = bool(modifiers & Qt.KeyboardModifier.AltModifier)
+        is_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        key = event.key()
 
-            if is_ctrl and not is_shift:
+        # Add / Edit Comment shortcut (Ctrl+M, Ctrl+Alt+M)
+        if (is_ctrl and key == Qt.Key.Key_M and not is_shift and not is_alt) or \
+           (is_ctrl and is_alt and key == Qt.Key.Key_M):
+            main_win = self.window()
+            if hasattr(main_win, "add_comment_from_selection"):
+                main_win.add_comment_from_selection()
+                event.accept()
+                return
+            elif hasattr(main_win, "edit_segment_comment_dialog"):
+                cursor = self.textCursor()
+                seg_idx = self.get_segment_index_at_cursor(cursor)
+                if seg_idx is None:
+                    seg_idx = cursor.blockNumber()
+                main_win.edit_segment_comment_dialog(seg_idx)
+                event.accept()
+                return
+
+        # Toggle Comments Sidebar shortcut (Ctrl+Alt+C or Alt+5)
+        if (is_ctrl and is_alt and key == Qt.Key.Key_C and not is_shift) or \
+           (is_alt and key == Qt.Key.Key_5 and not is_ctrl and not is_shift):
+            main_win = self.window()
+            if hasattr(main_win, "toggle_comments_panel"):
+                main_win.toggle_comments_panel()
+                event.accept()
+                return
+
+        if self.is_editing_mode:
+            if is_ctrl and not is_shift and not is_alt:
                 if key == Qt.Key.Key_B:
                     self.toggle_bold()
                     event.accept()
@@ -2446,7 +2803,7 @@ class InteractiveTranscriptEdit(QTextEdit):
                     self.clear_formatting()
                     event.accept()
                     return
-            elif is_ctrl and is_shift:
+            elif is_ctrl and is_shift and not is_alt:
                 if key in (Qt.Key.Key_X, Qt.Key.Key_S):
                     self.toggle_strikethrough()
                     event.accept()
@@ -2657,8 +3014,18 @@ class InteractiveTranscriptEdit(QTextEdit):
             menu.addAction(manage_spk_act)
             menu.addSeparator()
 
+        target_seg = self.get_segment_index_at_cursor(hit_cursor)
+        if target_seg is None:
+            target_seg = hit_cursor.blockNumber()
+        has_comment = False
+        if hasattr(main_win, "transcript") and main_win.transcript:
+            segs = main_win.transcript.get("segments", [])
+            if 0 <= target_seg < len(segs):
+                has_comment = bool(segs[target_seg].get("comments") or segs[target_seg].get("notes"))
+        comment_title = "💬 Edit Comment..." if has_comment else "💬 Add Comment..."
+
         if not self.is_editing_mode:
-            add_vocab = QAction("Add Selected Text to Glossary", self)
+            add_vocab = QAction("Add Selected Text to Glossary", menu)
             add_vocab.setEnabled(self.has_active_selection())
             def _add_vocab_from_selection():
                 ranges = self.get_all_selected_story_ranges()
@@ -2667,63 +3034,94 @@ class InteractiveTranscriptEdit(QTextEdit):
             add_vocab.triggered.connect(_add_vocab_from_selection)
             menu.addAction(add_vocab)
 
-            target_seg = self.get_segment_index_at_cursor(hit_cursor)
-            if target_seg is None:
-                target_seg = hit_cursor.blockNumber()
-            has_comment = False
-            if hasattr(main_win, "transcript") and main_win.transcript:
-                segs = main_win.transcript.get("segments", [])
-                if 0 <= target_seg < len(segs):
-                    has_comment = bool(segs[target_seg].get("comments") or segs[target_seg].get("notes"))
-            comment_title = "💬 Edit Comment..." if has_comment else "💬 Add Comment..."
-            edit_comment_act = QAction(comment_title, self)
-            edit_comment_act.setShortcut(QKeySequence("Ctrl+Alt+C"))
-            edit_comment_act.triggered.connect(lambda _, s=target_seg: getattr(main_win, "edit_segment_comment_dialog", getattr(main_win, "edit_segment_note_dialog", lambda x: None))(s))
+            edit_comment_act = QAction(f"{comment_title}\tCtrl+M", menu)
+            edit_comment_act.triggered.connect(
+                lambda _, s=target_seg: getattr(
+                    main_win, "add_comment_from_selection",
+                    lambda: getattr(main_win, "edit_segment_comment_dialog", getattr(main_win, "edit_segment_note_dialog", lambda x: None))(s)
+                )() if self.has_active_selection() else getattr(
+                    main_win, "edit_segment_comment_dialog", getattr(main_win, "edit_segment_note_dialog", lambda x: None)
+                )(s)
+            )
             menu.addAction(edit_comment_act)
 
-            toggle_comments_act = QAction("💬 Toggle Comments Sidebar", self)
-            toggle_comments_act.setShortcut(QKeySequence("Ctrl+Alt+M"))
+            if has_comment:
+                del_comment_act = QAction("🗑️ Delete Comment", menu)
+                del_comment_act.triggered.connect(
+                    lambda _, s=target_seg: getattr(main_win, "delete_segment_comment", lambda x: None)(s)
+                )
+                menu.addAction(del_comment_act)
+
+            rem_hl_act = QAction("🎨 Remove Highlight", menu)
+            rem_hl_act.triggered.connect(self.remove_highlight)
+            menu.addAction(rem_hl_act)
+
+            toggle_comments_act = QAction("💬 Toggle Comments Sidebar\tCtrl+Alt+C", menu)
             toggle_comments_act.triggered.connect(lambda: getattr(main_win, "toggle_comments_panel", lambda: None)())
             menu.addAction(toggle_comments_act)
 
             menu.addSeparator()
-            edit_action = QAction("Edit Transcript", self)
+            edit_action = QAction("Edit Transcript\tF2", menu)
             edit_action.triggered.connect(lambda: self.set_editing_mode(True))
             menu.addAction(edit_action)
         else:
             fmt_menu = menu.addMenu("Format Text")
-            act_bold = fmt_menu.addAction("Bold")
-            act_bold.setShortcut(QKeySequence("Ctrl+B"))
+            act_bold = fmt_menu.addAction("Bold\tCtrl+B")
             act_bold.triggered.connect(self.toggle_bold)
 
-            act_italic = fmt_menu.addAction("Italic")
-            act_italic.setShortcut(QKeySequence("Ctrl+I"))
+            act_italic = fmt_menu.addAction("Italic\tCtrl+I")
             act_italic.triggered.connect(self.toggle_italic)
 
-            act_underline = fmt_menu.addAction("Underline")
-            act_underline.setShortcut(QKeySequence("Ctrl+U"))
+            act_underline = fmt_menu.addAction("Underline\tCtrl+U")
             act_underline.triggered.connect(self.toggle_underline)
 
-            act_strike = fmt_menu.addAction("Strikethrough")
-            act_strike.setShortcut(QKeySequence("Ctrl+K"))
+            act_strike = fmt_menu.addAction("Strikethrough\tCtrl+K")
             act_strike.triggered.connect(self.toggle_strikethrough)
 
             fmt_menu.addSeparator()
-            act_highlight = fmt_menu.addAction("Highlight (Yellow)")
+            act_highlight = fmt_menu.addAction("Highlight (Yellow)\tCtrl+Shift+H")
             act_highlight.triggered.connect(self.toggle_highlight)
 
-            act_clear = fmt_menu.addAction("Clear Formatting")
-            act_clear.setShortcut(QKeySequence("Ctrl+\\"))
+            act_rem_hl = fmt_menu.addAction("Remove Highlight")
+            act_rem_hl.triggered.connect(self.remove_highlight)
+
+            act_clear = fmt_menu.addAction("Clear Formatting\tCtrl+\\")
             act_clear.triggered.connect(self.clear_formatting)
 
             menu.addSeparator()
-            find_action = QAction("Find and Replace...", self)
-            find_action.setShortcut(QKeySequence.StandardKey.Find)
+            edit_comment_act = QAction(f"{comment_title}\tCtrl+M", menu)
+            edit_comment_act.triggered.connect(
+                lambda _, s=target_seg: getattr(
+                    main_win, "add_comment_from_selection",
+                    lambda: getattr(main_win, "edit_segment_comment_dialog", getattr(main_win, "edit_segment_note_dialog", lambda x: None))(s)
+                )() if self.textCursor().hasSelection() else getattr(
+                    main_win, "edit_segment_comment_dialog", getattr(main_win, "edit_segment_note_dialog", lambda x: None)
+                )(s)
+            )
+            menu.addAction(edit_comment_act)
+
+            if has_comment:
+                del_comment_act = QAction("🗑️ Delete Comment", menu)
+                del_comment_act.triggered.connect(
+                    lambda _, s=target_seg: getattr(main_win, "delete_segment_comment", lambda x: None)(s)
+                )
+                menu.addAction(del_comment_act)
+
+            rem_hl_act = QAction("🎨 Remove Highlight", menu)
+            rem_hl_act.triggered.connect(self.remove_highlight)
+            menu.addAction(rem_hl_act)
+
+            toggle_comments_act = QAction("💬 Toggle Comments Sidebar\tCtrl+Alt+C", menu)
+            toggle_comments_act.triggered.connect(lambda: getattr(main_win, "toggle_comments_panel", lambda: None)())
+            menu.addAction(toggle_comments_act)
+
+            menu.addSeparator()
+            find_action = QAction("Find and Replace...\tCtrl+F", menu)
             find_action.triggered.connect(lambda: main_win.open_find_replace())
             menu.addAction(find_action)
 
             menu.addSeparator()
-            exit_action = QAction("View Transcript", self)
+            exit_action = QAction("View Transcript\tF2", menu)
             exit_action.triggered.connect(lambda: self.set_editing_mode(False))
             menu.addAction(exit_action)
 

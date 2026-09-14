@@ -688,13 +688,7 @@ class PlaybackPreferencesMixin:
     def _clone_transcript_state(transcript):
         if transcript is None:
             return None
-        clone = {k: v for k, v in transcript.items() if k != "segments"}
-        if "segments" in transcript:
-            clone["segments"] = [
-                {**seg, "words": list(seg.get("words", []))} if isinstance(seg, dict) else seg
-                for seg in transcript["segments"]
-            ]
-        return clone
+        return copy.deepcopy(transcript)
 
     def _capture_project_state(self):
         """Capture all editable project data for the application undo stack."""
@@ -735,9 +729,13 @@ class PlaybackPreferencesMixin:
 
             if self.transcript:
                 self.render_transcript()
+                if hasattr(self, "comments_panel") and self.comments_panel:
+                    self.comments_panel.set_comments(self.transcript.get("segments", []))
             else:
                 self.transcript_view.clear()
                 self.transcript_view.set_char_timestamp_map([])
+                if hasattr(self, "comments_panel") and self.comments_panel:
+                    self.comments_panel.set_comments([])
             self.refresh_story_list()
             self.apply_story_selection_indices(self.current_selected_story_indices)
             self.project_dirty = True
@@ -1342,6 +1340,12 @@ class PlaybackPreferencesMixin:
         else:
             single_instance_combo.setCurrentIndex(0)
         gen_form.addRow("Instance Handling Mode:", single_instance_combo)
+
+        floating_toolbar_chk = QCheckBox("Show floating quick-action toolbar on text selection in transcript")
+        floating_toolbar_chk.setToolTip("Controls visibility of the floating popup toolbar (Play, Story, Comment, Exclude, Export) that appears when text is selected in the transcript.")
+        curr_floating = str(getattr(self, "show_floating_selection_toolbar", self.settings_store.value("show_floating_selection_toolbar", "true"))).lower() in {"1", "true", "yes"}
+        floating_toolbar_chk.setChecked(curr_floating)
+        gen_form.addRow("Selection Popup:", floating_toolbar_chk)
 
         autosave_spin = QSpinBox()
         autosave_spin.setRange(0, 120)
@@ -2138,6 +2142,14 @@ class PlaybackPreferencesMixin:
             self.settings_store.setValue("transcript_selection_mode", new_sel_mode)
             if hasattr(self, "transcript_view") and hasattr(self.transcript_view, "set_selection_mode"):
                 self.transcript_view.set_selection_mode(new_sel_mode)
+
+            # Save Floating Selection Toolbar Preference
+            self.show_floating_selection_toolbar = floating_toolbar_chk.isChecked()
+            self.settings_store.setValue("show_floating_selection_toolbar", str(self.show_floating_selection_toolbar).lower())
+            if hasattr(self, "transcript_view"):
+                self.transcript_view.show_floating_selection_toolbar = self.show_floating_selection_toolbar
+                if hasattr(self.transcript_view, "selection_bubble") and not self.show_floating_selection_toolbar:
+                    self.transcript_view.selection_bubble.hide()
 
             # Save Detection
             self.story_detection_mode = str(det_mode_combo.currentData() or "voice")

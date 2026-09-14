@@ -1114,57 +1114,36 @@ class ProjectExportMixin:
                             if speaker and is_speaker_change and speaker != last_speaker:
                                 prefix += f"{speaker}: "
                                 last_speaker = speaker
-                            f.write(f"{prefix}{p_text}\n\n")
+                            f.write(f"{prefix}{p_text}\n")
+
+                            if options.get("include_comments", options.get("include_notes", True)):
+                                src_idx = block.get("_source_index")
+                                source_segs = self.transcript.get("segments", []) if self.transcript else []
+                                seg_comment = ""
+                                if src_idx is not None and 0 <= src_idx < len(source_segs):
+                                    seg_comment = (source_segs[src_idx].get("comments") or source_segs[src_idx].get("notes", "")).strip()
+                                elif "comments" in block or "notes" in block:
+                                    seg_comment = str(block.get("comments") or block.get("notes", "")).strip()
+                                if seg_comment:
+                                    f.write(f"   [Comment: {seg_comment}]\n")
+                            f.write("\n")
 
                 # Export DOCX
                 if formats.get("docx"):
                     docx_file = transcripts_out / f"{file_base}.docx"
-                    document = Document()
-                    document.styles["Normal"].font.name = "Arial"
-                    document.styles["Normal"].font.size = Pt(11)
-                    lang_label = " (Spanish)" if lang_code == "es" else (" (English)" if lang_code == "en" else "")
-                    document.add_heading(f"{story_title}{lang_label}", 0)
-                    if self.audio_file:
-                        document.add_paragraph(f"Recording: {self.audio_file.name} ({format_time(story.start, False)} - {format_time(story.end, False)})")
-                    
-                    last_speaker = None
-                    for block in blocks:
-                        speaker = (block.get("speaker") or "").strip() if options.get("include_speakers", True) else ""
-                        p_text = block.get("text", "").strip()
-                        if not p_text:
-                            continue
-                        p = document.add_paragraph()
-                        if options.get("include_timestamps") and "start" in block and block["start"] is not None:
-                            r_time = p.add_run(f"[{format_time(block['start'], False)}] ")
-                            r_time.font.color.rgb = RGBColor(120, 120, 120)
-                        is_speaker_change = block.get("is_speaker_change", (speaker != last_speaker))
-                        if speaker and is_speaker_change and speaker != last_speaker:
-                            r_spk = p.add_run(f"{speaker}: ")
-                            r_spk.bold = True
-                            last_speaker = speaker
-                        p.add_run(p_text)
-                        p.paragraph_format.space_after = Pt(6)
-
-                        if options.get("include_comments", options.get("include_notes", True)):
-                            src_idx = block.get("_source_index")
-                            source_segs = self.transcript.get("segments", []) if self.transcript else []
-                            seg_comment = ""
-                            if src_idx is not None and 0 <= src_idx < len(source_segs):
-                                seg_comment = (source_segs[src_idx].get("comments") or source_segs[src_idx].get("notes", "")).strip()
-                            elif "comments" in block or "notes" in block:
-                                seg_comment = str(block.get("comments") or block.get("notes", "")).strip()
-
-                            if seg_comment:
-                                p_note = document.add_paragraph()
-                                r_note_lbl = p_note.add_run("💬 Comment: ")
-                                r_note_lbl.bold = True
-                                r_note_lbl.font.color.rgb = RGBColor(180, 130, 0)
-                                r_note_txt = p_note.add_run(seg_comment)
-                                r_note_txt.font.italic = True
-                                r_note_txt.font.color.rgb = RGBColor(140, 100, 0)
-                                p_note.paragraph_format.left_indent = Pt(18)
-                                p_note.paragraph_format.space_after = Pt(6)
-                    document.save(docx_file)
+                    create_story_docx(
+                        title=story_title,
+                        blocks=blocks,
+                        output_path=docx_file,
+                        media_name=self.audio_file.name if self.audio_file else "",
+                        start_time=story.start,
+                        end_time=story.end,
+                        include_speakers=options.get("include_speakers", True),
+                        include_timestamps=options.get("include_timestamps", True),
+                        include_comments=options.get("include_comments", options.get("include_notes", True)),
+                        lang_code=lang_code,
+                        source_segments=self.transcript.get("segments", []) if self.transcript else None,
+                    )
 
                 # Export PDF
                 if formats.get("pdf"):
@@ -1850,61 +1829,36 @@ class ProjectExportMixin:
                                 prefix += f"{speaker}: "
                                 last_speaker = speaker
 
-                            f.write(f"{prefix}{paragraph_text}\n\n")
-
-                # Export DOCX to Transcripts subfolder
-                if formats.get("docx"):
-                    docx_file = transcripts_out / f"{file_base}.docx"
-                    document = Document()
-                    document.styles["Normal"].font.name = "Arial"
-                    document.styles["Normal"].font.size = Pt(11)
-                    lang_label = " (Spanish)" if lang_code == "es" else (" (English)" if lang_code == "en" else "")
-                    document.add_heading(f"{doc_title}{lang_label}", 0)
-                    if self.audio_file:
-                        document.add_paragraph(f"Recording: {self.audio_file.name}")
-
-                    if blocks:
-                        last_speaker = None
-                        for block in blocks:
-                            speaker = (block.get("speaker") or "").strip() if options.get("include_speakers", True) else ""
-                            paragraph_text = block.get("text", "").strip()
-                            if not paragraph_text:
-                                continue
-
-                            p = document.add_paragraph()
-                            time_prefix = ""
-                            if options.get("include_timestamps") and "start" in block and block["start"] is not None:
-                                time_prefix = f"[{format_time(block['start'], False)}] "
-
-                            if time_prefix:
-                                r_time = p.add_run(time_prefix)
-                                r_time.font.color.rgb = RGBColor(120, 120, 120)
-
-                            is_speaker_change = block.get("is_speaker_change", (speaker != last_speaker))
-                            if speaker and is_speaker_change and speaker != last_speaker:
-                                r_spk = p.add_run(f"{speaker}: ")
-                                r_spk.bold = True
-                                last_speaker = speaker
-
-                            p.add_run(paragraph_text)
-                            p.paragraph_format.space_after = Pt(6)
+                            f.write(f"{prefix}{paragraph_text}\n")
 
                             if options.get("include_comments", options.get("include_notes", True)):
                                 src_idx = block.get("_source_index")
                                 source_segs = self.transcript.get("segments", []) if self.transcript else []
+                                seg_comment = ""
                                 if src_idx is not None and 0 <= src_idx < len(source_segs):
                                     seg_comment = (source_segs[src_idx].get("comments") or source_segs[src_idx].get("notes", "")).strip()
-                                    if seg_comment:
-                                        p_note = document.add_paragraph()
-                                        r_note_lbl = p_note.add_run("💬 Comment: ")
-                                        r_note_lbl.bold = True
-                                        r_note_lbl.font.color.rgb = RGBColor(180, 130, 0)
-                                        r_note_txt = p_note.add_run(seg_comment)
-                                        r_note_txt.font.italic = True
-                                        r_note_txt.font.color.rgb = RGBColor(140, 100, 0)
-                                        p_note.paragraph_format.left_indent = Pt(18)
-                                        p_note.paragraph_format.space_after = Pt(6)
-                    document.save(docx_file)
+                                elif "comments" in block or "notes" in block:
+                                    seg_comment = str(block.get("comments") or block.get("notes", "")).strip()
+                                if seg_comment:
+                                    f.write(f"   [Comment: {seg_comment}]\n")
+                            f.write("\n")
+
+                # Export DOCX to Transcripts subfolder
+                if formats.get("docx"):
+                    docx_file = transcripts_out / f"{file_base}.docx"
+                    create_story_docx(
+                        title=doc_title,
+                        blocks=blocks,
+                        output_path=docx_file,
+                        media_name=self.audio_file.name if self.audio_file else "",
+                        start_time=0.0,
+                        end_time=0.0,
+                        include_speakers=options.get("include_speakers", True),
+                        include_timestamps=options.get("include_timestamps", True),
+                        include_comments=options.get("include_comments", options.get("include_notes", True)),
+                        lang_code=lang_code,
+                        source_segments=self.transcript.get("segments", []) if self.transcript else None,
+                    )
 
                 # Export PDF to Transcripts subfolder
                 if formats.get("pdf"):
@@ -2307,13 +2261,45 @@ class ProjectExportMixin:
             p_text = self.clean_export_text(p_text, curr_speaker_name)
             if p_text:
                 is_change = (curr_speaker_name != last_rendered_speaker_name)
-                blocks.append({
+                para_source_indices = []
+                for t in curr_para_words:
+                    s_idx = t.get("seg_idx")
+                    if s_idx is not None and s_idx not in para_source_indices:
+                        para_source_indices.append(s_idx)
+
+                # Extract any comments anchored to the source segments
+                source_segs = self.transcript.get("segments", []) if (hasattr(self, "transcript") and self.transcript) else []
+                para_comments = []
+                for s_idx in para_source_indices:
+                    if 0 <= s_idx < len(source_segs):
+                        c = (source_segs[s_idx].get("comments") or source_segs[s_idx].get("notes", "")).strip()
+                        if c and c not in para_comments:
+                            para_comments.append(c)
+
+                # Also inspect segments list passed directly to build_story_blocks
+                if not para_comments and segments:
+                    for s in segments:
+                        if isinstance(s, dict):
+                            s_idx = s.get("_source_index")
+                            if s_idx in para_source_indices or s.get("seg_idx") in para_source_indices:
+                                c = (s.get("comments") or s.get("notes", "")).strip()
+                                if c and c not in para_comments:
+                                    para_comments.append(c)
+
+                block_dict = {
                     "speaker": curr_speaker_name or "",
                     "text": p_text,
                     "start": curr_para_words[0]["start"],
                     "end": curr_para_words[-1]["end"],
                     "is_speaker_change": is_change,
-                })
+                    "_source_index": para_source_indices[0] if para_source_indices else None,
+                    "source_indices": para_source_indices,
+                }
+                if para_comments:
+                    block_dict["comments"] = "\n".join(para_comments)
+                    block_dict["notes"] = block_dict["comments"]
+
+                blocks.append(block_dict)
                 last_rendered_speaker_name = curr_speaker_name
             curr_para_words = []
 
