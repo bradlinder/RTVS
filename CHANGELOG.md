@@ -1,5 +1,16 @@
 # Changelog
 
+## v3.1.4 (In Development / Roadmap)
+- **Plugin Archive Path Traversal & Zip Slip Security Hardening**:
+  - Implemented safe path validation (`safe_extract_zip` & `safe_extract_tar`) across `plugins/manager.py` and `runtime_manager.py` to strictly sanitize archive target paths and prevent path traversal vulnerabilities.
+  - Added cryptographic SHA-256 checksum verification for downloaded plugin archives and standalone runtime binaries prior to extraction.
+- **Transactional Staged Plugin Installations**:
+  - Re-architected plugin installation and update workflows to extract into temporary staging directories, perform manifest/file validation, and execute atomic folder swaps with automated rollback on failure.
+- **Translation Runtime Decoupling & Pure Plugin Architecture**:
+  - Isolated translation dependencies, fallbacks, and runtime models strictly inside `plugins/translation/`, stripping direct ML model fallbacks from core code paths.
+- **Deterministic Provisioning State Machine**:
+  - Converted runtime environment provisioning in `runtime_manager.py` to a formal state machine (`NOT_INSTALLED` -> `CREATING` -> `INSTALLING` -> `VALIDATING` -> `READY` / `BROKEN`) with standardized recovery paths.
+
 ## v3.1.3
 - **Floating Selection Popup Initialization & Preference Enforcement**:
   - Ensured `TranscriptSelectionBubble` starts hidden upon widget initialization so the floating toolbar is never displayed at startup.

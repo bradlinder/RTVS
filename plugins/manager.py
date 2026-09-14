@@ -14,7 +14,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from prs_shared import INTERNAL_APP_ID, PROJECT_VERSION, QSettings, get_github_repo
+from prs_shared import INTERNAL_APP_ID, PROJECT_VERSION, QSettings, get_github_repo, safe_extract_zip
 from plugins.base import BasePlugin, PluginManifest
 
 import re
@@ -190,7 +190,7 @@ class PluginManager:
                                 shutil.rmtree(dest, ignore_errors=True)
                             dest.mkdir(parents=True, exist_ok=True)
                             with zipfile.ZipFile(source_to_install, "r") as z:
-                                z.extractall(dest)
+                                safe_extract_zip(z, dest)
                             if not (dest / "manifest.json").exists():
                                 for sub in list(dest.iterdir()):
                                     if sub.is_dir() and (sub / "manifest.json").exists():
@@ -459,7 +459,7 @@ class PluginManager:
 
         try:
             with zipfile.ZipFile(package_path, "r") as z:
-                z.extractall(temp_extract)
+                safe_extract_zip(z, temp_extract)
 
             # Find folder with manifest.json
             manifest_file = None

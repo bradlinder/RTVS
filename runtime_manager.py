@@ -508,8 +508,9 @@ class RuntimeManager:
             _emit_progress(progress_cb, 8.0, f"Downloading standalone Python {target_version}…")
             urllib.request.urlretrieve(url, archive_path)
             _emit_progress(progress_cb, 14.0, f"Extracting standalone Python {target_version}…")
+            from prs_shared import safe_extract_tar
             with tarfile.open(archive_path, "r:*") as tar:
-                tar.extractall(path=dest_dir)
+                safe_extract_tar(tar, dest_dir)
 
             return self._find_extracted_python(target_version)
         except Exception as exc:

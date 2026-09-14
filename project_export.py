@@ -699,7 +699,7 @@ class ProjectExportMixin:
                 extract_dir = project_path.parent / project_path.stem
                 extract_dir.mkdir(parents=True, exist_ok=True)
                 with zipfile.ZipFile(project_path, "r") as zf:
-                    zf.extractall(extract_dir)
+                    safe_extract_zip(zf, extract_dir)
                 candidate_rtvs = list(extract_dir.glob("*.rtvs")) or list(extract_dir.glob("*.json"))
                 if candidate_rtvs:
                     self.log_activity(f"[PROJECT] Extracted archive {project_path.name} to {extract_dir.name}", mark_dirty=False)

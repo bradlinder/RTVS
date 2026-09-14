@@ -56,7 +56,7 @@ try:
     )
 except Exception:
     APP_DISPLAY_NAME = "Radio & TV Segmenter"
-    PROJECT_VERSION = "3.1.3"
+    PROJECT_VERSION = "3.1.4"
     DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
     INTERNAL_APP_ID = "RadioTVStorySegmenter"

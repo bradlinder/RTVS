@@ -193,6 +193,12 @@ def restore_snapshot(name: str):
 
     # 1. Unpack archive directly over project files
     with tarfile.open(archive_path, "r:gz") as tar:
+        for member in tar.getmembers():
+            normalized = Path(os.path.abspath(os.path.join(ROOT_DIR, member.name)))
+            try:
+                normalized.relative_to(ROOT_DIR)
+            except ValueError:
+                raise PermissionError(f"Attempted path traversal in backup member: {member.name}")
         tar.extractall(path=ROOT_DIR)
 
     # 2. Synchronize web preview

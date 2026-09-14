@@ -48,6 +48,46 @@ def _ensure_runtime_bin_on_path():
 
 _ensure_runtime_bin_on_path()
 
+def safe_extract_zip(zip_source, dest_dir) -> None:
+    """Safely extracts a ZIP archive to a destination directory, guarding against path traversal (Zip Slip)."""
+    import zipfile
+    dest_path = Path(dest_dir).resolve()
+    
+    def _verify_and_extract(zf):
+        for member in zf.infolist():
+            normalized = Path(os.path.abspath(os.path.join(dest_path, member.filename)))
+            try:
+                normalized.relative_to(dest_path)
+            except ValueError:
+                raise PermissionError(f"Attempted path traversal in ZIP member: {member.filename}")
+        zf.extractall(dest_path)
+
+    if isinstance(zip_source, (str, Path)):
+        with zipfile.ZipFile(zip_source, "r") as z:
+            _verify_and_extract(z)
+    else:
+        _verify_and_extract(zip_source)
+
+def safe_extract_tar(tar_source, dest_dir) -> None:
+    """Safely extracts a TAR archive to a destination directory, guarding against path traversal."""
+    import tarfile
+    dest_path = Path(dest_dir).resolve()
+
+    def _verify_and_extract(tf):
+        for member in tf.getmembers():
+            normalized = Path(os.path.abspath(os.path.join(dest_path, member.name)))
+            try:
+                normalized.relative_to(dest_path)
+            except ValueError:
+                raise PermissionError(f"Attempted path traversal in TAR member: {member.name}")
+        tf.extractall(dest_path)
+
+    if isinstance(tar_source, (str, Path)):
+        with tarfile.open(tar_source, "r:*") as t:
+            _verify_and_extract(t)
+    else:
+        _verify_and_extract(tar_source)
+
 from docx import Document
 from docx.shared import Pt, RGBColor
 
@@ -416,7 +456,7 @@ class CollapsibleSection(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "3.1.3"
+PROJECT_VERSION = "3.1.4"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 
