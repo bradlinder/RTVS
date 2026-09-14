@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter v3.0.0-beta.4 — transcript story responsibilities.
+"""Radio & TV Segmenter v3.0.0-beta.5 — transcript story responsibilities.
 
 
 Methods intentionally retain the MainWindow-facing API so behavior remains
@@ -161,22 +161,6 @@ class TranscriptStoryMixin:
                 if self.show_timestamps else ""
             )
 
-            notes_html = ""
-            if getattr(self, "show_notes", True):
-                seg_indices = list(dict.fromkeys(item["seg_idx"] for item in p_words if "seg_idx" in item))
-                segments_list = self.transcript.get("segments", []) if self.transcript else []
-                for idx in seg_indices:
-                    if 0 <= idx < len(segments_list):
-                        s_note = segments_list[idx].get("notes", "").strip()
-                        if s_note:
-                            esc_note = html.escape(s_note).replace("\n", "<br/>")
-                            notes_html += (
-                                f'<div style="margin-top: 4px; margin-bottom: 6px; padding: 4px 8px; '
-                                f'background-color: rgba(255, 193, 7, 0.15); border-left: 3px solid #ffc107; '
-                                f'color: #e6b800; font-size: 0.9em; border-radius: 4px;">'
-                                f'<b>Note:</b> {esc_note}</div>'
-                            )
-
             if display_mode in ("split", "bilingual") and es_segments:
                 es_text_parts = [es_segments[idx].get("text", "") for idx in seg_indices if 0 <= idx < len(es_segments)]
                 es_text = " ".join(t.strip() for t in es_text_parts if t.strip())
@@ -188,7 +172,6 @@ class TranscriptStoryMixin:
                         f'<span style="color:{word_color};">{body_content}</span><br/>'
                         f'<span style="color:{spanish_tag_color}; font-weight:bold; font-size:0.86em;">ES: </span>'
                         f'<span style="color:{spanish_color};"><i>{esc_es_text}</i></span>'
-                        f'{notes_html}'
                         f'</p>'
                     )
 
@@ -196,7 +179,6 @@ class TranscriptStoryMixin:
                 f'<p style="margin-bottom: 14px; color: {word_color};">'
                 f'{timestamp_html}{speaker_html}'
                 f'<span style="color:{word_color};">{body_content}</span>'
-                f'{notes_html}'
                 f'</p>'
             )
 
@@ -255,6 +237,8 @@ class TranscriptStoryMixin:
             ]
         )
         self.transcript_view.set_char_timestamp_map(char_timestamp_map)
+        if hasattr(self, "comments_panel"):
+            self.comments_panel.set_comments(self.transcript.get("segments", []))
         # This is the exact project state represented by the rendered editor.
         # Text edits are grouped from this baseline into one undoable action.
         if hasattr(self, "_capture_project_state") and not getattr(self, "is_restoring_undo", False):
@@ -381,6 +365,8 @@ class TranscriptStoryMixin:
             self.last_position_source = "transcript"
             self.last_transcript_cursor_time = seconds
             self.seek_to(seconds)
+            if hasattr(self.transcript_view, "move_cursor_to_time"):
+                self.transcript_view.move_cursor_to_time(seconds, self.transcript)
         elif text.startswith("word:"):
             # Viewing-mode left-click is navigation only.  Speaker actions
             # are available from the right-click context menu.
@@ -389,6 +375,8 @@ class TranscriptStoryMixin:
             self.last_position_source = "transcript"
             self.last_transcript_cursor_time = seconds
             self.seek_to(seconds)
+            if hasattr(self.transcript_view, "move_cursor_to_time"):
+                self.transcript_view.move_cursor_to_time(seconds, self.transcript)
         elif text.startswith("speaker:"):
             parts = text.split(":")
             if len(parts) >= 2 and parts[1].isdigit():
@@ -400,8 +388,11 @@ class TranscriptStoryMixin:
                     self.last_position_source = "transcript"
                     self.last_transcript_cursor_time = start_time
                     self.seek_to(start_time)
+                    if hasattr(self.transcript_view, "move_cursor_to_time"):
+                        self.transcript_view.move_cursor_to_time(start_time, self.transcript)
 
-    def edit_segment_note_dialog(self, seg_idx):
+    def edit_segment_comment_dialog(self, seg_idx):
+        """Open comment editor dialog for the targeted transcript segment."""
         if not self.transcript or "segments" not in self.transcript:
             QMessageBox.information(self, "No Transcript", "No transcript is currently loaded.")
             return
@@ -409,29 +400,93 @@ class TranscriptStoryMixin:
         if not (0 <= seg_idx < len(segments)):
             return
         seg = segments[seg_idx]
-        current_note = seg.get("notes", "")
-        text, ok = QInputDialog.getMultiLineText(
+        current_comment = seg.get("comments") or seg.get("notes", "")
+        dialog = CommentEditorDialog(
             self,
-            "Add Note",
-            f"Note for segment {seg_idx + 1} ({format_time(seg.get('start', 0.0))}):",
-            current_note,
+            comment_text=current_comment,
+            title="Edit Comment" if current_comment else "Add Comment",
+            prompt=f"Comment for Segment {seg_idx + 1} ({format_time(seg.get('start', 0.0))}):",
         )
-        if ok:
-            seg["notes"] = text.strip()
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            if dialog.is_deleted():
+                seg.pop("comments", None)
+                seg.pop("notes", None)
+            else:
+                text = dialog.get_comment_text()
+                if text.strip():
+                    seg["comments"] = text
+                    seg["notes"] = text  # preserve backward compatibility
+                else:
+                    seg.pop("comments", None)
+                    seg.pop("notes", None)
             self.mark_project_dirty()
-            self.render_transcript()
+            if hasattr(self, "transcript_view"):
+                self.transcript_view.update_extra_selections()
+            if hasattr(self, "comments_panel"):
+                self.comments_panel.set_comments(segments)
+                self.comments_panel.highlight_segment(seg_idx)
 
-    def open_transcript_notes_dialog(self):
-        curr_notes = getattr(self, "transcript_notes", "")
-        text, ok = QInputDialog.getMultiLineText(
-            self,
-            "Transcript & Project Notes",
-            "Project & Episode Notes (saved with project and included in DOCX export):",
-            curr_notes,
-        )
-        if ok:
-            self.transcript_notes = text.strip()
+    # Alias for backward compatibility
+    edit_segment_note_dialog = edit_segment_comment_dialog
+
+    def add_comment_from_selection(self):
+        """Add or edit comment anchored to the active transcript selection."""
+        if not hasattr(self, "transcript_view"):
+            return
+        cursor = self.transcript_view.textCursor()
+        seg_idx = self.transcript_view.get_segment_index_at_cursor(cursor)
+        if seg_idx is None:
+            ranges = self.transcript_view.get_all_selected_story_ranges()
+            if ranges and hasattr(self, "transcript") and self.transcript:
+                t = ranges[0].get("start_time", 0.0)
+                segs = self.transcript.get("segments", [])
+                for i, s in enumerate(segs):
+                    if s.get("start", 0.0) <= t <= s.get("end", 0.0):
+                        seg_idx = i
+                        break
+        if seg_idx is None:
+            seg_idx = cursor.blockNumber()
+        self.edit_segment_comment_dialog(seg_idx)
+
+    def delete_segment_comment(self, seg_idx):
+        """Delete comment anchored to the specified segment."""
+        if not self.transcript or "segments" not in self.transcript:
+            return
+        segments = self.transcript["segments"]
+        if 0 <= seg_idx < len(segments):
+            seg = segments[seg_idx]
+            seg.pop("comments", None)
+            seg.pop("notes", None)
             self.mark_project_dirty()
+            if hasattr(self, "transcript_view"):
+                self.transcript_view.update_extra_selections()
+            if hasattr(self, "comments_panel"):
+                self.comments_panel.set_comments(segments)
+
+    def toggle_comments_panel(self):
+        """Toggle visibility of the comments sidebar."""
+        if hasattr(self, "comments_panel"):
+            is_vis = not self.comments_panel.isVisible()
+            self.comments_panel.setVisible(is_vis)
+            if hasattr(self, "comments_toggle_btn"):
+                self.comments_toggle_btn.setChecked(is_vis)
+
+    def toggle_show_comments(self, checked):
+        """Toggle display of comments sidebar and yellow anchor highlights."""
+        self.show_comments = checked
+        self.show_notes = checked
+        if hasattr(self, "settings_store"):
+            self.settings_store.setValue("show_comments", checked)
+            self.settings_store.setValue("show_notes", checked)
+        if hasattr(self, "comments_panel"):
+            self.comments_panel.setVisible(checked)
+        if hasattr(self, "comments_toggle_btn"):
+            self.comments_toggle_btn.setChecked(checked)
+        if hasattr(self, "transcript_view"):
+            self.transcript_view.update_extra_selections()
+
+    # Alias for backward compatibility
+    toggle_show_notes = toggle_show_comments
 
     def handle_insert_speaker_request(self, seg_idx, split_time, speaker_name):
         """Dispatched from the right-click 'Add Speaker Label Here' context menu."""

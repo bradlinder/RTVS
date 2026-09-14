@@ -309,7 +309,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "3.0.0-beta.4"
+PROJECT_VERSION = "3.0.0-beta.5"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 
@@ -705,8 +705,12 @@ class ExportDialog(QDialog):
             self.media_checkbox.setChecked(True)
             self.media_checkbox.setToolTip("Export corresponding media clips for each story segment.")
 
+        self.notes_checkbox = QCheckBox("Include Segment & Project Notes")
+        self.notes_checkbox.setChecked(True)
+
         format_layout.addWidget(self.txt_checkbox)
         format_layout.addWidget(self.docx_checkbox)
+        format_layout.addWidget(self.notes_checkbox)
         format_layout.addWidget(self.media_checkbox)
         layout.addWidget(format_group)
 
@@ -734,6 +738,7 @@ class ExportDialog(QDialog):
             "scope": self.scope_combo.currentData(),
             "txt": self.txt_checkbox.isChecked(),
             "docx": self.docx_checkbox.isChecked(),
+            "include_notes": self.notes_checkbox.isChecked(),
             "media": self.media_checkbox.isChecked(),
             "filename": self.filename_input.text().strip() or self.default_name,
         }
@@ -1115,13 +1120,301 @@ def transcript_text_view_stylesheet(mode, font_size=16):
     """
 
 
+class CommentEditorDialog(QDialog):
+    """Multi-line document-style comment editor supporting spaces, line breaks, and paragraph breaks."""
+    def __init__(self, parent=None, comment_text="", title="Add Comment", prompt="Enter comment details:"):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(500)
+        self.setMinimumHeight(300)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        label = QLabel(prompt, self)
+        label.setWordWrap(True)
+        label.setStyleSheet("font-weight: bold; font-size: 13px;")
+        layout.addWidget(label)
+
+        self.text_edit = QTextEdit(self)
+        self.text_edit.setPlainText(comment_text)
+        self.text_edit.setAcceptRichText(False)
+        self.text_edit.setPlaceholderText("Type your comment here... (Spaces, tabs, Enter line breaks, and Ctrl+Enter to save supported)")
+        self.text_edit.setStyleSheet("font-size: 13px; line-height: 1.5; padding: 6px;")
+        layout.addWidget(self.text_edit)
+
+        btn_layout = QHBoxLayout()
+        self.delete_btn = QPushButton("🗑️ Delete Comment", self)
+        self.delete_btn.setStyleSheet("color: #dc2626; font-weight: bold;")
+        self.delete_btn.setVisible(bool(comment_text and comment_text.strip()))
+
+        self.save_btn = QPushButton("Save Comment", self)
+        self.save_btn.setDefault(True)
+        self.cancel_btn = QPushButton("Cancel", self)
+
+        btn_layout.addWidget(self.delete_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.cancel_btn)
+        btn_layout.addWidget(self.save_btn)
+        layout.addLayout(btn_layout)
+
+        self.save_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        self.delete_btn.clicked.connect(self._on_delete)
+        self._is_deleted = False
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Return and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self.accept()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _on_delete(self):
+        self._is_deleted = True
+        self.accept()
+
+    def get_comment_text(self):
+        if self._is_deleted:
+            return ""
+        return self.text_edit.toPlainText()
+
+    def get_note_text(self):
+        return self.get_comment_text()
+
+    def is_deleted(self):
+        return self._is_deleted
+
+
+# Alias for backward compatibility
+NoteEditorDialog = CommentEditorDialog
+
+
+class CommentCardWidget(QFrame):
+    """Card representing a single range-anchored comment in the Comments side panel."""
+    editRequested = Signal(int)
+    deleteRequested = Signal(int)
+    seekRequested = Signal(float, int)
+
+    def __init__(self, seg_idx, start_time, end_time, comment_text, quote_text="", parent=None):
+        super().__init__(parent)
+        self.seg_idx = seg_idx
+        self.start_time = float(start_time)
+        self.end_time = float(end_time)
+        self.setObjectName("comment_card")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(4)
+
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        time_str = f"[{format_time(self.start_time)} - {format_time(self.end_time)}]"
+        self.time_lbl = QLabel(f"<b>{time_str}</b>", self)
+        self.time_lbl.setStyleSheet("color: #38bdf8; font-size: 11px;")
+        header_layout.addWidget(self.time_lbl)
+        header_layout.addStretch()
+
+        self.edit_btn = QToolButton(self)
+        self.edit_btn.setText("✏️")
+        self.edit_btn.setToolTip("Edit comment")
+        self.edit_btn.setStyleSheet("border: none; padding: 2px;")
+        self.edit_btn.clicked.connect(lambda: self.editRequested.emit(self.seg_idx))
+        header_layout.addWidget(self.edit_btn)
+
+        self.delete_btn = QToolButton(self)
+        self.delete_btn.setText("🗑️")
+        self.delete_btn.setToolTip("Delete comment")
+        self.delete_btn.setStyleSheet("border: none; padding: 2px; color: #ef4444;")
+        self.delete_btn.clicked.connect(lambda: self.deleteRequested.emit(self.seg_idx))
+        header_layout.addWidget(self.delete_btn)
+        layout.addLayout(header_layout)
+
+        if quote_text and quote_text.strip():
+            esc_q = quote_text.strip()
+            if len(esc_q) > 90:
+                esc_q = esc_q[:87] + "..."
+            self.quote_lbl = QLabel(f'<i>"{esc_q}"</i>', self)
+            self.quote_lbl.setWordWrap(True)
+            self.quote_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; margin-bottom: 2px;")
+            layout.addWidget(self.quote_lbl)
+
+        self.comment_lbl = QLabel(comment_text, self)
+        self.comment_lbl.setWordWrap(True)
+        self.comment_lbl.setStyleSheet("font-size: 12px; line-height: 1.4;")
+        layout.addWidget(self.comment_lbl)
+
+        self.setStyleSheet("""
+            QFrame#comment_card {
+                background-color: rgba(254, 240, 138, 0.08);
+                border: 1px solid rgba(234, 179, 8, 0.35);
+                border-left: 4px solid #eab308;
+                border-radius: 6px;
+                margin-bottom: 4px;
+            }
+            QFrame#comment_card:hover {
+                background-color: rgba(254, 240, 138, 0.16);
+                border-color: #eab308;
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.seekRequested.emit(self.start_time, self.seg_idx)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class CommentsPanel(QWidget):
+    """Collapsible docked Comments Sidebar / Pane sitting beside the transcript view."""
+    commentSeekRequested = Signal(float, int)
+    commentEditRequested = Signal(int)
+    commentDeleteRequested = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("comments_panel")
+        self.setMinimumWidth(220)
+        self.setMaximumWidth(400)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(6, 6, 6, 6)
+        main_layout.setSpacing(6)
+
+        # Header bar
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(2, 2, 2, 4)
+        self.title_lbl = QLabel("<b>💬 Comments (0)</b>", self)
+        self.title_lbl.setStyleSheet("font-size: 13px;")
+        header_layout.addWidget(self.title_lbl)
+        header_layout.addStretch()
+
+        self.add_btn = QToolButton(self)
+        self.add_btn.setText("+ Add")
+        self.add_btn.setToolTip("Add comment to current transcript selection (Ctrl+Alt+C)")
+        self.add_btn.setStyleSheet("padding: 2px 6px; font-weight: bold;")
+        self.add_btn.clicked.connect(self._on_add_clicked)
+        header_layout.addWidget(self.add_btn)
+
+        self.close_btn = QToolButton(self)
+        self.close_btn.setText("✕")
+        self.close_btn.setToolTip("Close Comments Sidebar (Ctrl+Alt+M)")
+        self.close_btn.setStyleSheet("border: none; padding: 2px 4px; color: #94a3b8;")
+        self.close_btn.clicked.connect(self.hide)
+        header_layout.addWidget(self.close_btn)
+        main_layout.addLayout(header_layout)
+
+        # Scroll area for cards
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_widget = QWidget()
+        self.cards_layout = QVBoxLayout(self.scroll_widget)
+        self.cards_layout.setContentsMargins(2, 2, 2, 2)
+        self.cards_layout.setSpacing(6)
+        self.cards_layout.addStretch()
+        self.scroll_area.setWidget(self.scroll_widget)
+        main_layout.addWidget(self.scroll_area, 1)
+
+        # Empty state label
+        self.empty_lbl = QLabel(
+            "No comments yet.\n\nHighlight text in the transcript and select '💬 Add Comment' to annotate.",
+            self
+        )
+        self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_lbl.setWordWrap(True)
+        self.empty_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; padding: 24px 12px;")
+        main_layout.addWidget(self.empty_lbl)
+
+    def _on_add_clicked(self):
+        win = self.window()
+        if hasattr(win, "add_comment_from_selection"):
+            win.add_comment_from_selection()
+        elif hasattr(win, "transcript_view"):
+            cursor = win.transcript_view.textCursor()
+            seg_idx = win.transcript_view.get_segment_index_at_cursor(cursor)
+            if seg_idx is not None and hasattr(win, "edit_segment_comment_dialog"):
+                win.edit_segment_comment_dialog(seg_idx)
+
+    def set_comments(self, segments):
+        """Populate the comment cards from transcript segments."""
+        # Clear existing card widgets
+        while self.cards_layout.count() > 1:
+            item = self.cards_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        comment_count = 0
+        if segments:
+            for idx, seg in enumerate(segments):
+                c_text = seg.get("comments") or seg.get("notes", "")
+                if c_text and c_text.strip():
+                    comment_count += 1
+                    quote = seg.get("text", "")
+                    card = CommentCardWidget(
+                        seg_idx=idx,
+                        start_time=seg.get("start", 0.0),
+                        end_time=seg.get("end", 0.0),
+                        comment_text=c_text.strip(),
+                        quote_text=quote,
+                        parent=self.scroll_widget
+                    )
+                    card.seekRequested.connect(self.commentSeekRequested.emit)
+                    card.editRequested.connect(self.commentEditRequested.emit)
+                    card.deleteRequested.connect(self.commentDeleteRequested.emit)
+                    self.cards_layout.insertWidget(self.cards_layout.count() - 1, card)
+
+        self.title_lbl.setText(f"<b>💬 Comments ({comment_count})</b>")
+        if comment_count > 0:
+            self.empty_lbl.hide()
+            self.scroll_area.show()
+        else:
+            self.empty_lbl.show()
+            self.scroll_area.hide()
+
+    def highlight_segment(self, target_seg_idx):
+        """Visually flash/highlight a specific comment card."""
+        for i in range(self.cards_layout.count() - 1):
+            item = self.cards_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), CommentCardWidget):
+                card = item.widget()
+                if card.seg_idx == target_seg_idx:
+                    card.setStyleSheet("""
+                        QFrame#comment_card {
+                            background-color: rgba(254, 240, 138, 0.28);
+                            border: 2px solid #eab308;
+                            border-left: 5px solid #ca8a04;
+                            border-radius: 6px;
+                            margin-bottom: 4px;
+                        }
+                    """)
+                    self.scroll_area.ensureWidgetVisible(card)
+                else:
+                    card.setStyleSheet("""
+                        QFrame#comment_card {
+                            background-color: rgba(254, 240, 138, 0.08);
+                            border: 1px solid rgba(234, 179, 8, 0.35);
+                            border-left: 4px solid #eab308;
+                            border-radius: 6px;
+                            margin-bottom: 4px;
+                        }
+                        QFrame#comment_card:hover {
+                            background-color: rgba(254, 240, 138, 0.16);
+                            border-color: #eab308;
+                        }
+                    """)
+
+
 class TranscriptSelectionBubble(QFrame):
     """Floating quick-action toolbar on transcript selection (Milestone 3.12)."""
     playRequested = Signal()
     storyRequested = Signal()
     cutRequested = Signal()
     exportRequested = Signal()
-    noteRequested = Signal()
+    commentRequested = Signal()
+    noteRequested = Signal()  # alias for backward compatibility
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1146,11 +1439,13 @@ class TranscriptSelectionBubble(QFrame):
         self.story_btn.clicked.connect(self.storyRequested.emit)
         layout.addWidget(self.story_btn)
 
-        self.note_btn = QToolButton(self)
-        self.note_btn.setText("📝 Note")
-        self.note_btn.setToolTip("Add Note to highlighted section")
-        self.note_btn.clicked.connect(self.noteRequested.emit)
-        layout.addWidget(self.note_btn)
+        self.comment_btn = QToolButton(self)
+        self.comment_btn.setText("💬 Comment")
+        self.comment_btn.setToolTip("Add comment to highlighted section (Ctrl+Alt+C)")
+        self.comment_btn.clicked.connect(self._emit_comment)
+        layout.addWidget(self.comment_btn)
+
+        self.note_btn = self.comment_btn  # alias
 
         self.cut_btn = QToolButton(self)
         self.cut_btn.setText("✂ Exclude")
@@ -1188,6 +1483,10 @@ class TranscriptSelectionBubble(QFrame):
                 background-color: #0f172a;
             }
         """)
+
+    def _emit_comment(self):
+        self.commentRequested.emit()
+        self.noteRequested.emit()
         self.hide()
 
 
@@ -1240,6 +1539,28 @@ class InteractiveTranscriptEdit(QTextEdit):
         self.selection_bubble.exportRequested.connect(self._on_bubble_export)
 
         self.apply_theme_style("dark")
+        self.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard
+            | Qt.TextInteractionFlag.LinksAccessibleByMouse
+        )
+
+    def event(self, e):
+        if e.type() == QEvent.Type.ToolTip:
+            main_win = self.window()
+            show_comments = str(getattr(main_win, "show_comments", getattr(main_win, "show_notes", True))).lower() in {"1", "true", "yes"}
+            if show_comments and hasattr(self, "transcript_data") and self.transcript_data:
+                cursor = self.cursorForPosition(e.pos())
+                seg_idx = self.get_segment_index_at_cursor(cursor)
+                if seg_idx is not None:
+                    segments = self.transcript_data.get("segments", [])
+                    if 0 <= seg_idx < len(segments):
+                        c_text = segments[seg_idx].get("comments") or segments[seg_idx].get("notes", "")
+                        if c_text and c_text.strip():
+                            QToolTip.showText(e.globalPos(), f"💬 Comment:\n{c_text.strip()}", self)
+                            return True
+            QToolTip.hideText()
+        return super().event(e)
 
     def _on_bubble_play(self):
         win = self.window()
@@ -1256,14 +1577,16 @@ class InteractiveTranscriptEdit(QTextEdit):
 
     def _on_bubble_note(self):
         win = self.window()
-        if hasattr(win, "add_note_dialog"):
-            win.add_note_dialog()
-        elif hasattr(win, "edit_segment_note_dialog"):
+        if hasattr(win, "add_comment_from_selection"):
+            win.add_comment_from_selection()
+        elif hasattr(win, "edit_segment_comment_dialog"):
             cursor = self.textCursor()
             seg_idx = self.get_segment_index_at_cursor(cursor)
             if seg_idx is None:
                 seg_idx = cursor.blockNumber()
-            win.edit_segment_note_dialog(seg_idx)
+            win.edit_segment_comment_dialog(seg_idx)
+        elif hasattr(win, "add_note_dialog"):
+            win.add_note_dialog()
         self.selection_bubble.hide()
 
     def _on_bubble_cut(self):
@@ -1450,6 +1773,38 @@ class InteractiveTranscriptEdit(QTextEdit):
 
     def update_extra_selections(self):
         extras = []
+        main_win = self.window()
+        show_comments = str(getattr(main_win, "show_comments", getattr(main_win, "show_notes", True))).lower() in {"1", "true", "yes"}
+
+        # Amber / Yellow Comment Highlights (Word & Google Docs Style)
+        if show_comments and hasattr(self, "transcript_data") and self.transcript_data and "segments" in self.transcript_data:
+            segments = self.transcript_data.get("segments", [])
+            doc = self.document()
+            for idx, seg in enumerate(segments):
+                comment_text = seg.get("comments") or seg.get("notes", "")
+                if comment_text and comment_text.strip():
+                    target_anchor = f"seg_{idx}"
+                    positions = self.anchor_ranges.get(target_anchor)
+                    if not positions:
+                        block = doc.findBlockByNumber(idx)
+                        if block.isValid():
+                            positions = (block.position(), block.position() + max(1, block.length() - 1))
+                    if positions:
+                        comment_fmt = QTextCharFormat()
+                        if getattr(self, "current_theme", "dark") == "light":
+                            comment_fmt.setBackground(QColor(254, 240, 138, 220))  # Light warm amber highlight
+                            comment_fmt.setForeground(QColor(133, 77, 14))
+                        else:
+                            comment_fmt.setBackground(QColor(133, 77, 14, 200))  # Dark warm amber highlight
+                            comment_fmt.setForeground(QColor(254, 240, 138))
+                        comment_cursor = QTextCursor(doc)
+                        comment_cursor.setPosition(positions[0])
+                        comment_cursor.setPosition(positions[1], QTextCursor.MoveMode.KeepAnchor)
+                        extra = QTextEdit.ExtraSelection()
+                        extra.format = comment_fmt
+                        extra.cursor = comment_cursor
+                        extras.append(extra)
+
         if hasattr(self, "saved_selections") and self.saved_selections:
             fmt = QTextCharFormat()
             if getattr(self, "current_theme", "dark") == "light":
@@ -1766,6 +2121,43 @@ class InteractiveTranscriptEdit(QTextEdit):
         main_win = self.window()
         return getattr(main_win, "current_position", 0.0)
 
+    def get_block_start_timestamp(self, cursor):
+        block = cursor.block()
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            if frag.isValid():
+                href = frag.charFormat().anchorHref()
+                if href and href.startswith("word:"):
+                    parts = href.split(":")
+                    if len(parts) >= 2:
+                        try:
+                            return float(parts[1])
+                        except ValueError:
+                            pass
+            it += 1
+        return self.get_timestamp_at_cursor(cursor)
+
+    def get_block_end_timestamp(self, cursor):
+        block = cursor.block()
+        last_ts = None
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            if frag.isValid():
+                href = frag.charFormat().anchorHref()
+                if href and href.startswith("word:"):
+                    parts = href.split(":")
+                    if len(parts) >= 2:
+                        try:
+                            last_ts = float(parts[1])
+                        except ValueError:
+                            pass
+            it += 1
+        if last_ts is not None:
+            return last_ts
+        return self.get_timestamp_at_cursor(cursor)
+
     def get_segment_index_at_cursor(self, cursor):
         nearest = self._nearest_word_anchor(cursor)
         if nearest is not None:
@@ -1878,8 +2270,6 @@ class InteractiveTranscriptEdit(QTextEdit):
                 event.accept()
                 return
 
-        super().keyPressEvent(event)
-
         if not self.is_editing_mode and event.key() in (
             Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
             Qt.Key.Key_Home, Qt.Key.Key_End, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown
@@ -1893,26 +2283,38 @@ class InteractiveTranscriptEdit(QTextEdit):
                 cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
                 self.setTextCursor(cursor)
                 self.ensureCursorVisible()
+                t = self.get_block_start_timestamp(cursor)
+                if t is not None and hasattr(main_win, "seek_to"):
+                    main_win.seek_to(t)
                 event.accept()
                 return
             elif key == Qt.Key.Key_End:
                 cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
                 self.setTextCursor(cursor)
                 self.ensureCursorVisible()
+                t = self.get_block_end_timestamp(cursor)
+                if t is not None and hasattr(main_win, "seek_to"):
+                    main_win.seek_to(t)
                 event.accept()
                 return
             elif key in (Qt.Key.Key_Left, Qt.Key.Key_Up, Qt.Key.Key_PageUp):
                 if hasattr(main_win, "seek_relative"):
                     main_win.last_position_source = "transcript"
                     main_win.seek_relative(-skip_sec)
+                    if hasattr(main_win, "transcript") and hasattr(self, "move_cursor_to_time"):
+                        self.move_cursor_to_time(getattr(main_win, "current_position", 0.0), main_win.transcript)
                 event.accept()
                 return
             elif key in (Qt.Key.Key_Right, Qt.Key.Key_Down, Qt.Key.Key_PageDown):
                 if hasattr(main_win, "seek_relative"):
                     main_win.last_position_source = "transcript"
                     main_win.seek_relative(skip_sec)
+                    if hasattr(main_win, "transcript") and hasattr(self, "move_cursor_to_time"):
+                        self.move_cursor_to_time(getattr(main_win, "current_position", 0.0), main_win.transcript)
                 event.accept()
                 return
+
+        super().keyPressEvent(event)
 
     def show_context_menu(self, position):
         """Context menu for both viewing and editing modes.  Speaker labels
@@ -2032,16 +2434,24 @@ class InteractiveTranscriptEdit(QTextEdit):
             add_vocab.triggered.connect(_add_vocab_from_selection)
             menu.addAction(add_vocab)
 
-            edit_note_act = QAction("📝 Add Note...", self)
             target_seg = self.get_segment_index_at_cursor(hit_cursor)
             if target_seg is None:
                 target_seg = hit_cursor.blockNumber()
-            edit_note_act.triggered.connect(lambda _, s=target_seg: getattr(main_win, "edit_segment_note_dialog", lambda x: None)(s))
-            menu.addAction(edit_note_act)
+            has_comment = False
+            if hasattr(main_win, "transcript") and main_win.transcript:
+                segs = main_win.transcript.get("segments", [])
+                if 0 <= target_seg < len(segs):
+                    has_comment = bool(segs[target_seg].get("comments") or segs[target_seg].get("notes"))
+            comment_title = "💬 Edit Comment..." if has_comment else "💬 Add Comment..."
+            edit_comment_act = QAction(comment_title, self)
+            edit_comment_act.setShortcut(QKeySequence("Ctrl+Alt+C"))
+            edit_comment_act.triggered.connect(lambda _, s=target_seg: getattr(main_win, "edit_segment_comment_dialog", getattr(main_win, "edit_segment_note_dialog", lambda x: None))(s))
+            menu.addAction(edit_comment_act)
 
-            all_notes_act = QAction("📋 Transcript & Project Notes...", self)
-            all_notes_act.triggered.connect(lambda: getattr(main_win, "open_transcript_notes_dialog", lambda: None)())
-            menu.addAction(all_notes_act)
+            toggle_comments_act = QAction("💬 Toggle Comments Sidebar", self)
+            toggle_comments_act.setShortcut(QKeySequence("Ctrl+Alt+M"))
+            toggle_comments_act.triggered.connect(lambda: getattr(main_win, "toggle_comments_panel", lambda: None)())
+            menu.addAction(toggle_comments_act)
 
             menu.addSeparator()
             edit_action = QAction("Edit Transcript", self)

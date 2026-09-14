@@ -29,29 +29,18 @@ ROADMAP MAINTENANCE POLICY: N-1 SLIDING-WINDOW & STATUS TRACKING
 --------------------------------------------------------------------------------
 TABLE OF CONTENTS & STATUS OVERVIEW
 --------------------------------------------------------------------------------
-1. Previous Release: Artifact Naming Normalization & Updater Asset Matching (Completed in v2.9.6)
-   [x] 1.1 Cross-Platform Build Artifact Naming Normalization (Double Dot Prevention)
-   [x] 1.2 Resilient In-App Updater Asset Matching & Checksum Discovery
-   [x] 1.3 Semantic Version Tuple Comparison in Updater Asset Notices
-   [x] 1.4 Synchronized Project Version Bump to v2.9.6 across Core and Add-ons
-   [x] 1.5 AI Studio Web Preview Git Hygiene & Zero-Token Scaffolding Restoration (preview_manager.py & .gitignore structure)
+1. Previous Release: Navigation & Preliminary Annotations (Completed in v3.0.0-beta.4)
+   [x] 1.1 Clickable Speaker & Timestamp Links seeking audio/video to exact second
+   [x] 1.2 Paragraph-Scoped Home & End Key Navigation in Transcript Editor
+   [x] 1.3 Arrow Key Playback Skipping & Word-Highlight Synchronization
+   [x] 1.4 Single-Instance Application Enforcement & IPC Message Forwarding
+   [x] 1.5 Project-Local Peak Cache Storage (.cache/peaks/)
 
-2. Current Release: Self-Contained Project Bundles & Storage Management (Completed in v3.0.0-beta)
-   [x] 2.1 Project Media Ingest Preferences & Disk Space Controls (Copy vs. Reference)
-   [x] 2.2 Ingest Size Warning & Drive Free-Space Verification
-   [x] 2.3 Dedicated exports/ Directory Structure (exports/audio/, exports/transcripts/)
-   [x] 2.4 Backward-Compatible Legacy Ingest & Resolution Migration
-   [x] 2.5 Project-Local Hidden Cache (.cache/peaks/) & Scratch Storage
-   [x] 2.6 Consolidate Media into Project Action (File > Consolidate Media...)
-   [x] 2.7 Clean Project Cache & Free Space Tool (File > Clean Cache / Reclaim Space...)
-   [x] 2.8 Portable Project Archive Creator (File > Export Project Archive (.zip))
-   [x] 2.9 Enhanced "Locate Missing Media" Dialog & Interactive Re-Pathing Assistant
-   [x] 2.10 Interactive Empty-State Onboarding & Drag-and-Drop Canvas Guidance
-   [x] 2.11 "Reveal Export in File Manager" Action on Export Completion
-   [x] 2.12 Floating Quick-Action Mini-Toolbar on Transcript Text Selection
-   [x] 2.13 Dual-Layer Timeline Navigation (Macro Overview Strip + Detailed Zoom Strip)
-   [x] 2.14 Synchronized Color-Coded Story Accents & Waveform Marker Badges
-   [x] 2.15 Debian / Ubuntu (.deb) Control Version Compliance & CI Extraction Sanitization
+2. Current Release: Word/Docs Style Comments Architecture & Focus Isolation (Completed in v3.0.0-beta.5)
+   [x] 2.1 Comment Dialog Spacebar & Focus Isolation (Suppress global play/pause shortcuts during text input; full space/line break support)
+   [x] 2.2 Comments System UX Architecture (Decommission project/episode notes; rename Notes to Comments; anchor comments to highlighted text with margin cards/side panel; no inline transcript clutter)
+   [x] 2.3 Transcript Paragraph-Constrained Navigation & Viewport Synchronization
+   [x] 2.4 Word Document (DOCX) Comments Export & Callout Formatting (Include Comments toggle; styled indented callouts with timing)
 
 3. Upcoming Milestone: Media Transcoding, Async Provisioning & Transcript Cleaning (Phase 2 - Planned for v3.1) [NOT STARTED]
    [ ] 3.1 Media Transcoding & Format Conversion on Export (Audio & Video Codecs)
@@ -75,115 +64,59 @@ TABLE OF CONTENTS & STATUS OVERVIEW
    [ ] 5.4 Memory-Bounded Diarization & Chunked Streaming
 
 ================================================================================
-1. PREVIOUS RELEASE: ARTIFACT NAMING NORMALIZATION & UPDATER ASSET MATCHING (Completed in v2.9.6)
+1. PREVIOUS RELEASE: NAVIGATION & PRELIMINARY ANNOTATIONS (Completed in v3.0.0-beta.4)
 ================================================================================
 
-[x] 1.1 CROSS-PLATFORM BUILD ARTIFACT NAMING NORMALIZATION (DOUBLE DOT PREVENTION)
------------------------------------------------------------------------------------
-- Resolved naming artifact bug where double dots (`2.9..6`) could be generated in Windows setup executable names (`RadioTVSegmenter-2.9.6-Windows-Setup.exe`) and Linux tarballs.
-- Hardened version extraction and variable expansion in `build_installer.py`, `build_windows.bat`, `build_deb.sh`, and `build_app.sh` using strict dot collapsing (`re.sub(r"\.+", ".", v)` / `tr -s '.'`).
-- Sanitized Inno Setup `/DMyAppVersion` parameter passing and Debian package metadata creation to guarantee single-dot semantic version numbering.
+[x] 1.1 CLICKABLE SPEAKER & TIMESTAMP LINKS
+-------------------------------------------
+- Clicking any timestamp link `[00:00]` or speaker header in `InteractiveTranscriptEdit` seeks playback to that exact second and positions text cursor precisely at the clicked location.
 
-[x] 1.2 RESILIENT IN-APP UPDATER ASSET MATCHING & CHECKSUM DISCOVERY
+[x] 1.2 PARAGRAPH-SCOPED HOME & END KEY NAVIGATION
+--------------------------------------------------
+- Initial implementation of Home and End key navigation in `InteractiveTranscriptEdit` during viewing mode.
+
+[x] 1.3 ARROW KEY PLAYBACK SKIPPING & SYNCHRONIZATION
+----------------------------------------------------
+- Arrow keys in transcript edit view synchronized with user playback skip preferences (`playback_skip_interval`).
+
+[x] 1.4 SINGLE-INSTANCE APPLICATION ENFORCEMENT & IPC
+-----------------------------------------------------
+- Added preference setting in `playback_preferences.py` ("Instance Handling Mode") allowing users to choose between single-instance mode and multi-instance mode via `QLocalServer` and `QLocalSocket`.
+
+[x] 1.5 PROJECT-LOCAL PEAK CACHE STORAGE (.CACHE/PEAKS/)
+--------------------------------------------------------
+- Pre-calculated waveform `.peaks` cache files are stored inside the project folder's hidden `.cache/peaks/` subfolder.
+
+================================================================================
+2. CURRENT RELEASE: WORD/DOCS STYLE COMMENTS ARCHITECTURE & FOCUS ISOLATION (Completed in v3.0.0-beta.5)
+================================================================================
+
+[x] 2.1 COMMENT DIALOG SPACEBAR & FOCUS ISOLATION
+-------------------------------------------------
+- Isolated keyboard shortcut dispatching (`eventFilter` in `playback_preferences.py`) so global Play/Pause hotkeys are strictly suppressed whenever a text input, dialog, or comment editor is active.
+- Multi-line `CommentEditorDialog` built with `QPlainTextEdit` supporting spaces, tabs, paragraph breaks (`Enter`), and quick save (`Ctrl+Enter`).
+
+[x] 2.2 COMMENTS SYSTEM UX ARCHITECTURE (WORD / DOCS / WRITER STYLE)
 ---------------------------------------------------------------------
-- Enhanced `updater.py` with normalized string matching across `parse_version_tuple`, `_find_release_checksum`, and `select_best_asset_for_platform`.
-- Automatically normalizes consecutive dots in remote asset filenames when matching platform binaries and retrieving SHA-256 hashes from `SHA256SUMS` or `.sha256` files.
-- Guarantees seamless download, verification, and upgrade/rollback even if a remote GitHub release asset contains formatting quirks.
+- Re-architected notes into a non-destructive **Comments** system inspired by Microsoft Word, Google Docs, and LibreOffice Writer.
+- Removed raw inline note blocks from the transcript body, keeping the reading flow clean and uncluttered.
+- Added collapsible docked **Comments Sidebar** (`CommentsPanel`) with comment cards displaying timestamp spans, quote excerpt anchors, multi-line comment text, and quick Edit and Delete/Resolve actions.
+- Two-way interactive synchronization: clicking a comment card scrolls the transcript to the passage and seeks audio playback; hovering or clicking commented transcript passages highlights and scrolls to the card in the sidebar.
+- Non-destructive amber/yellow highlight ranges (`#fef08a` / `#854d0e`) rendered over commented transcript text via `QTextEdit.ExtraSelection` with hover tooltips.
+- Added dedicated View menu action "Show Comments Sidebar & Highlights" (`Ctrl+Alt+M`) and search bar toggle button.
+- Decommissioned legacy project and episode notes dialogs and menus, focusing strictly on segment-anchored comments.
 
-[x] 1.3 SEMANTIC VERSION TUPLE COMPARISON IN UPDATER ASSET NOTICES
---------------------------------------------------------------------
-- Updated `_display_release` in `updater.py` to evaluate numerical semantic version tuples (`parse_version_tuple(asset_ver)[0] != parse_version_tuple(clean_tag)[0]`) rather than performing strict raw string comparisons.
-- Eliminates erroneous warning banners when asset filenames and release tags differ only in non-semantic formatting (e.g., dot counts or prefixes).
+[x] 2.3 TRANSCRIPT PARAGRAPH-CONSTRAINED NAVIGATION & VIEWPORT SYNCHRONIZATION
+------------------------------------------------------------------------------
+- Fixed `Home` and `End` keys in `InteractiveTranscriptEdit` to seek and navigate strictly within the current paragraph block rather than jumping across the entire document.
+- Home key positions cursor at start of paragraph block and seeks to paragraph start timestamp; End key positions cursor at end of paragraph block and seeks to paragraph end timestamp.
+- Arrow key navigation in viewing mode jumps playback according to user skip settings and synchronizes timeline cursor and transcript word highlighting.
 
-[x] 1.4 SYNCHRONIZED PROJECT VERSION BUMP TO v2.9.6 ACROSS CORE AND ADD-ONS
-----------------------------------------------------------------------------
-- Synchronized `v2.9.6` across all required locations:
-  * `prs_shared.py`, `updater.py`, `build_installer.py`, `transcript_story.py`
-  * `installer/Windows/RadioTVStorySegmenter.iss`, `package.json`, `metadata.json`, `index.html`
-  * `plugins/wordpress/manifest.json`, `plugins/youtube/manifest.json`, `plugins/translation/manifest.json`
-  * `CHANGELOG.md`, `roadmap.txt`, and `/src/App.tsx`
-- Clarified version naming formatting in `AGENTS.md` and `GEMINI.md` to prevent double-dot regressions in all future releases.
-
-[x] 1.5 AI STUDIO WEB PREVIEW GIT HYGIENE & ZERO-TOKEN SCAFFOLDING RESTORATION
---------------------------------------------------------------------------------
-- Rebuilt `.gitignore` to strictly exclude all Node/Vite web preview files (`package.json`, `tsconfig.json`, `vite.config.ts`, `tailwind.config.js`, `postcss.config.js`, `eslint.config.js`, `metadata.json`, `index.html`, `src/`, `public/`, `node_modules/`, `bun.lock`), keeping the GitHub repository focused exclusively on the Python desktop suite.
-- Removed stale untracked `gitignore` file (without leading dot) to restore standard gitignore resolution.
-- Created `preview_manager.py` to provide instantaneous, zero-token restoration and version synchronization across all web preview files (`python preview_manager.py --restore` / `--sync`).
-- Decoupled `src/App.tsx` from manual markdown copy-pasting by leveraging Vite's native raw asset import (`import CHANGELOG_MARKDOWN from '../CHANGELOG.md?raw'`), ensuring the web preview changelog is perpetually synchronized with `CHANGELOG.md` in real-time.
-
-================================================================================
-2. CURRENT RELEASE: SELF-CONTAINED PROJECT BUNDLES & STORAGE MANAGEMENT (Completed in v3.0.0-beta)
-================================================================================
-
-[x] 2.1 PROJECT MEDIA INGEST PREFERENCES & DISK SPACE CONTROLS (COPY VS. REFERENCE)
--------------------------------------------------------------------------------------
-- Implemented configurable media ingest policies in Preferences (`playback_preferences.py`, `project_export.py`, `ui_layout.py`):
-  * "Reference in place (Recommended for external drives / save disk space)"
-  * "Copy source media into project bundle (Self-contained / portable)"
-  * "Ask when saving new project"
-- Per-project metadata tracks ingest mode and relative/absolute source recording paths seamlessly.
-
-[x] 2.2 INGEST SIZE WARNING & DRIVE FREE-SPACE VERIFICATION
--------------------------------------------------------------
-- Added automated free-space preflight verification before media ingestion using `shutil.disk_usage`.
-- Prompts confirmation if media exceeds 1 GB or if available disk space is under 10%, offering an instant 1-click switch to "Reference in place".
-
-[x] 2.3 DEDICATED EXPORTS DIRECTORY STRUCTURE (EXPORTS/AUDIO, EXPORTS/TRANSCRIPTS)
------------------------------------------------------------------------------------
-- Upgraded project bundle structure to dedicated directories:
-  * `<Project>/media/`: Original recordings
-  * `<Project>/exports/audio/`: Cut audio clips
-  * `<Project>/exports/transcripts/`: Transcripts, CUE sheets, tracklists, and documents
-  * `<Project>/.cache/`: Hidden peak data and transient scratch files
-
-[x] 2.4 BACKWARD-COMPATIBLE LEGACY INGEST & RESOLUTION MIGRATION
-------------------------------------------------------------------
-- Multi-tier fallback resolution in `resolve_project_media()`: checks project bundle `media/`, legacy `Media/`, original path, and adjacent sibling directories.
-
-[x] 2.5 PROJECT-LOCAL HIDDEN CACHE (.CACHE/PEAKS/) & SCRATCH STORAGE
-----------------------------------------------------------------------
-- Implemented `.cache/peaks/` for fast binary waveform peak storage and cache invalidation based on file size and mtime.
-
-[x] 2.6 CONSOLIDATE MEDIA INTO PROJECT ACTION (FILE > CONSOLIDATE MEDIA...)
------------------------------------------------------------------------------
-- Added File menu action and background task to copy externally referenced media into the project bundle for zero-configuration archiving.
-
-[x] 2.7 CLEAN PROJECT CACHE & FREE SPACE TOOL (FILE > CLEAN CACHE / RECLAIM SPACE...)
----------------------------------------------------------------------------------------
-- Added interactive cache inspection and cleanup dialog calculating reclaimed bytes across `.cache/peaks/` and temporary files.
-
-[x] 2.8 PORTABLE PROJECT ARCHIVE CREATOR (FILE > EXPORT PROJECT ARCHIVE (.ZIP))
----------------------------------------------------------------------------------
-- Added ZIP project bundler with customizable options (include source media, transcripts, exports) and automatic exclusion of temporary `.cache/` directories.
-
-[x] 2.9 ENHANCED "LOCATE MISSING MEDIA" DIALOG & INTERACTIVE RE-PATHING ASSISTANT
------------------------------------------------------------------------------------
-- Added modal re-pathing assistant with auto-search in project subfolders and user-directed directory browsing.
-
-[x] 2.10 INTERACTIVE EMPTY-STATE ONBOARDING & DRAG-AND-DROP CANVAS GUIDANCE
------------------------------------------------------------------------------
-- Custom empty-state canvas cards in `InteractiveTranscriptEdit` and `StoryListWidget` guiding users to drop or load audio files.
-
-[x] 2.11 "REVEAL EXPORT IN FILE MANAGER" ACTION ON EXPORT COMPLETION
----------------------------------------------------------------------
-- Added actionable "Open Folder" button on all export completion dialogs (`show_export_completion_dialog`) using `QDesktopServices`.
-
-[x] 2.12 FLOATING QUICK-ACTION MINI-TOOLBAR ON TRANSCRIPT TEXT SELECTION
--------------------------------------------------------------------------
-- Added `TranscriptSelectionBubble` over text selections in `InteractiveTranscriptEdit` with instant Play, + Story, Exclude, and Export buttons.
-
-[x] 2.13 DUAL-LAYER TIMELINE NAVIGATION (MACRO OVERVIEW STRIP + DETAILED ZOOM STRIP)
--------------------------------------------------------------------------------------
-- Added macro overview strip with story span color blocks and a draggable/clickable viewfinder rectangle in `TimelineWidget`.
-
-[x] 2.14 SYNCHRONIZED COLOR-CODED STORY ACCENTS & WAVEFORM MARKER BADGES
--------------------------------------------------------------------------
-- Implemented `StoryCardDelegate` with 8-color palette left border accents, matching timeline span tinting, and transcript story highlights.
-
-[x] 2.15 DEBIAN / UBUNTU (.DEB) CONTROL VERSION COMPLIANCE & CI EXTRACTION SANITIZATION
-----------------------------------------------------------------------------------------
-- Hardened `installer/Linux/build_deb.sh` to construct a clean Debian policy-compliant `DEB_VERSION` (starts with digit, lowercase tags, and hyphen-to-tilde mapping).
-- Sanitized workflow version extraction in `.github/workflows/build.yml` across all jobs to trim leading `v`/`V` prefixes and handle git release tag inputs safely.
+[x] 2.4 WORD DOCUMENT (DOCX) COMMENTS EXPORT & CALLOUT FORMATTING
+-----------------------------------------------------------------
+- Added "Include Comments" option to the export settings dialog with preference persistence (`export_opt_include_comments`).
+- Exports segment-anchored comments into Microsoft Word documents as beautifully styled, indented callouts (`💬 Comment: ...`) with accurate timing and speaker context.
+- Removed legacy project notes sections from exported Word documents.
 
 ================================================================================
 3. UPCOMING MILESTONE: MEDIA TRANSCODING, ASYNC PROVISIONING & TRANSCRIPT CLEANING (Phase 2 - Planned for v3.1) [NOT STARTED]

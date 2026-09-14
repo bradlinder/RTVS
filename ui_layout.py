@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from prs_shared import (
+    CommentsPanel,
     FindReplaceDialog,
     InteractiveTranscriptEdit,
     StoryListWidget,
@@ -209,12 +210,35 @@ class UiLayoutMixin:
         self.transcript_font_up_btn.clicked.connect(lambda: self.adjust_transcript_font_size(1))
         search_bar.addWidget(self.transcript_font_up_btn)
 
+        self.comments_toggle_btn = QPushButton("💬 Comments", self)
+        self.comments_toggle_btn.setObjectName("comments_toggle_btn")
+        self.comments_toggle_btn.setCheckable(True)
+        self.comments_toggle_btn.setChecked(getattr(self, "show_comments", True))
+        self.comments_toggle_btn.setToolTip("Toggle comments sidebar (Ctrl+Alt+M)")
+        self.comments_toggle_btn.clicked.connect(lambda: getattr(self, "toggle_comments_panel", lambda: None)())
+        search_bar.addWidget(self.comments_toggle_btn)
+
         left_layout.addLayout(search_bar)
+
+        self.transcript_comments_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.transcript_comments_splitter.setObjectName("transcript_comments_splitter")
+        self.transcript_comments_splitter.setChildrenCollapsible(True)
 
         self.transcript_view = InteractiveTranscriptEdit(self)
         self.transcript_view.setObjectName("transcript_view")
         self.transcript_view.set_font_scale(getattr(self, "transcript_font_scale", 1.0))
-        left_layout.addWidget(self.transcript_view, 1)
+        self.transcript_comments_splitter.addWidget(self.transcript_view)
+
+        self.comments_panel = CommentsPanel(self)
+        self.comments_panel.setObjectName("comments_panel")
+        self.comments_panel.commentSeekRequested.connect(self.seek_to)
+        self.comments_panel.commentEditRequested.connect(lambda s: getattr(self, "edit_segment_comment_dialog", getattr(self, "edit_segment_note_dialog", lambda x: None))(s))
+        self.comments_panel.commentDeleteRequested.connect(lambda s: getattr(self, "delete_segment_comment", lambda x: None)(s))
+        self.transcript_comments_splitter.addWidget(self.comments_panel)
+        self.transcript_comments_splitter.setStretchFactor(0, 3)
+        self.transcript_comments_splitter.setStretchFactor(1, 1)
+
+        left_layout.addWidget(self.transcript_comments_splitter, 1)
 
         splitter.addWidget(left_widget)
 
@@ -551,6 +575,13 @@ class UiLayoutMixin:
         self.toggle_activity_action.setChecked(True)
         self.toggle_activity_action.toggled.connect(lambda checked: self.activity_panel.setVisible(checked))
         view_menu.addAction(self.toggle_activity_action)
+
+        self.toggle_comments_action = QAction("Show &Comments Sidebar & Highlights", self, checkable=True)
+        self.toggle_comments_action.setShortcut(platform_seq("Ctrl+Alt+M"))
+        self.toggle_comments_action.setChecked(str(getattr(self, "show_comments", getattr(self, "show_notes", True))).lower() in {"1", "true", "yes"})
+        self.toggle_comments_action.toggled.connect(lambda checked: getattr(self, "toggle_show_comments", getattr(self, "toggle_show_notes", lambda c: None))(checked))
+        view_menu.addAction(self.toggle_comments_action)
+        self.toggle_notes_action = self.toggle_comments_action
 
         view_menu.addSeparator()
 

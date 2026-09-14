@@ -2364,7 +2364,11 @@ class PlaybackPreferencesMixin:
 
             if is_play_key:
                 focused_widget = QApplication.focusWidget()
-                if focused_widget and isinstance(focused_widget, QLineEdit):
+                if focused_widget and isinstance(focused_widget, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox)):
+                    return super().eventFilter(watched, event)
+                if QApplication.activeModalWidget() is not None:
+                    return super().eventFilter(watched, event)
+                if focused_widget and (focused_widget.window() != self or isinstance(focused_widget.window(), QDialog)):
                     return super().eventFilter(watched, event)
                 if focused_widget and isinstance(focused_widget, InteractiveTranscriptEdit) and focused_widget.is_editing_mode:
                     return super().eventFilter(watched, event)
@@ -2400,8 +2404,23 @@ class PlaybackPreferencesMixin:
     def seek_to(self, seconds):
         self.current_position = float(seconds)
         self.player.setPosition(int(seconds * 1000))
-        self.timeline.ensure_position_visible(seconds)
-        self.transcript_view.highlight_word_at_time(seconds, self.transcript)
+        if hasattr(self, "timeline"):
+            self.timeline.set_position(self.current_position)
+            self.timeline.ensure_position_visible(seconds)
+        if hasattr(self, "time_label"):
+            self.time_label.setText(
+                f"{format_time(self.current_position)} / {format_time(getattr(self, 'duration', 0.0))}"
+            )
+        if hasattr(self, "transcript_view"):
+            self.transcript_view.highlight_word_at_time(seconds, self.transcript)
+
+    def seek_relative(self, delta_seconds):
+        duration = float(getattr(self, "duration", 0.0) or 0.0)
+        curr = float(getattr(self, "current_position", 0.0) or 0.0)
+        target = max(0.0, curr + float(delta_seconds))
+        if duration > 0:
+            target = min(duration, target)
+        self.seek_to(target)
 
     def audio_position_changed(self, position):
         self.current_position = position / 1000

@@ -1,5 +1,25 @@
 # Changelog
 
+## v3.0.0-beta.5
+- **Word / Google Docs / LibreOffice Style Comments Architecture**:
+  - Re-architected notes into a professional, non-destructive **Comments** system inspired by Microsoft Word, Google Docs, and LibreOffice Writer.
+  - Removed raw inline note blocks from the transcript body, keeping the reading flow completely uncluttered.
+  - Implemented collapsible, docked **Comments Sidebar** (`CommentsPanel`) with comment cards displaying timestamp spans, quote excerpt anchors, multi-line comment text, and quick ✏️ Edit and 🗑️ Delete/Resolve actions.
+  - Two-way interactive synchronization: clicking a comment card scrolls the transcript to the passage and seeks audio playback; hovering or clicking commented transcript passages highlights and scrolls to the card in the sidebar.
+  - Non-destructive amber/yellow highlight ranges (`#fef08a` / `#854d0e`) rendered over commented transcript text via `QTextEdit.ExtraSelection` with hover tooltips.
+  - Added dedicated View menu action "Show Comments Sidebar & Highlights" (`Ctrl+Alt+M`) and search bar toggle button.
+- **Spacebar & Dialog Focus Isolation**:
+  - Isolated keyboard shortcut dispatching (`eventFilter`) so global Play/Pause hotkeys are strictly suppressed whenever a text input, dialog, or comment editor is active.
+  - Multi-line `CommentEditorDialog` with full native support for spaces, tabs, line breaks (`Enter`), and quick save (`Ctrl+Enter`).
+- **Transcript Paragraph-Constrained Navigation**:
+  - Fixed `Home` and `End` keys in `InteractiveTranscriptEdit` to seek and navigate strictly within the current paragraph block rather than jumping across the entire document.
+  - Arrow key navigation in viewing mode jumps playback according to user skip settings and synchronizes timeline cursor and transcript word highlighting.
+- **Decommissioned Project & Episode Notes (Scope Simplification)**:
+  - Completely removed legacy project and episode notes dialogs and menus, focusing exclusively on segment-anchored document comments.
+- **Word Document (DOCX) Comments Export**:
+  - Added an "Include Comments" option to the export settings dialog with preference persistence.
+  - Exports segment-anchored comments into Microsoft Word documents as beautifully styled, indented callouts (`💬 Comment: ...`) with accurate timing and speaker context.
+
 ## v3.0.0-beta.4
 - **Transcript Navigation & Selection Jumping**:
   - Implemented timestamp and speaker label cursor navigation: clicking any timestamp link `[00:00]` or speaker header in `InteractiveTranscriptEdit` seeks playback to that exact second and positions text cursor precisely at the clicked location.
