@@ -1,6 +1,25 @@
-# Next Steps & Feedback (v3.0.0-beta.4 / v3.0.0-beta.5)
+# Next Steps & Feedback (v3.0.0-beta.5 / v3.0.1-beta-1)
 
-## Feature Re-Architecture: From "Notes" to "Comments"
+## ✅ Completed in v3.0.1-beta-1
+
+### 1. Transcript Rich Text Formatting Toolbar & Styling Engine
+- [x] **Formatting Toolbar (`transcript_format_toolbar`)**: Added toolbar directly above the transcript view that automatically appears when Editing Mode is enabled (`Edit Transcript` or `Ctrl+E`).
+- [x] **Quick Action Buttons**: Bold, Italic, Underline, Strikethrough, Highlight (yellow text background), Clear Formatting (`Ctrl+\`), and Split Speaker Segment (`Shift+Enter`).
+- [x] **Standard Keyboard Shortcuts**: Full support in `InteractiveTranscriptEdit` for `Ctrl+B` (Bold), `Ctrl+I` (Italic), `Ctrl+U` (Underline), `Ctrl+K` (Strikethrough), and `Ctrl+\` / `Ctrl+Space` (Clear).
+- [x] **Bidirectional State Sync**: Buttons dynamically update their pressed/checked state matching the styling at the current cursor position or selection (`formatChanged` signal & cursor tracking).
+- [x] **Context Menu Access**: Added "Format Text" submenu in right-click context menu when editing mode is active.
+- [x] **Non-Destructive Word Token Persistence**: Preserved style formatting attributes across word splicing (`sync_segment_words`) and rendering (`render_paragraph_block`).
+
+### 2. Multi-Location Comments Sidebar Toggles
+- [x] **View > Transcript Submenu**: Added checkable "Show Comments Sidebar" option (`Ctrl+Alt+M`).
+- [x] **View Menu**: Synchronized with existing top-level "Show Comments Sidebar & Highlights" action.
+- [x] **Transcript Search Bar**: Synchronized with the "💬 Comments" header toggle button.
+- [x] **Sidebar Close Button**: Connected the Comments panel's `✕` close button to synchronously update all menu items and buttons.
+- [x] **Preference Persistence**: Saved visibility state to `QSettings` (`show_comments`).
+
+---
+
+## Feature Re-Architecture: From "Notes" to "Comments" (Completed in v3.0.0-beta.5)
 *(Inspired by Microsoft Word, Google Docs, and LibreOffice Writer)*
 
 ### 💡 Visual & Interaction Model: Comments in Radio & TV Story Segmenter

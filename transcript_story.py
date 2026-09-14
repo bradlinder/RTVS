@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter v3.0.0-beta.5 — transcript story responsibilities.
+"""Radio & TV Segmenter v3.0.1-beta-1 — transcript story responsibilities.
 
 
 Methods intentionally retain the MainWindow-facing API so behavior remains
@@ -45,7 +45,7 @@ class TranscriptStoryMixin:
             words = segment.get("words", [])
             if words and display_mode != "es":
                 for w in words:
-                    word_tokens.append({
+                    token = {
                         "word": w.get("word", ""),
                         "start": w.get("start", start),
                         "end": w.get("end", end),
@@ -53,7 +53,13 @@ class TranscriptStoryMixin:
                         "speaker_name": spk_name,
                         "raw_speaker": raw_spk,
                         "deleted": bool(w.get("deleted", False)),
-                    })
+                    }
+                    if w.get("bold"): token["bold"] = True
+                    if w.get("italic"): token["italic"] = True
+                    if w.get("underline"): token["underline"] = True
+                    if w.get("strike"): token["strike"] = True
+                    if w.get("highlight"): token["highlight"] = w["highlight"]
+                    word_tokens.append(token)
             else:
                 seg_text = segment.get("text", "")
                 for word in seg_text.split():
@@ -148,6 +154,18 @@ class TranscriptStoryMixin:
 
                 esc_w = html.escape(w_text)
                 w_style = f"color:{word_color}; text-decoration:none;"
+                if item.get("bold"):
+                    w_style += " font-weight:bold;"
+                if item.get("italic"):
+                    w_style += " font-style:italic;"
+                if item.get("underline") and item.get("strike"):
+                    w_style += " text-decoration:underline line-through;"
+                elif item.get("underline"):
+                    w_style += " text-decoration:underline;"
+                elif item.get("strike"):
+                    w_style += " text-decoration:line-through;"
+                if item.get("highlight"):
+                    w_style += f" background-color:{item.get('highlight')};"
                 word_html_list.append(
                     f'<a href="word:{w_start}:{w_seg}" style="{w_style}">{esc_w}</a>'
                 )
@@ -295,12 +313,47 @@ class TranscriptStoryMixin:
 
         known_speaker_labels = None
 
+        def _extract_block_word_formatting(block, prefix_len=0):
+            word_formats = []
+            it = block.begin()
+            curr_pos = 0
+            while not it.atEnd():
+                frag = it.fragment()
+                if frag.isValid():
+                    frag_text = frag.text()
+                    fmt = frag.charFormat()
+                    frag_len = len(frag_text)
+                    frag_start = curr_pos
+                    frag_end = curr_pos + frag_len
+                    if frag_end > prefix_len:
+                        start_in_frag = max(0, prefix_len - frag_start)
+                        usable_text = frag_text[start_in_frag:]
+                        is_bold = fmt.fontWeight() > QFont.Weight.Medium
+                        is_italic = fmt.fontItalic()
+                        is_underline = fmt.fontUnderline()
+                        is_strike = fmt.fontStrikeOut()
+                        bg = fmt.background().color()
+                        highlight = bg.name() if (bg.isValid() and bg.alpha() > 0 and fmt.background().style() != Qt.BrushStyle.NoBrush) else None
+                        for w in usable_text.split():
+                            word_formats.append({
+                                "word": w,
+                                "bold": is_bold,
+                                "italic": is_italic,
+                                "underline": is_underline,
+                                "strike": is_strike,
+                                "highlight": highlight,
+                            })
+                    curr_pos += frag_len
+                it += 1
+            return word_formats
+
         for i in range(min(blocks_count, len(block_groups))):
             groups = [g for g in block_groups[i] if 0 <= g[0] < len(segments)]
             if not groups:
                 continue
 
-            block_text = doc.findBlockByNumber(i).text()
+            block = doc.findBlockByNumber(i)
+            block_text = block.text()
             cleaned_text = re.sub(r'^\d{2}:\d{2}(?::\d{2})?\.\d{3}\s+', '', block_text)
             # Remove any displayed speaker prefix, including custom names.
             if ": " in cleaned_text:
@@ -315,10 +368,13 @@ class TranscriptStoryMixin:
             cleaned_text = re.sub(r'^Speaker \d+:\s+', '', cleaned_text)
             cleaned_text = cleaned_text.strip()
 
+            prefix_len = block_text.find(cleaned_text) if (cleaned_text and cleaned_text in block_text) else 0
+            block_fmts = _extract_block_word_formatting(block, prefix_len)
+
             if len(groups) == 1:
                 target_seg = segments[groups[0][0]]
                 target_seg["text"] = cleaned_text
-                self.sync_segment_words(target_seg, cleaned_text)
+                self.sync_segment_words(target_seg, cleaned_text, block_fmts)
                 continue
 
             # This paragraph was built from more than one original segment
@@ -330,16 +386,19 @@ class TranscriptStoryMixin:
             words = cleaned_text.split()
             total_original_words = sum(g[1] for g in groups) or 1
             remaining_words = words
+            remaining_fmts = block_fmts
             for gi, (seg_idx, orig_count) in enumerate(groups):
                 if gi == len(groups) - 1:
                     share, remaining_words = remaining_words, []
+                    share_fmts, remaining_fmts = remaining_fmts, []
                 else:
                     n = round(len(words) * (orig_count / total_original_words))
                     n = max(0, min(n, len(remaining_words)))
                     share, remaining_words = remaining_words[:n], remaining_words[n:]
+                    share_fmts, remaining_fmts = remaining_fmts[:n], remaining_fmts[n:]
                 seg_text = " ".join(share)
                 segments[seg_idx]["text"] = seg_text
-                self.sync_segment_words(segments[seg_idx], seg_text)
+                self.sync_segment_words(segments[seg_idx], seg_text, share_fmts)
 
         if self.translations:
             for key in self.translations:
@@ -467,9 +526,7 @@ class TranscriptStoryMixin:
         """Toggle visibility of the comments sidebar."""
         if hasattr(self, "comments_panel"):
             is_vis = not self.comments_panel.isVisible()
-            self.comments_panel.setVisible(is_vis)
-            if hasattr(self, "comments_toggle_btn"):
-                self.comments_toggle_btn.setChecked(is_vis)
+            self.toggle_show_comments(is_vis)
 
     def toggle_show_comments(self, checked):
         """Toggle display of comments sidebar and yellow anchor highlights."""
@@ -481,7 +538,17 @@ class TranscriptStoryMixin:
         if hasattr(self, "comments_panel"):
             self.comments_panel.setVisible(checked)
         if hasattr(self, "comments_toggle_btn"):
+            self.comments_toggle_btn.blockSignals(True)
             self.comments_toggle_btn.setChecked(checked)
+            self.comments_toggle_btn.blockSignals(False)
+        if hasattr(self, "toggle_comments_action"):
+            self.toggle_comments_action.blockSignals(True)
+            self.toggle_comments_action.setChecked(checked)
+            self.toggle_comments_action.blockSignals(False)
+        if hasattr(self, "transcript_show_comments_action"):
+            self.transcript_show_comments_action.blockSignals(True)
+            self.transcript_show_comments_action.setChecked(checked)
+            self.transcript_show_comments_action.blockSignals(False)
         if hasattr(self, "transcript_view"):
             self.transcript_view.update_extra_selections()
 
@@ -923,7 +990,7 @@ class TranscriptStoryMixin:
         self.statusBar().showMessage(f"Removed '{removed_name}' label at {format_time(segments[seg_idx].get('start', 0))}.")
         return True
 
-    def sync_segment_words(self, segment, new_text):
+    def sync_segment_words(self, segment, new_text, word_formats=None):
         """
         Interpolate and maintain word-level timestamps when segment text is edited.
         Preserves exact timing of unchanged words, and linearly interpolates
@@ -944,7 +1011,7 @@ class TranscriptStoryMixin:
                 segment["words"] = []
                 return
             w_dur = total_dur / len(new_tokens)
-            segment["words"] = [
+            new_words = [
                 {
                     "word": tok,
                     "start": round(seg_start + i * w_dur, 3),
@@ -953,6 +1020,16 @@ class TranscriptStoryMixin:
                 }
                 for i, tok in enumerate(new_tokens)
             ]
+            if word_formats:
+                for idx, w_dict in enumerate(new_words):
+                    if 0 <= idx < len(word_formats):
+                        fmt = word_formats[idx]
+                        if fmt.get("bold"): w_dict["bold"] = True
+                        if fmt.get("italic"): w_dict["italic"] = True
+                        if fmt.get("underline"): w_dict["underline"] = True
+                        if fmt.get("strike"): w_dict["strike"] = True
+                        if fmt.get("highlight"): w_dict["highlight"] = fmt["highlight"]
+            segment["words"] = new_words
             return
 
         if not new_tokens:
@@ -1009,6 +1086,21 @@ class TranscriptStoryMixin:
                     })
             elif tag == 'delete':
                 pass
+
+        if word_formats:
+            for idx, w_dict in enumerate(new_words_list):
+                if 0 <= idx < len(word_formats):
+                    fmt = word_formats[idx]
+                    if fmt.get("bold"): w_dict["bold"] = True
+                    else: w_dict.pop("bold", None)
+                    if fmt.get("italic"): w_dict["italic"] = True
+                    else: w_dict.pop("italic", None)
+                    if fmt.get("underline"): w_dict["underline"] = True
+                    else: w_dict.pop("underline", None)
+                    if fmt.get("strike"): w_dict["strike"] = True
+                    else: w_dict.pop("strike", None)
+                    if fmt.get("highlight"): w_dict["highlight"] = fmt["highlight"]
+                    else: w_dict.pop("highlight", None)
 
         segment["words"] = new_words_list
 

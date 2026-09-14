@@ -74,6 +74,7 @@ from PySide6.QtCore import (
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from PySide6.QtGui import (
+    QBrush,
     QColor,
     QPainter,
     QPen,
@@ -309,7 +310,7 @@ class ResizableTextEdit(QWidget):
 
 # Display branding shown to the user (title bar, About box, installers).
 APP_DISPLAY_NAME = "Radio & TV Segmenter"
-PROJECT_VERSION = "3.0.0-beta.5"
+PROJECT_VERSION = "3.0.1-beta-1"
 DEFAULT_GITHUB_REPO = "bradlinder/RTVS"
 
 
@@ -1301,7 +1302,7 @@ class CommentsPanel(QWidget):
         self.close_btn.setText("✕")
         self.close_btn.setToolTip("Close Comments Sidebar (Ctrl+Alt+M)")
         self.close_btn.setStyleSheet("border: none; padding: 2px 4px; color: #94a3b8;")
-        self.close_btn.clicked.connect(self.hide)
+        self.close_btn.clicked.connect(self._on_close_clicked)
         header_layout.addWidget(self.close_btn)
         main_layout.addLayout(header_layout)
 
@@ -1336,6 +1337,13 @@ class CommentsPanel(QWidget):
             seg_idx = win.transcript_view.get_segment_index_at_cursor(cursor)
             if seg_idx is not None and hasattr(win, "edit_segment_comment_dialog"):
                 win.edit_segment_comment_dialog(seg_idx)
+
+    def _on_close_clicked(self):
+        win = self.window()
+        if hasattr(win, "toggle_show_comments"):
+            win.toggle_show_comments(False)
+        else:
+            self.hide()
 
     def set_comments(self, segments):
         """Populate the comment cards from transcript segments."""
@@ -1493,6 +1501,7 @@ class TranscriptSelectionBubble(QFrame):
 class InteractiveTranscriptEdit(QTextEdit):
     linkClicked = Signal(QUrl)
     editingModeChanged = Signal(bool)
+    formatChanged = Signal()
     requestInsertSpeaker = Signal(int, float, str)
     requestSplitAtCursor = Signal(int, float)
     requestRemoveSpeakerAtBlock = Signal(int)
@@ -1928,6 +1937,89 @@ class InteractiveTranscriptEdit(QTextEdit):
             self.clear_highlight()
         self.editingModeChanged.emit(enabled)
 
+    def toggle_bold(self):
+        cursor = self.textCursor()
+        fmt = QTextCharFormat()
+        curr_weight = self.fontWeight()
+        new_weight = QFont.Weight.Normal if curr_weight > QFont.Weight.Medium else QFont.Weight.Bold
+        fmt.setFontWeight(new_weight)
+        if cursor.hasSelection():
+            cursor.mergeCharFormat(fmt)
+        else:
+            self.mergeCurrentCharFormat(fmt)
+        self.formatChanged.emit()
+
+    def toggle_italic(self):
+        cursor = self.textCursor()
+        fmt = QTextCharFormat()
+        fmt.setFontItalic(not self.fontItalic())
+        if cursor.hasSelection():
+            cursor.mergeCharFormat(fmt)
+        else:
+            self.mergeCurrentCharFormat(fmt)
+        self.formatChanged.emit()
+
+    def toggle_underline(self):
+        cursor = self.textCursor()
+        fmt = QTextCharFormat()
+        fmt.setFontUnderline(not self.fontUnderline())
+        if cursor.hasSelection():
+            cursor.mergeCharFormat(fmt)
+        else:
+            self.mergeCurrentCharFormat(fmt)
+        self.formatChanged.emit()
+
+    def toggle_strikethrough(self):
+        cursor = self.textCursor()
+        fmt = QTextCharFormat()
+        is_strike = self.currentCharFormat().fontStrikeOut()
+        fmt.setFontStrikeOut(not is_strike)
+        if cursor.hasSelection():
+            cursor.mergeCharFormat(fmt)
+        else:
+            self.mergeCurrentCharFormat(fmt)
+        self.formatChanged.emit()
+
+    def toggle_highlight(self, color_name="#fef08a"):
+        cursor = self.textCursor()
+        fmt = QTextCharFormat()
+        curr_bg = self.currentCharFormat().background().color()
+        if curr_bg.isValid() and curr_bg.alpha() > 0:
+            fmt.setBackground(QBrush(Qt.BrushStyle.NoBrush))
+        else:
+            fmt.setBackground(QColor(color_name))
+        if cursor.hasSelection():
+            cursor.mergeCharFormat(fmt)
+        else:
+            self.mergeCurrentCharFormat(fmt)
+        self.formatChanged.emit()
+
+    def clear_formatting(self):
+        cursor = self.textCursor()
+        fmt = QTextCharFormat()
+        fmt.setFontWeight(QFont.Weight.Normal)
+        fmt.setFontItalic(False)
+        fmt.setFontUnderline(False)
+        fmt.setFontStrikeOut(False)
+        fmt.setBackground(QBrush(Qt.BrushStyle.NoBrush))
+        if cursor.hasSelection():
+            cursor.setCharFormat(fmt)
+        else:
+            self.setCurrentCharFormat(fmt)
+        self.formatChanged.emit()
+
+    def get_current_formatting(self):
+        fmt = self.currentCharFormat()
+        bg = fmt.background().color()
+        has_highlight = bg.isValid() and bg.alpha() > 0 and fmt.background().style() != Qt.BrushStyle.NoBrush
+        return {
+            "bold": fmt.fontWeight() > QFont.Weight.Medium,
+            "italic": fmt.fontItalic(),
+            "underline": fmt.fontUnderline(),
+            "strike": fmt.fontStrikeOut(),
+            "highlight": has_highlight,
+        }
+
     def mousePressEvent(self, event):
         if self.is_editing_mode:
             super().mousePressEvent(event)
@@ -2219,6 +2311,39 @@ class InteractiveTranscriptEdit(QTextEdit):
                 event.accept()
                 return
 
+        if self.is_editing_mode:
+            modifiers = event.modifiers()
+            is_ctrl = bool(modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier))
+            is_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+            key = event.key()
+
+            if is_ctrl and not is_shift:
+                if key == Qt.Key.Key_B:
+                    self.toggle_bold()
+                    event.accept()
+                    return
+                elif key == Qt.Key.Key_I:
+                    self.toggle_italic()
+                    event.accept()
+                    return
+                elif key == Qt.Key.Key_U:
+                    self.toggle_underline()
+                    event.accept()
+                    return
+                elif key == Qt.Key.Key_K:
+                    self.toggle_strikethrough()
+                    event.accept()
+                    return
+                elif key in (Qt.Key.Key_Backslash, Qt.Key.Key_Space):
+                    self.clear_formatting()
+                    event.accept()
+                    return
+            elif is_ctrl and is_shift:
+                if key in (Qt.Key.Key_X, Qt.Key.Key_S):
+                    self.toggle_strikethrough()
+                    event.accept()
+                    return
+
         if self.is_editing_mode and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             cursor = self.textCursor()
 
@@ -2458,6 +2583,32 @@ class InteractiveTranscriptEdit(QTextEdit):
             edit_action.triggered.connect(lambda: self.set_editing_mode(True))
             menu.addAction(edit_action)
         else:
+            fmt_menu = menu.addMenu("Format Text")
+            act_bold = fmt_menu.addAction("Bold")
+            act_bold.setShortcut(QKeySequence("Ctrl+B"))
+            act_bold.triggered.connect(self.toggle_bold)
+
+            act_italic = fmt_menu.addAction("Italic")
+            act_italic.setShortcut(QKeySequence("Ctrl+I"))
+            act_italic.triggered.connect(self.toggle_italic)
+
+            act_underline = fmt_menu.addAction("Underline")
+            act_underline.setShortcut(QKeySequence("Ctrl+U"))
+            act_underline.triggered.connect(self.toggle_underline)
+
+            act_strike = fmt_menu.addAction("Strikethrough")
+            act_strike.setShortcut(QKeySequence("Ctrl+K"))
+            act_strike.triggered.connect(self.toggle_strikethrough)
+
+            fmt_menu.addSeparator()
+            act_highlight = fmt_menu.addAction("Highlight (Yellow)")
+            act_highlight.triggered.connect(self.toggle_highlight)
+
+            act_clear = fmt_menu.addAction("Clear Formatting")
+            act_clear.setShortcut(QKeySequence("Ctrl+\\"))
+            act_clear.triggered.connect(self.clear_formatting)
+
+            menu.addSeparator()
             find_action = QAction("Find and Replace...", self)
             find_action.setShortcut(QKeySequence.StandardKey.Find)
             find_action.triggered.connect(lambda: main_win.open_find_replace())

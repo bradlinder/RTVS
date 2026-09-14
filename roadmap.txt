@@ -29,18 +29,18 @@ ROADMAP MAINTENANCE POLICY: N-1 SLIDING-WINDOW & STATUS TRACKING
 --------------------------------------------------------------------------------
 TABLE OF CONTENTS & STATUS OVERVIEW
 --------------------------------------------------------------------------------
-1. Previous Release: Navigation & Preliminary Annotations (Completed in v3.0.0-beta.4)
-   [x] 1.1 Clickable Speaker & Timestamp Links seeking audio/video to exact second
-   [x] 1.2 Paragraph-Scoped Home & End Key Navigation in Transcript Editor
-   [x] 1.3 Arrow Key Playback Skipping & Word-Highlight Synchronization
-   [x] 1.4 Single-Instance Application Enforcement & IPC Message Forwarding
-   [x] 1.5 Project-Local Peak Cache Storage (.cache/peaks/)
+1. Previous Release: Word/Docs Style Comments Architecture & Focus Isolation (Completed in v3.0.0-beta.5)
+   [x] 1.1 Comment Dialog Spacebar & Focus Isolation (Suppress global play/pause shortcuts during text input; full space/line break support)
+   [x] 1.2 Comments System UX Architecture (Decommission project/episode notes; rename Notes to Comments; anchor comments to highlighted text with margin cards/side panel; no inline transcript clutter)
+   [x] 1.3 Transcript Paragraph-Constrained Navigation & Viewport Synchronization
+   [x] 1.4 Word Document (DOCX) Comments Export & Callout Formatting (Include Comments toggle; styled indented callouts with timing)
 
-2. Current Release: Word/Docs Style Comments Architecture & Focus Isolation (Completed in v3.0.0-beta.5)
-   [x] 2.1 Comment Dialog Spacebar & Focus Isolation (Suppress global play/pause shortcuts during text input; full space/line break support)
-   [x] 2.2 Comments System UX Architecture (Decommission project/episode notes; rename Notes to Comments; anchor comments to highlighted text with margin cards/side panel; no inline transcript clutter)
-   [x] 2.3 Transcript Paragraph-Constrained Navigation & Viewport Synchronization
-   [x] 2.4 Word Document (DOCX) Comments Export & Callout Formatting (Include Comments toggle; styled indented callouts with timing)
+2. Current Release: Rich Text Formatting Toolbar & Multi-Location Comments Sidebar Toggles (Completed in v3.0.1-beta-1)
+   [x] 2.1 Transcript Rich Text Formatting Toolbar (Bold, Italic, Underline, Strikethrough, Highlight, Clear, Split Speaker)
+   [x] 2.2 Standard Keyboard Shortcuts (Ctrl+B, Ctrl+I, Ctrl+U, Ctrl+K, Ctrl+\, Shift+Enter)
+   [x] 2.3 Real-Time Bidirectional Formatting Tracking & Toolbar Button Synchronization (formatChanged & cursor tracking)
+   [x] 2.4 Multi-Location Comments Sidebar Visibility Controls (View > Transcript submenu, View menu, transcript header button, sidebar close button)
+   [x] 2.5 Non-Destructive Formatting Token Persistence across view modes and project saves
 
 3. Upcoming Milestone: Media Transcoding, Async Provisioning & Transcript Cleaning (Phase 2 - Planned for v3.1) [NOT STARTED]
    [ ] 3.1 Media Transcoding & Format Conversion on Export (Audio & Video Codecs)
@@ -64,39 +64,15 @@ TABLE OF CONTENTS & STATUS OVERVIEW
    [ ] 5.4 Memory-Bounded Diarization & Chunked Streaming
 
 ================================================================================
-1. PREVIOUS RELEASE: NAVIGATION & PRELIMINARY ANNOTATIONS (Completed in v3.0.0-beta.4)
+1. PREVIOUS RELEASE: WORD/DOCS STYLE COMMENTS ARCHITECTURE & FOCUS ISOLATION (Completed in v3.0.0-beta.5)
 ================================================================================
 
-[x] 1.1 CLICKABLE SPEAKER & TIMESTAMP LINKS
--------------------------------------------
-- Clicking any timestamp link `[00:00]` or speaker header in `InteractiveTranscriptEdit` seeks playback to that exact second and positions text cursor precisely at the clicked location.
-
-[x] 1.2 PARAGRAPH-SCOPED HOME & END KEY NAVIGATION
---------------------------------------------------
-- Initial implementation of Home and End key navigation in `InteractiveTranscriptEdit` during viewing mode.
-
-[x] 1.3 ARROW KEY PLAYBACK SKIPPING & SYNCHRONIZATION
-----------------------------------------------------
-- Arrow keys in transcript edit view synchronized with user playback skip preferences (`playback_skip_interval`).
-
-[x] 1.4 SINGLE-INSTANCE APPLICATION ENFORCEMENT & IPC
------------------------------------------------------
-- Added preference setting in `playback_preferences.py` ("Instance Handling Mode") allowing users to choose between single-instance mode and multi-instance mode via `QLocalServer` and `QLocalSocket`.
-
-[x] 1.5 PROJECT-LOCAL PEAK CACHE STORAGE (.CACHE/PEAKS/)
---------------------------------------------------------
-- Pre-calculated waveform `.peaks` cache files are stored inside the project folder's hidden `.cache/peaks/` subfolder.
-
-================================================================================
-2. CURRENT RELEASE: WORD/DOCS STYLE COMMENTS ARCHITECTURE & FOCUS ISOLATION (Completed in v3.0.0-beta.5)
-================================================================================
-
-[x] 2.1 COMMENT DIALOG SPACEBAR & FOCUS ISOLATION
+[x] 1.1 COMMENT DIALOG SPACEBAR & FOCUS ISOLATION
 -------------------------------------------------
 - Isolated keyboard shortcut dispatching (`eventFilter` in `playback_preferences.py`) so global Play/Pause hotkeys are strictly suppressed whenever a text input, dialog, or comment editor is active.
 - Multi-line `CommentEditorDialog` built with `QPlainTextEdit` supporting spaces, tabs, paragraph breaks (`Enter`), and quick save (`Ctrl+Enter`).
 
-[x] 2.2 COMMENTS SYSTEM UX ARCHITECTURE (WORD / DOCS / WRITER STYLE)
+[x] 1.2 COMMENTS SYSTEM UX ARCHITECTURE (WORD / DOCS / WRITER STYLE)
 ---------------------------------------------------------------------
 - Re-architected notes into a non-destructive **Comments** system inspired by Microsoft Word, Google Docs, and LibreOffice Writer.
 - Removed raw inline note blocks from the transcript body, keeping the reading flow clean and uncluttered.
@@ -106,17 +82,53 @@ TABLE OF CONTENTS & STATUS OVERVIEW
 - Added dedicated View menu action "Show Comments Sidebar & Highlights" (`Ctrl+Alt+M`) and search bar toggle button.
 - Decommissioned legacy project and episode notes dialogs and menus, focusing strictly on segment-anchored comments.
 
-[x] 2.3 TRANSCRIPT PARAGRAPH-CONSTRAINED NAVIGATION & VIEWPORT SYNCHRONIZATION
+[x] 1.3 TRANSCRIPT PARAGRAPH-CONSTRAINED NAVIGATION & VIEWPORT SYNCHRONIZATION
 ------------------------------------------------------------------------------
 - Fixed `Home` and `End` keys in `InteractiveTranscriptEdit` to seek and navigate strictly within the current paragraph block rather than jumping across the entire document.
 - Home key positions cursor at start of paragraph block and seeks to paragraph start timestamp; End key positions cursor at end of paragraph block and seeks to paragraph end timestamp.
 - Arrow key navigation in viewing mode jumps playback according to user skip settings and synchronizes timeline cursor and transcript word highlighting.
 
-[x] 2.4 WORD DOCUMENT (DOCX) COMMENTS EXPORT & CALLOUT FORMATTING
+[x] 1.4 WORD DOCUMENT (DOCX) COMMENTS EXPORT & CALLOUT FORMATTING
 -----------------------------------------------------------------
 - Added "Include Comments" option to the export settings dialog with preference persistence (`export_opt_include_comments`).
 - Exports segment-anchored comments into Microsoft Word documents as beautifully styled, indented callouts (`💬 Comment: ...`) with accurate timing and speaker context.
 - Removed legacy project notes sections from exported Word documents.
+
+================================================================================
+2. CURRENT RELEASE: RICH TEXT FORMATTING TOOLBAR & COMMENTS TOGGLES (Completed in v3.0.1-beta-1)
+================================================================================
+
+[x] 2.1 TRANSCRIPT RICH TEXT FORMATTING TOOLBAR
+-----------------------------------------------
+- Integrated a dedicated formatting toolbar (`transcript_format_toolbar`) above the transcript view that automatically appears when Editing Mode is toggled on (`Edit Transcript` button or `Ctrl+E`).
+- Provides quick-action tool buttons for Bold, Italic, Underline, Strikethrough, Highlight (Yellow background), Clear Formatting, and Split Speaker Segment.
+- Non-editing mode hides the toolbar completely to maximize viewing canvas and reading clarity.
+
+[x] 2.2 STANDARD KEYBOARD SHORTCUTS
+-----------------------------------
+- Added native shortcut handling to `InteractiveTranscriptEdit.keyPressEvent`:
+  * `Ctrl+B`: Toggle Bold
+  * `Ctrl+I`: Toggle Italic
+  * `Ctrl+U`: Toggle Underline
+  * `Ctrl+K`: Toggle Strikethrough
+  * `Ctrl+\` / `Ctrl+Space`: Clear Formatting
+  * `Shift+Enter`: Split speaker segment at cursor position
+
+[x] 2.3 REAL-TIME BIDIRECTIONAL FORMAT TRACKING & TOOLBAR SYNC
+--------------------------------------------------------------
+- `InteractiveTranscriptEdit` exposes `formatChanged` signal and `get_current_formatting()` method inspecting active `QTextCharFormat` attributes.
+- Toolbar buttons dynamically sync their checked state to reflect the formatting under the cursor or selection in real time.
+- Context menu in editing mode includes a dedicated "Format Text" submenu with hotkeys for fast right-click access.
+
+[x] 2.4 MULTI-LOCATION COMMENTS SIDEBAR VISIBILITY CONTROLS
+------------------------------------------------------------
+- Added checkable "Show Comments Sidebar" option (`Ctrl+Alt+M`) to the **View > Transcript** submenu.
+- Kept top-level "Show Comments Sidebar & Highlights" in the **View** menu and the "💬 Comments" toggle button in the transcript search bar.
+- Connected the Comments sidebar close (`✕`) button directly to synchronized toggle state so closing the panel updates the toolbar button and menu checkboxes simultaneously.
+
+[x] 2.5 NON-DESTRUCTIVE FORMATTING TOKEN PERSISTENCE
+----------------------------------------------------
+- Extended token splicing (`sync_segment_words`) and rendering (`render_paragraph_block`) to preserve formatting flags (`bold`, `italic`, `underline`, `strike`, `highlight`) across edits, project file saves, and display mode switches.
 
 ================================================================================
 3. UPCOMING MILESTONE: MEDIA TRANSCODING, ASYNC PROVISIONING & TRANSCRIPT CLEANING (Phase 2 - Planned for v3.1) [NOT STARTED]

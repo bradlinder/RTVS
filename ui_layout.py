@@ -220,6 +220,85 @@ class UiLayoutMixin:
 
         left_layout.addLayout(search_bar)
 
+        # Rich Text Formatting Toolbar (visible only when Editing Mode is active)
+        self.transcript_format_toolbar = QWidget(self)
+        self.transcript_format_toolbar.setObjectName("transcript_format_toolbar")
+        fmt_layout = QHBoxLayout(self.transcript_format_toolbar)
+        fmt_layout.setContentsMargins(2, 2, 2, 4)
+        fmt_layout.setSpacing(4)
+
+        self.fmt_bold_btn = QToolButton(self.transcript_format_toolbar)
+        self.fmt_bold_btn.setText("B")
+        self.fmt_bold_btn.setCheckable(True)
+        self.fmt_bold_btn.setToolTip("Bold (Ctrl+B)")
+        self.fmt_bold_btn.setStyleSheet("font-weight: bold; min-width: 26px; padding: 2px 6px;")
+        self.fmt_bold_btn.clicked.connect(lambda: getattr(self.transcript_view, "toggle_bold", lambda: None)())
+        fmt_layout.addWidget(self.fmt_bold_btn)
+
+        self.fmt_italic_btn = QToolButton(self.transcript_format_toolbar)
+        self.fmt_italic_btn.setText("I")
+        self.fmt_italic_btn.setCheckable(True)
+        self.fmt_italic_btn.setToolTip("Italic (Ctrl+I)")
+        self.fmt_italic_btn.setStyleSheet("font-style: italic; min-width: 26px; padding: 2px 6px;")
+        self.fmt_italic_btn.clicked.connect(lambda: getattr(self.transcript_view, "toggle_italic", lambda: None)())
+        fmt_layout.addWidget(self.fmt_italic_btn)
+
+        self.fmt_underline_btn = QToolButton(self.transcript_format_toolbar)
+        self.fmt_underline_btn.setText("U")
+        self.fmt_underline_btn.setCheckable(True)
+        self.fmt_underline_btn.setToolTip("Underline (Ctrl+U)")
+        self.fmt_underline_btn.setStyleSheet("text-decoration: underline; min-width: 26px; padding: 2px 6px;")
+        self.fmt_underline_btn.clicked.connect(lambda: getattr(self.transcript_view, "toggle_underline", lambda: None)())
+        fmt_layout.addWidget(self.fmt_underline_btn)
+
+        self.fmt_strike_btn = QToolButton(self.transcript_format_toolbar)
+        self.fmt_strike_btn.setText("S")
+        self.fmt_strike_btn.setCheckable(True)
+        self.fmt_strike_btn.setToolTip("Strikethrough (Ctrl+K)")
+        self.fmt_strike_btn.setStyleSheet("text-decoration: line-through; min-width: 26px; padding: 2px 6px;")
+        self.fmt_strike_btn.clicked.connect(lambda: getattr(self.transcript_view, "toggle_strikethrough", lambda: None)())
+        fmt_layout.addWidget(self.fmt_strike_btn)
+
+        fmt_sep1 = QFrame(self.transcript_format_toolbar)
+        fmt_sep1.setFrameShape(QFrame.Shape.VLine)
+        fmt_sep1.setFrameShadow(QFrame.Shadow.Sunken)
+        fmt_layout.addWidget(fmt_sep1)
+
+        self.fmt_highlight_btn = QToolButton(self.transcript_format_toolbar)
+        self.fmt_highlight_btn.setText("🖊️ Highlight")
+        self.fmt_highlight_btn.setToolTip("Highlight text (Yellow)")
+        self.fmt_highlight_btn.setStyleSheet("padding: 2px 6px;")
+        self.fmt_highlight_btn.clicked.connect(lambda: getattr(self.transcript_view, "toggle_highlight", lambda: None)())
+        fmt_layout.addWidget(self.fmt_highlight_btn)
+
+        self.fmt_clear_btn = QToolButton(self.transcript_format_toolbar)
+        self.fmt_clear_btn.setText("Tx Clear")
+        self.fmt_clear_btn.setToolTip("Clear text formatting (Ctrl+\\)")
+        self.fmt_clear_btn.setStyleSheet("padding: 2px 6px;")
+        self.fmt_clear_btn.clicked.connect(lambda: getattr(self.transcript_view, "clear_formatting", lambda: None)())
+        fmt_layout.addWidget(self.fmt_clear_btn)
+
+        fmt_sep2 = QFrame(self.transcript_format_toolbar)
+        fmt_sep2.setFrameShape(QFrame.Shape.VLine)
+        fmt_sep2.setFrameShadow(QFrame.Shadow.Sunken)
+        fmt_layout.addWidget(fmt_sep2)
+
+        self.fmt_split_btn = QToolButton(self.transcript_format_toolbar)
+        self.fmt_split_btn.setText("↵ Split Speaker")
+        self.fmt_split_btn.setToolTip("Split speaker segment at cursor (Shift+Enter)")
+        self.fmt_split_btn.setStyleSheet("padding: 2px 6px;")
+        self.fmt_split_btn.clicked.connect(self._on_toolbar_split_speaker)
+        fmt_layout.addWidget(self.fmt_split_btn)
+
+        fmt_layout.addStretch()
+
+        self.fmt_hint_lbl = QLabel("✏️ Editing Mode • Ctrl+B: Bold • Ctrl+I: Italic • Ctrl+U: Underline • Ctrl+K: Strike", self.transcript_format_toolbar)
+        self.fmt_hint_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        fmt_layout.addWidget(self.fmt_hint_lbl)
+
+        self.transcript_format_toolbar.setVisible(False)
+        left_layout.addWidget(self.transcript_format_toolbar)
+
         self.transcript_comments_splitter = QSplitter(Qt.Orientation.Horizontal, self)
         self.transcript_comments_splitter.setObjectName("transcript_comments_splitter")
         self.transcript_comments_splitter.setChildrenCollapsible(True)
@@ -406,6 +485,9 @@ class UiLayoutMixin:
         self.transcript_view.requestRemoveSpeakerAtBlock.connect(self.remove_speaker_label_at_segment)
         self.transcript_view.textChanged.connect(self.on_transcript_text_changed)
         self.transcript_view.cursorPositionChanged.connect(self.on_transcript_selection_changed)
+        self.transcript_view.cursorPositionChanged.connect(self._sync_format_toolbar_buttons)
+        if hasattr(self.transcript_view, "formatChanged"):
+            self.transcript_view.formatChanged.connect(self._sync_format_toolbar_buttons)
         self.transcript_view.editingModeChanged.connect(self._on_transcript_editing_mode_changed)
 
         # Transcript zoom shortcuts. Use platform_seq so Ctrl becomes Command on macOS.
@@ -622,6 +704,20 @@ class UiLayoutMixin:
         self.show_timestamps_action.setChecked(getattr(self, "show_timestamps", True))
         self.show_timestamps_action.toggled.connect(self.toggle_timestamps)
         transcript_menu.addAction(self.show_timestamps_action)
+
+        transcript_menu.addSeparator()
+
+        self.transcript_show_comments_action = QAction("Show &Comments Sidebar", self, checkable=True)
+        self.transcript_show_comments_action.setShortcut(platform_seq("Ctrl+Alt+M"))
+        self.transcript_show_comments_action.setChecked(str(getattr(self, "show_comments", getattr(self, "show_notes", True))).lower() in {"1", "true", "yes"})
+        self.transcript_show_comments_action.toggled.connect(lambda checked: getattr(self, "toggle_show_comments", getattr(self, "toggle_show_notes", lambda c: None))(checked))
+        transcript_menu.addAction(self.transcript_show_comments_action)
+
+        self.transcript_edit_mode_action = QAction("&Edit Transcript Mode", self, checkable=True)
+        self.transcript_edit_mode_action.setShortcut(platform_seq("Ctrl+E"))
+        self.transcript_edit_mode_action.setChecked(getattr(self.transcript_view, "is_editing_mode", False) if hasattr(self, "transcript_view") else False)
+        self.transcript_edit_mode_action.toggled.connect(lambda checked: getattr(self, "toggle_transcript_editing_mode", lambda: None)())
+        transcript_menu.addAction(self.transcript_edit_mode_action)
 
         view_menu.addSeparator()
 
@@ -988,9 +1084,48 @@ class UiLayoutMixin:
                 self.transcript_mode_toggle_btn.setText("Edit Transcript")
                 self.transcript_mode_toggle_btn.setToolTip("Click to edit transcript text.")
                 self.transcript_mode_toggle_btn.setStyleSheet("")
+        if hasattr(self, "transcript_format_toolbar"):
+            self.transcript_format_toolbar.setVisible(is_editing)
+        if hasattr(self, "transcript_edit_mode_action"):
+            self.transcript_edit_mode_action.blockSignals(True)
+            self.transcript_edit_mode_action.setChecked(is_editing)
+            self.transcript_edit_mode_action.blockSignals(False)
+        if is_editing:
+            self._sync_format_toolbar_buttons()
         if not is_editing and hasattr(self, "render_transcript"):
             # Re-render so word-level clickable anchors and highlights are freshly constructed
             self.render_transcript()
+
+    def _sync_format_toolbar_buttons(self):
+        if not hasattr(self, "transcript_view") or not getattr(self.transcript_view, "is_editing_mode", False):
+            return
+        if hasattr(self.transcript_view, "get_current_formatting"):
+            fmt = self.transcript_view.get_current_formatting()
+            if hasattr(self, "fmt_bold_btn"):
+                self.fmt_bold_btn.blockSignals(True)
+                self.fmt_bold_btn.setChecked(fmt.get("bold", False))
+                self.fmt_bold_btn.blockSignals(False)
+            if hasattr(self, "fmt_italic_btn"):
+                self.fmt_italic_btn.blockSignals(True)
+                self.fmt_italic_btn.setChecked(fmt.get("italic", False))
+                self.fmt_italic_btn.blockSignals(False)
+            if hasattr(self, "fmt_underline_btn"):
+                self.fmt_underline_btn.blockSignals(True)
+                self.fmt_underline_btn.setChecked(fmt.get("underline", False))
+                self.fmt_underline_btn.blockSignals(False)
+            if hasattr(self, "fmt_strike_btn"):
+                self.fmt_strike_btn.blockSignals(True)
+                self.fmt_strike_btn.setChecked(fmt.get("strike", False))
+                self.fmt_strike_btn.blockSignals(False)
+
+    def _on_toolbar_split_speaker(self):
+        if hasattr(self, "transcript_view"):
+            cursor = self.transcript_view.textCursor()
+            seg_idx = self.transcript_view.get_segment_index_at_cursor(cursor)
+            if seg_idx is None:
+                seg_idx = cursor.blockNumber()
+            split_time = self.transcript_view.get_timestamp_at_cursor(cursor)
+            self.transcript_view.requestSplitAtCursor.emit(seg_idx, split_time)
 
     def _apply_transcript_font_scale(self, scale, persist=True):
         """Apply a transcript-only font scale and optionally persist it."""

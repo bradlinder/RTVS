@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.1-beta-1
+- **Transcript Rich Text Formatting Toolbar & Styling Engine**:
+  - Added dedicated formatting toolbar above the transcript view that automatically appears when Editing Mode is toggled on (`Edit Transcript`).
+  - Added quick-access formatting buttons: **Bold** (`Ctrl+B`), **Italic** (`Ctrl+I`), **Underline** (`Ctrl+U`), **Strikethrough** (`Ctrl+K`), **Highlight** (Yellow text background), **Clear Formatting** (`Ctrl+\` / `Ctrl+Space`), and **Split Speaker Segment** (`Shift+Enter`).
+  - Implemented real-time bidirectional format detection: toolbar buttons automatically toggle their active/pressed state matching the styling of text at the current cursor position or selection (`formatChanged` signal & cursor tracking).
+  - Added right-click context menu "Format Text" submenu in editing mode providing full access to all styling actions and hotkeys.
+  - Non-destructive token synchronization: word-level styling (`bold`, `italic`, `underline`, `strike`, `highlight`) is preserved across token splicing, re-rendering, and translation views.
+- **Multi-Location Comments Sidebar Toggles**:
+  - Added checkable "Show Comments Sidebar" option (`Ctrl+Alt+M`) to the **View > Transcript** submenu.
+  - Retained "Show Comments Sidebar & Highlights" in top-level **View** menu and the "💬 Comments" toggle button in the transcript search header bar.
+  - Connected the sidebar's close (`✕`) button directly to synchronized toggle state so closing the panel updates the toolbar button and all menu checkboxes synchronously.
+  - Maintained user preference persistence for sidebar visibility across application sessions.
+
 ## v3.0.0-beta.5
 - **Word / Google Docs / LibreOffice Style Comments Architecture**:
   - Re-architected notes into a professional, non-destructive **Comments** system inspired by Microsoft Word, Google Docs, and LibreOffice Writer.
