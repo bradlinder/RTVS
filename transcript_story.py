@@ -1,4 +1,4 @@
-"""Radio & TV Segmenter v3.1.5 — transcript story responsibilities.
+"""Radio & TV Segmenter v3.1.6 — transcript story responsibilities.
 
 
 Methods intentionally retain the MainWindow-facing API so behavior remains
@@ -551,7 +551,8 @@ class TranscriptStoryMixin:
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             before_state = self._capture_project_state() if hasattr(self, "_capture_project_state") else None
-            target_indices = covered_indices if covered_indices else [seg_idx]
+            # Force exactly one target segment index to prevent comment duplication
+            target_indices = [seg_idx]
             if dialog.is_deleted():
                 for idx in target_indices:
                     if 0 <= idx < len(segments):
@@ -635,7 +636,7 @@ class TranscriptStoryMixin:
             for i, s in enumerate(segments):
                 s_start = s.get("start", 0.0)
                 s_end = s.get("end", 0.0)
-                if (s_start <= et and s_end >= st):
+                if (s_start < et and s_end > st):
                     covered_indices.append(i)
 
         seg_idx = None

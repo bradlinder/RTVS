@@ -717,7 +717,7 @@ class UiLayoutMixin:
 
         add_comment_act = QAction("Add / Edit &Comment...", self)
         add_comment_act.setShortcut(platform_seq("Ctrl+M"))
-        add_comment_act.triggered.connect(lambda: getattr(self.transcript_view, "edit_active_segment_comment", lambda: None)() if hasattr(self, "transcript_view") else None)
+        add_comment_act.triggered.connect(lambda: getattr(self, "add_comment_from_selection", lambda: None)())
         self.add_comment_action = add_comment_act
         edit_menu.addAction(add_comment_act)
 

@@ -29,18 +29,19 @@ ROADMAP MAINTENANCE POLICY: N-1 SLIDING-WINDOW & STATUS TRACKING
 --------------------------------------------------------------------------------
 TABLE OF CONTENTS & STATUS OVERVIEW
 --------------------------------------------------------------------------------
-1. Previous Release: clean installation type definition correction (Completed in v3.1.4)
-   [x] 1.1 Correct NameError: name 'Optional' is not defined on post-install program launch
+1. Previous Release: Security Hardening, Staged Updates, Network Saves & Spacebar Fix (Completed in v3.1.5)
+   [x] 1.1 Spacebar Play/Pause Restoration in Transcript Viewing Mode
+   [x] 1.2 UNC Network Share Safe File/Autosave Replacement Fallback (`safe_replace`)
+   [x] 1.3 Zip Slip & Path Traversal Safe Archive Extraction
+   [x] 1.4 Cryptographic SHA-256 Checksum Verification & Asset Integrity Validation
+   [x] 1.5 Transactional Staged Plugin Installation & Atomic Folder Swaps with Automated Rollback
+   [x] 1.6 Translation Runtime Decoupling & Complete Core ML Fallback Cleanup
+   [x] 1.7 Deterministic Runtime Provisioning State Machine
+   [x] 1.8 Hugging Face Model Revision Pinning & Explicit Download Verification
 
-2. Current Release: Security Hardening, Staged Updates, Network Saves & Spacebar Fix (Planned for v3.1.5) [IN-PROGRESS]
-   [x] 2.1 Spacebar Play/Pause Restoration in Transcript Viewing Mode
-   [x] 2.2 UNC Network Share Safe File/Autosave Replacement Fallback (`safe_replace`)
-   [ ] 2.3 Zip Slip & Path Traversal Safe Archive Extraction (`plugins/manager.py` & `runtime_manager.py`)
-   [ ] 2.4 Cryptographic SHA-256 Checksum Verification & Asset Integrity Validation
-   [ ] 2.5 Transactional Staged Plugin Installation & Atomic Folder Swaps with Automated Rollback
-   [ ] 2.6 Translation Runtime Decoupling & Complete Core ML Fallback Cleanup
-   [ ] 2.7 Deterministic Runtime Provisioning State Machine (`RuntimeManager`)
-   [ ] 2.8 Hugging Face Model Revision Pinning & Explicit Download Verification
+2. Current Release: Shortcut Conflict Resolution, Comment Duplicate Prevention & Version Stabilization (Planned for v3.1.6) [IN-PROGRESS]
+   [x] 2.1 Resolve Comment Shortcut (Ctrl+M) Conflict and Restore Global Shortcuts
+   [x] 2.2 Prevent Duplicate Comment Creation on Text Selection Overlaps
 
 3. Upcoming Milestone: Media Transcoding, Async Provisioning & Transcript Cleaning (Phase 3 - Planned for v3.2) [NOT STARTED]
    [ ] 3.1 Media Transcoding & Format Conversion on Export (Audio & Video Codecs)
@@ -64,60 +65,45 @@ TABLE OF CONTENTS & STATUS OVERVIEW
    [ ] 5.4 Memory-Bounded Diarization & Chunked Streaming
 
 ================================================================================
-1. PREVIOUS RELEASE: SELECTION POPUP PERSISTENCE & DEEP-STATE UNDO/REDO (Completed in v3.1.3)
+1. PREVIOUS RELEASE: SECURITY HARDENING, STAGED UPDATES, NETWORK SAVES & SPACEBAR FIX (Completed in v3.1.5)
 ================================================================================
 
-[x] 1.1 FLOATING SELECTION POPUP INITIALIZATION & PREFERENCE ENFORCEMENT
-------------------------------------------------------------------------
-- Ensured `TranscriptSelectionBubble` starts hidden upon widget initialization so the floating toolbar is never displayed at startup.
-- Enforced `show_floating_selection_toolbar` preference checks across `prs_shared.py`, `ui_layout.py`, and `playback_preferences.py` so that if disabled in Preferences, the floating toolbar is never displayed at startup or on text selection.
+[x] 1.1 SPACEBAR PLAY/PAUSE RESTORATION IN TRANSCRIPT VIEWING MODE
+------------------------------------------------------------------
+- Refined the global event filter inside `playback_preferences.py` to allow the Spacebar key to toggle play/pause when the transcript text editor is focused in read-only viewing mode, instead of acting as a "Page Down" key.
 
-[x] 1.2 DEEP-STATE ISOLATION FOR UNIVERSAL UNDO & REDO
-------------------------------------------------------
-- Resolved `_clone_transcript_state` object reference sharing in `playback_preferences.py` and `prs_shared.py` using complete deep copies.
-- Pressing `Ctrl+Z` (Undo) or `Ctrl+Shift+Z` (Redo) reliably restores removed highlights and deleted comments, auto-refreshing both transcript views and the sidebar comments panel.
+[x] 1.2 UNC NETWORK SHARE SAFE FILE/AUTOSAVE REPLACEMENT FALLBACK (`safe_replace`)
+---------------------------------------------------------------------------------
+- Implemented `safe_replace` across all persistent save pathways (`prs_shared.py`, `playback_preferences.py`, and `model_management.py`) utilizing exponential retry backoff loops and write-stream file copy fallbacks. This completely resolves `WinError 5 Access is denied` permission blocks during auto-saves and manual project saves on Windows SMB/UNC network storage shares.
 
-[x] 1.3 CONTIGUOUS SECTION HIGHLIGHT REMOVAL
--------------------------------------------
-- Re-engineered `remove_highlight` to clear character background brushes and word/segment metadata across contiguous highlighted sections spanning multiple sentences or paragraphs.
-
-================================================================================
-2. CURRENT RELEASE: SECURITY HARDENING, STAGED UPDATES, NETWORK SAVES & SPACEBAR FIX (Planned for v3.1.5) [IN-PROGRESS]
-================================================================================
-
-[ ] 2.1 ZIP SLIP & PATH TRAVERSAL SAFE ARCHIVE EXTRACTION
+[x] 1.3 ZIP SLIP & PATH TRAVERSAL SAFE ARCHIVE EXTRACTION
 ---------------------------------------------------------
-Implement safe path validation (`safe_extract_zip` & `safe_extract_tar`) across `plugins/manager.py` and `runtime_manager.py`.
-- Enforces strict canonical path checks (`os.path.abspath`) to verify extracted target paths remain inside destination boundaries.
-- Rejects ZIP and Tar archive members containing relative traversal sequences (`../`).
+- Implemented safe path validation (`safe_extract_zip` & `safe_extract_tar`) across `plugins/manager.py` and `runtime_manager.py` to strictly sanitize archive target paths and prevent path traversal vulnerabilities.
+- Added cryptographic SHA-256 checksum verification for downloaded plugin archives and standalone runtime binaries prior to extraction.
 
-[ ] 2.2 CRYPTOGRAPHIC SHA-256 CHECKSUM VERIFICATION
----------------------------------------------------
-Add SHA-256 hash validation for remote plugin ZIP downloads and standalone Python runtime archives prior to extraction.
-- Rejects downloaded archives if hash mismatches manifest specifications.
-
-[ ] 2.3 TRANSACTIONAL STAGED PLUGIN INSTALLATIONS & ATOMIC SWAPS
+[x] 1.4 TRANSACTIONAL STAGED PLUGIN INSTALLATIONS & ATOMIC SWAPS
 ----------------------------------------------------------------
-Re-architect plugin installation and update workflows:
-- Download ZIP to temporary staging directory (`tempfile.TemporaryDirectory()`).
-- Extract and validate `manifest.json` and required entry points inside staging.
-- Perform atomic folder swap with automated rollback to preserved backup if validation or extraction fails.
+- Re-architected plugin installation and update workflows to extract into temporary staging directories, perform manifest/file validation, and execute atomic folder swaps with automated rollback on failure.
 
-[ ] 2.4 TRANSLATION RUNTIME DECOUPLING & CORE ML FALLBACK CLEANUP
+[x] 1.5 TRANSLATION RUNTIME DECOUPLING & CORE ML FALLBACK CLEANUP
 -----------------------------------------------------------------
-Isolate translation dependencies, fallbacks, and runtime models strictly inside `plugins/translation/`.
-- Remove legacy direct Transformers / PyTorch fallbacks from core `translation.py`.
-- Core application serves as a pure GUI and IPC bridge to plugin runtimes.
+- Isolated translation dependencies, fallbacks, and runtime models strictly inside `plugins/translation/`, stripping direct ML model fallbacks from core code paths.
 
-[ ] 2.5 DETERMINISTIC RUNTIME PROVISIONING STATE MACHINE
+[x] 1.6 DETERMINISTIC RUNTIME PROVISIONING STATE MACHINE
 --------------------------------------------------------
-Standardize `runtime_manager.py` environment provisioning into a formal state machine:
-- States: `NOT_INSTALLED` -> `CREATING` -> `INSTALLING` -> `VALIDATING` -> `READY` / `BROKEN`.
-- Eliminates indeterminate intermediate states and provides predictable recovery paths.
+- Converted runtime environment provisioning in `runtime_manager.py` to a formal state machine (`NOT_INSTALLED` -> `CREATING` -> `INSTALLING` -> `VALIDATING` -> `READY` / `BROKEN`) with standardized recovery paths.
 
-[ ] 2.6 HUGGING FACE MODEL REVISION PINNING & EXPLICIT VERIFICATION
--------------------------------------------------------------------
-Implement revision commit-hash pinning and pre-registration file verification for translation model downloads from Hugging Face.
+================================================================================
+2. CURRENT RELEASE: SHORTCUT CONFLICT RESOLUTION, COMMENT DUPLICATE PREVENTION & VERSION STABILIZATION (Planned for v3.1.6) [IN-PROGRESS]
+================================================================================
+
+[x] 2.1 RESOLVE COMMENT SHORTCUT (CTRL+M) CONFLICT and RESTORE GLOBAL SHORTCUTS
+-------------------------------------------------------------------------------
+- Connected the global `add_comment_action` (`Ctrl+M`) to the MainWindow `add_comment_from_selection()` method instead of a non-existent transcript view method. This ensures that pressing `Ctrl+M` works globally across the application, whether the transcript view is focused or not, and eliminates silent shortcut collisions.
+
+[x] 2.2 PREVENT DUPLICATE COMMENT CREATION ON TEXT SELECTION OVERLAPS
+---------------------------------------------------------------------
+- Restricted selection-based comments to exactly one primary segment target index in the comment editor dialog instead of copy-creating multiple independent comments when a selection boundary slightly overlaps adjacent segments. This ensures that clicking the comment button or using the shortcut adds exactly one comment per selection range.
 
 ================================================================================
 4. FUTURE MILESTONE: MEDIA TRANSCODING, ASYNC PROVISIONING & TRANSCRIPT CLEANING (Phase 3 - Planned for v3.2) [NOT STARTED]

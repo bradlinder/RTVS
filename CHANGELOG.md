@@ -1,6 +1,12 @@
 # Changelog
 
-## v3.1.5 (In Development / Roadmap)
+## v3.1.6 (In Development / Roadmap)
+- **Resolved Comment Shortcut (Ctrl+M) Conflict**:
+  - Connected the global `add_comment_action` (`Ctrl+M`) to the MainWindow `add_comment_from_selection()` method instead of a non-existent transcript view method. This ensures that pressing `Ctrl+M` works globally across the application, whether the transcript view is focused or not, and eliminates silent shortcut collisions.
+- **Prevented Duplicate Comment Creation**:
+  - Restricted selection-based comments to exactly one primary segment target index in the comment editor dialog instead of copy-creating multiple independent comments when a selection boundary slightly overlaps adjacent segments. This ensures that clicking the comment button or using the shortcut adds exactly one comment per selection range.
+
+## v3.1.5
 - **Spacebar Play/Pause Restoration in Transcript Viewing Mode**:
   - Refined the global event filter inside `playback_preferences.py` to allow the Spacebar key to toggle play/pause when the transcript text editor is focused in read-only viewing mode, instead of acting as a "Page Down" key.
 - **UNC Network Share Safe File/Autosave Replacement Fallback**:
