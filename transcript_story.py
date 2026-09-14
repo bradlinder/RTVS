@@ -5,6 +5,7 @@ Methods intentionally retain the MainWindow-facing API so behavior remains
 maintaining the established MainWindow-facing API while responsibilities are isolated.
 """
 
+from typing import List, Optional
 from prs_shared import *
 
 
