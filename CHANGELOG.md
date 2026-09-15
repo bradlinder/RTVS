@@ -1,6 +1,18 @@
 # Changelog
 
-## v3.1.6 (In Development / Roadmap)
+## v3.2.0-dev (In Development / Roadmap)
+- **Subprocess & Worker Lifecycle Hardening (Windows Job Objects & POSIX Groups)**:
+  - Bound the application and all child worker processes (`python.exe`, `ffmpeg.exe`, translation processes) to an OS Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) on Windows and isolated process groups on POSIX. Prevents lingering orphan processes if the parent process crashes or is killed externally.
+- **Translation Plugin Self-Containment & Pure CTranslate2 Engine**:
+  - Removed legacy PyTorch and Transformers fallbacks from `plugins/translation/worker.py` and pruned `torch` from translation runtime dependencies. Model inference runs strictly through quantized `ctranslate2` and `sentencepiece`, dramatically shrinking memory footprint and installation overhead.
+- **Emergency Project State Serialization & Crash Recovery**:
+  - Enhanced global exception hooks in `playback_preferences.py` to atomically snapshot dirty projects to `.crash_recovery.rtvs` upon unhandled exceptions.
+  - Added startup detection in `media_batch.py` (`restore_last_opened`) to prompt users to recover emergency crash snapshots if an unexpected termination occurs.
+- **Download Integrity & Plugin Verification**:
+  - Implemented cryptographic SHA-256 validation helpers in `prs_shared.py` and wired optional `expected_sha256` integrity checking into `plugins/manager.py`'s `install_addon`.
+  - Hardened translation model downloads in `plugins/translation/worker.py` with HTTP status validation and support for pinned revisions.
+
+## v3.1.6
 - **Resolved Comment Shortcut (Ctrl+M) Conflict**:
   - Connected the global `add_comment_action` (`Ctrl+M`) to the MainWindow `add_comment_from_selection()` method instead of a non-existent transcript view method. This ensures that pressing `Ctrl+M` works globally across the application, whether the transcript view is focused or not, and eliminates silent shortcut collisions.
 - **Prevented Duplicate Comment Creation**:

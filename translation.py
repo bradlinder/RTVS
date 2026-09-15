@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from prs_shared import format_time
+from prs_shared import format_time, register_process, unregister_process
 
 
 def _translation_worker_class():
@@ -510,6 +510,7 @@ class TranslationMixin:
                     self._on_translation_cancelled(msg.get("result", []), msg.get("key", ""))
 
         def finished(exit_code, exit_status):
+            unregister_process(proc)
             stderr = bytes(proc.readAllStandardError()).decode("utf-8", errors="replace").strip()
             if proc._rtvs_callback:
                 try:
@@ -529,8 +530,11 @@ class TranslationMixin:
 
         proc.readyReadStandardOutput.connect(read_output)
         proc.finished.connect(finished)
+        proc.errorOccurred.connect(lambda _err: unregister_process(proc))
+        register_process(proc)
         proc.start()
         if not proc.waitForStarted(10000):
+            unregister_process(proc)
             try:
                 request_file.unlink(missing_ok=True)
             except Exception:

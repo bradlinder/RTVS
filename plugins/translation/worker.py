@@ -191,16 +191,18 @@ class TranslationWorker(QObject):
     def cancel(self):
         self._cancelled = True
 
-    def _download_file(self, repo, filename, destination, progress_start, progress_end, label):
+    def _download_file(self, repo, filename, destination, progress_start, progress_end, label, revision="main"):
         import urllib.request
         import urllib.error
 
         destination.parent.mkdir(parents=True, exist_ok=True)
         temp = destination.with_name(destination.name + ".download")
-        url = f"https://huggingface.co/{repo}/resolve/main/{filename}?download=true"
-        request = urllib.request.Request(url, headers={"User-Agent": "Radio-TV-Story-Segmenter/60-opus-mt-tiny"})
+        url = f"https://huggingface.co/{repo}/resolve/{revision}/{filename}?download=true"
+        request = urllib.request.Request(url, headers={"User-Agent": "Radio-TV-Story-Segmenter/60-opus-mt"})
         try:
             with urllib.request.urlopen(request, timeout=60) as response, temp.open("wb") as out:
+                if getattr(response, "status", 200) not in (200, 206):
+                    raise RuntimeError(f"Server returned HTTP {getattr(response, 'status', 'unknown')}")
                 total = int(response.headers.get("Content-Length") or 0)
                 downloaded = 0
                 while True:
@@ -415,7 +417,7 @@ class TranslationWorker(QObject):
 
         setup_windows_dll_directories()
 
-        # Try fast CTranslate2 engine first
+        # Pure CTranslate2 engine execution
         try:
             import ctranslate2
             from transformers import AutoTokenizer
@@ -434,25 +436,12 @@ class TranslationWorker(QObject):
             self.translation_device = "cpu"
             return "ctranslate2", tokenizer, translator, None
         except Exception as ct2_exc:
-            # Fallback to PyTorch/Transformers pipeline if CTranslate2 fails or is unavailable
-            try:
-                import torch
-                from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-            except Exception as exc:
-                raise RuntimeError(
-                    f"OPUS-MT {self.model_variant} requires translation prerequisites (ctranslate2 / transformers). "
-                    f"Details: {ct2_exc} / {exc}"
-                ) from exc
+            raise RuntimeError(
+                f"OPUS-MT {self.model_variant} requires the CTranslate2 translation engine. "
+                f"Details: {ct2_exc}"
+            ) from ct2_exc
 
-            tokenizer = AutoTokenizer.from_pretrained(str(model_dir), local_files_only=True, use_fast=False)
-            model = AutoModelForSeq2SeqLM.from_pretrained(str(model_dir), local_files_only=True)
-            model.eval()
-            device = "cpu"
-            model = model.to(device)
-            self.translation_device = device
-            return "transformers", tokenizer, model, torch
-
-    def _translate_batches(self, engine_type, tokenizer, model_or_translator, torch_mod):
+    def _translate_batches(self, engine_type, tokenizer, model_or_translator, torch_mod=None):
         results = list(self.resume_results)
         start_index = len(results)
         total = max(1, len(self.segments))
@@ -461,7 +450,7 @@ class TranslationWorker(QObject):
             start_index = 0
 
         # Process in macro-chunks to maintain sequential progress and allow cancellation
-        batch_size = 32 if engine_type == "ctranslate2" else 8
+        batch_size = 32
 
         for batch_start in range(start_index, len(self.segments), batch_size):
             if self._cancelled:
@@ -482,98 +471,34 @@ class TranslationWorker(QObject):
             if nonempty_indices:
                 nonempty_texts = [texts[i] for i in nonempty_indices]
 
-                if engine_type == "ctranslate2":
-                    try:
-                        # Prepare input tokens using the HF tokenizer associated with the converted model
-                        # MarianTokenizer encodes text into token IDs ending with </s> (EOS)
-                        # convert_ids_to_tokens converts token IDs into strings matching the model vocabulary
-                        source_tokens = [
-                            tokenizer.convert_ids_to_tokens(
-                                tokenizer.encode(text, truncation=True, max_length=512)
-                            )
-                            for text in nonempty_texts
-                        ]
-
-                        translations = model_or_translator.translate_batch(
-                            source_tokens,
-                            beam_size=2,
-                            patience=1.0,
-                            max_batch_size=32,
-                            batch_type="examples",
-                            repetition_penalty=1.2,
-                            no_repeat_ngram_size=3,
-                            max_decoding_length=256,
-                            replace_unknowns=True,
-                        )
-
-                        for idx, res in zip(nonempty_indices, translations):
-                            hyp_tokens = res.hypotheses[0] if res.hypotheses else []
-                            token_ids = tokenizer.convert_tokens_to_ids(hyp_tokens)
-                            try:
-                                decoded_text = tokenizer.decode(token_ids, skip_special_tokens=True)
-                            except Exception:
-                                decoded_text = tokenizer.convert_tokens_to_string(hyp_tokens)
-                            translated_by_index[idx] = decoded_text.strip()
-                    except Exception:
-                        # Fallback to robust transformers pipeline if ctranslate2 execution fails
-                        model_dir = getattr(self, "model_dir_path", None)
-                        if model_dir is None:
-                            model_dir = Path(self.model_dir(self.from_code, self.to_code, self.model_variant))
-                            self.model_dir_path = model_dir
-                        import torch
-                        from transformers import AutoModelForSeq2SeqLM
-                        if not hasattr(self, "_fallback_hf_model"):
-                            self._fallback_hf_model = AutoModelForSeq2SeqLM.from_pretrained(str(model_dir), local_files_only=True).eval()
-                        hf_model = self._fallback_hf_model
-
-                        encoded = tokenizer(
-                            nonempty_texts,
-                            return_tensors="pt",
-                            padding=True,
-                            truncation=True,
-                            max_length=512,
-                        )
-                        with torch.inference_mode():
-                            generated = hf_model.generate(
-                                **encoded,
-                                num_beams=2,
-                                max_new_tokens=256,
-                                repetition_penalty=1.2,
-                                no_repeat_ngram_size=3,
-                                early_stopping=True,
-                            )
-                        decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)
-                        for idx, text in zip(nonempty_indices, decoded):
-                            translated_by_index[idx] = text.strip()
-                else:
-                    # PyTorch/Transformers fallback
-                    encoded = tokenizer(
-                        nonempty_texts,
-                        return_tensors="pt",
-                        padding=True,
-                        truncation=True,
-                        max_length=512,
+                # Prepare input tokens using tokenizer associated with the converted model
+                source_tokens = [
+                    tokenizer.convert_ids_to_tokens(
+                        tokenizer.encode(text, truncation=True, max_length=512)
                     )
+                    for text in nonempty_texts
+                ]
 
-                    if getattr(self, "translation_device", "cpu") != "cpu":
-                        try:
-                            encoded = {k: v.to(self.translation_device) for k, v in encoded.items()}
-                        except Exception:
-                            self.translation_device = "cpu"
+                translations = model_or_translator.translate_batch(
+                    source_tokens,
+                    beam_size=2,
+                    patience=1.0,
+                    max_batch_size=32,
+                    batch_type="examples",
+                    repetition_penalty=1.2,
+                    no_repeat_ngram_size=3,
+                    max_decoding_length=256,
+                    replace_unknowns=True,
+                )
 
-                    with torch_mod.inference_mode():
-                        generated = model_or_translator.generate(
-                            **encoded,
-                            num_beams=2,
-                            max_new_tokens=256,
-                            repetition_penalty=1.2,
-                            no_repeat_ngram_size=3,
-                            early_stopping=True,
-                        )
-
-                    decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)
-                    for idx, text in zip(nonempty_indices, decoded):
-                        translated_by_index[idx] = text.strip()
+                for idx, res in zip(nonempty_indices, translations):
+                    hyp_tokens = res.hypotheses[0] if res.hypotheses else []
+                    token_ids = tokenizer.convert_tokens_to_ids(hyp_tokens)
+                    try:
+                        decoded_text = tokenizer.decode(token_ids, skip_special_tokens=True)
+                    except Exception:
+                        decoded_text = tokenizer.convert_tokens_to_string(hyp_tokens)
+                    translated_by_index[idx] = decoded_text.strip()
 
             # Reconstruct 1:1 segment mappings preserving all original metadata and timestamps
             for i, segment in enumerate(batch):

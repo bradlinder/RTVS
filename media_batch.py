@@ -676,8 +676,36 @@ class MediaBatchMixin:
         raw_saved = str(self.settings_store.value("last_saved_project_path", "") or "")
         if raw_saved:
             saved_path = Path(raw_saved)
+            crash_recovery = saved_path.with_suffix(".crash_recovery.rtvs")
             autosave = saved_path.with_suffix(saved_path.suffix + ".autosave")
             try:
+                # Check for emergency crash recovery snapshot first
+                if crash_recovery.exists() and crash_recovery.is_file():
+                    answer = QMessageBox.question(
+                        self,
+                        "Crash Recovery Found",
+                        f"An emergency crash recovery snapshot was found for {saved_path.name}.\n\n"
+                        "This snapshot was created immediately prior to an unexpected application termination.\n"
+                        "Would you like to recover this unsaved session?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.Yes,
+                    )
+                    if answer == QMessageBox.StandardButton.Yes:
+                        if self.load_project_file(crash_recovery, prompt=False, preserve_media=False):
+                            self.project_file = saved_path
+                            self.project_dirty = True
+                            self.log_activity(f"[CRASH-RECOVERY] Recovered emergency crash snapshot for {saved_path.name}.", mark_dirty=False)
+                            try:
+                                crash_recovery.unlink(missing_ok=True)
+                            except Exception:
+                                pass
+                            return
+                    else:
+                        try:
+                            crash_recovery.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+
                 if autosave.exists() and saved_path.exists() and autosave.stat().st_mtime > saved_path.stat().st_mtime:
                     answer = QMessageBox.question(self, "Recover Auto-Saved Project", f"A newer recovery snapshot was found for {saved_path.name}. Would you like to recover it?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                     if answer == QMessageBox.StandardButton.Yes:
@@ -696,7 +724,7 @@ class MediaBatchMixin:
                             self.log_activity(f"[AUTOSAVE] Recovered newer snapshot for {saved_path.name}.", mark_dirty=False)
                             return
             except Exception as exc:
-                self.log_activity(f"[AUTOSAVE] Recovery check failed: {exc}", mark_dirty=False)
+                self.log_activity(f"[RECOVERY] Recovery check failed: {exc}", mark_dirty=False)
 
         if mode == "new":
             self.log_activity("[STARTUP] Starting with a new, unsaved project by preference.", mark_dirty=False)

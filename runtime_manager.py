@@ -40,11 +40,21 @@ _ACTIVE_SUBPROCESSES = set()
 def register_process(proc: subprocess.Popen):
     """Register an active Popen process for teardown monitoring."""
     _ACTIVE_SUBPROCESSES.add(proc)
+    try:
+        from prs_shared import register_process as _prs_register_proc
+        _prs_register_proc(proc)
+    except Exception:
+        pass
 
 
 def unregister_process(proc: subprocess.Popen):
     """Remove completed process from tracking."""
     _ACTIVE_SUBPROCESSES.discard(proc)
+    try:
+        from prs_shared import unregister_process as _prs_unregister_proc
+        _prs_unregister_proc(proc)
+    except Exception:
+        pass
 
 
 def kill_all_subprocesses():

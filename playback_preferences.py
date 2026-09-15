@@ -217,6 +217,31 @@ class PlaybackPreferencesMixin:
                     cf.write(text)
             except Exception:
                 pass
+
+            # Emergency Crash Recovery Snapshot
+            try:
+                if hasattr(self, "project_data") and (getattr(self, "project_dirty", False) or getattr(self, "audio_file", None)):
+                    data = self.project_data()
+                    target_file = None
+                    proj_file = getattr(self, "project_file", None)
+                    if proj_file:
+                        target_file = Path(proj_file).with_suffix(".crash_recovery.rtvs")
+                    elif getattr(self, "audio_file", None):
+                        audio_path = Path(self.audio_file)
+                        target_file = audio_path.with_name(f"{audio_path.stem}.crash_recovery.rtvs")
+                    else:
+                        target_file = self.log_dir / f"emergency_crash_{datetime.now().strftime('%Y%m%d_%H%M%S')}.crash_recovery.rtvs"
+
+                    if target_file:
+                        from prs_shared import write_rtvs_project_file
+                        write_rtvs_project_file(target_file, data)
+                        write_diag("CRASH-RECOVERY", f"Emergency project snapshot preserved to {target_file}")
+            except Exception as crash_save_exc:
+                try:
+                    write_diag("CRASH-RECOVERY-FAIL", str(crash_save_exc))
+                except Exception:
+                    pass
+
             # Never let the crash reporter throw a second exception.
             if getattr(self, "activity_list", None) is not None:
                 try:

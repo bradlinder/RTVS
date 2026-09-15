@@ -14,7 +14,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from prs_shared import INTERNAL_APP_ID, PROJECT_VERSION, QSettings, get_github_repo, safe_extract_zip
+from prs_shared import INTERNAL_APP_ID, PROJECT_VERSION, QSettings, get_github_repo, safe_extract_zip, verify_file_sha256
 from plugins.base import BasePlugin, PluginManifest
 
 import re
@@ -446,11 +446,15 @@ class PluginManager:
 
         return True
 
-    def install_addon(self, package_path: Path | str, enable: bool = False) -> bool:
+    def install_addon(self, package_path: Path | str, enable: bool = False, expected_sha256: Optional[str] = None) -> bool:
         """Installs a .rtvs-addon or .zip package into the user plugins directory."""
         package_path = Path(package_path)
         if not package_path.exists():
             return False
+
+        if expected_sha256:
+            if not verify_file_sha256(package_path, expected_sha256):
+                raise ValueError(f"Integrity check failed: package SHA-256 does not match expected checksum.")
 
         user_dir = self.get_user_plugins_dir()
         temp_extract = user_dir / ".tmp_install"
